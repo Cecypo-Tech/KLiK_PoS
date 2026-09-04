@@ -2452,6 +2452,30 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 />
               </>
             )}
+
+            <MpesaOptionsModal
+              isOpen={showMpesaOptionsModal}
+              modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
+              amount={getActiveMpesaPayment()?.amount || 0}
+              phoneNumber={mpesaPhoneNumber}
+              currencySymbol={displayCurrencySymbol}
+              searchTerm={mpesaSearchTerm}
+              payments={mpesaRegisterPayments}
+              pendingCount={mpesaRegisterCount}
+              selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
+              selectedTotal={selectedMpesaTotal}
+              mergePayments={mergeMpesaPayments}
+              isLoadingPayments={isLoadingMpesaRegisterPayments}
+              isProcessing={isProcessingPayment}
+              onClose={() => setShowMpesaOptionsModal(false)}
+              onPhoneNumberChange={setMpesaPhoneNumber}
+              onSearchChange={setMpesaSearchTerm}
+              onTogglePayment={handleToggleMpesaPayment}
+              onToggleMergePayments={setMergeMpesaPayments}
+              onInitiateStk={() => void handleInitiateMpesaPayment()}
+              onAddPayments={() => void handleReconcileMpesaPayments()}
+              variant="panel"
+            />
           </div>
 
           <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">
@@ -2534,29 +2558,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         isOpen={showDeliveryPersonnelModal}
         onClose={() => setShowDeliveryPersonnelModal(false)}
         onSelect={(name) => setSelectedDeliveryPersonnel(name)}
-      />
-
-      <MpesaOptionsModal
-        isOpen={showMpesaOptionsModal}
-        modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
-        amount={getActiveMpesaPayment()?.amount || 0}
-        phoneNumber={mpesaPhoneNumber}
-        currencySymbol={displayCurrencySymbol}
-        searchTerm={mpesaSearchTerm}
-        payments={mpesaRegisterPayments}
-        pendingCount={mpesaRegisterCount}
-        selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
-        selectedTotal={selectedMpesaTotal}
-        mergePayments={mergeMpesaPayments}
-        isLoadingPayments={isLoadingMpesaRegisterPayments}
-        isProcessing={isProcessingPayment}
-        onClose={() => setShowMpesaOptionsModal(false)}
-        onPhoneNumberChange={setMpesaPhoneNumber}
-        onSearchChange={setMpesaSearchTerm}
-        onTogglePayment={handleToggleMpesaPayment}
-        onToggleMergePayments={setMergeMpesaPayments}
-        onInitiateStk={() => void handleInitiateMpesaPayment()}
-        onAddPayments={() => void handleReconcileMpesaPayments()}
       />
     </div>
   );

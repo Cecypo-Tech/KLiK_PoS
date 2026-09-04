@@ -23,6 +23,8 @@ interface MpesaOptionsModalProps {
   onToggleMergePayments: (checked: boolean) => void;
   onInitiateStk: () => void;
   onAddPayments: () => void;
+  /** "modal" keeps the overlay (mobile). "panel" renders inline for the full-screen desktop checkout. */
+  variant?: "modal" | "panel";
 }
 
 export default function MpesaOptionsModal({
@@ -46,12 +48,18 @@ export default function MpesaOptionsModal({
   onToggleMergePayments,
   onInitiateStk,
   onAddPayments,
+  variant = "modal",
 }: MpesaOptionsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className={variant === "panel"
+      ? "w-full"
+      : "fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4"}>
+      <div className={variant === "panel"
+        ? "w-full rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 overflow-hidden"
+        : "w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"}>
+
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">M-Pesa Payment Options</h2>
