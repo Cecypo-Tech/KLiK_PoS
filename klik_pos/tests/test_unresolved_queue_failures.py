@@ -49,13 +49,21 @@ class TestUnresolvedQueueFailures(FrappeTestCase):
 		cls.company = reference[0].company
 		cls.customer = reference[0].customer
 		cls.item = frappe.db.get_value("Item", {"is_sales_item": 1, "disabled": 0}, "name")
+		# A stock item needs somewhere to come from: without a warehouse the invoice throws
+		# "Warehouse required for stock Item" before the test reaches what it is checking.
+		cls.warehouse = frappe.db.get_value(
+			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
+		)
 		frappe.db.commit()
 
 	def _failed_invoice(self, owner, status=None):
 		doc = frappe.new_doc("Sales Invoice")
 		doc.customer = self.customer
 		doc.company = self.company
-		doc.append("items", {"item_code": self.item, "qty": 1, "rate": 10})
+		doc.append(
+			"items",
+			{"item_code": self.item, "qty": 1, "rate": 10, "warehouse": self.warehouse},
+		)
 		doc.insert(ignore_permissions=True)
 
 		frappe.db.set_value(
