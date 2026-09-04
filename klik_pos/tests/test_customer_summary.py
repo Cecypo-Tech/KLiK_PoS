@@ -4,7 +4,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
-from klik_pos.api import customer_summary
+from klik_pos.api import customer_summary, receivables
 from klik_pos.api.receivables import get_customer_receivables
 
 COMPANY = "Dev Co"
@@ -103,6 +103,20 @@ class TestCustomerAccountSummary(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 
+		# The summary resolves its company from the POS profile, and delegates the
+		# outstanding figure to the receivables module which resolves it again. Pin both to
+		# the fixtures' company: an unrelated open till on another company otherwise empties
+		# the AR report, and the expectation derived below would quietly become 0.0 and then
+		# agree with an equally empty result - a test that passes while proving nothing.
+		for module in (customer_summary, receivables):
+			patcher = patch.object(
+				module,
+				"get_current_pos_profile",
+				return_value=frappe._dict(name="_pinned_for_tests", company=COMPANY),
+			)
+			patcher.start()
+			cls.addClassCleanup(patcher.stop)
+
 		suffix = frappe.generate_hash(length=8)
 		cls.customer = _make_customer(f"CAS Test Customer {suffix}")
 		cls.lookalike_customer = _make_customer(f"{cls.customer} Ltd")
@@ -125,11 +139,17 @@ class TestCustomerAccountSummary(FrappeTestCase):
 
 		# Derived from the same helper the endpoint delegates to, not hardcoded — this test is
 		# about the endpoint delegating to the AR path, not about a magic number.
-		cls.expected_outstanding = 0.0
 		response = get_customer_receivables(customer=cls.customer)
 		data = response.get("data") or []
-		if data:
-			cls.expected_outstanding = data[0]["outstanding"]
+		if not data:
+			# Defaulting to 0.0 here made this class pass vacuously: the endpoint also
+			# returned 0.0 from the same empty report, so the comparison held while testing
+			# nothing at all.
+			raise AssertionError(
+				f"the AR path returned no row for the fixture customer, so the expected "
+				f"outstanding would be a meaningless 0.0: {response}"
+			)
+		cls.expected_outstanding = data[0]["outstanding"]
 
 	def test_counts_exclude_returns_but_revenue_is_net_of_them(self):
 		"""A return is not an order — it must not inflate the invoice count or drag the

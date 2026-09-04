@@ -155,6 +155,20 @@ class TestReceivablesDegradedFallback(FrappeTestCase):
 			due_date=add_days(nowdate(), -10),
 		)
 
+	def setUp(self):
+		super().setUp()
+		# get_customer_receivables resolves the company from the POS profile, so these
+		# assertions otherwise depend on whichever till happens to be open on the machine
+		# running them: a shift on another company returns an empty report and every
+		# lookup below collapses with IndexError. Pin it to the fixtures' company.
+		patcher = patch.object(
+			receivables,
+			"get_current_pos_profile",
+			return_value=frappe._dict(name="_pinned_for_tests", company=COMPANY),
+		)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
 	def test_permission_error_falls_back_instead_of_returning_failure(self):
 		"""A user without Journal Entry read must still see what is owed. Before this, the
 		whole call failed and the Receive modal silently took payments on account."""
