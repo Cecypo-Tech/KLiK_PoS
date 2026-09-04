@@ -1,4 +1,4 @@
-import { X, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
+import { ChevronLeft, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
 import { handlePrintInvoice } from "../../utils/printHandler";
 
 interface PaymentHeaderProps {
@@ -10,6 +10,7 @@ interface PaymentHeaderProps {
   isProcessingPayment: boolean;
   isHoldingOrder: boolean;
   onClose: (completed?: boolean) => void;
+  backLabel?: string;
   handleViewInvoice: (invoice: any) => void;
   finalizeCompletedOrderState: (afterClear?: () => void) => void;
   posDetails: any;
@@ -25,6 +26,7 @@ export default function PaymentHeader({
   isProcessingPayment,
   isHoldingOrder,
   onClose,
+  backLabel = "Back",
   handleViewInvoice,
   finalizeCompletedOrderState,
   posDetails,
@@ -108,9 +110,11 @@ export default function PaymentHeader({
       <button
         onClick={() => onClose(invoiceSubmitted)}
         disabled={isProcessingPayment || isHoldingOrder}
-        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label={backLabel}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <X size={24} />
+        <ChevronLeft size={18} />
+        {backLabel}
       </button>
     </div>
   );

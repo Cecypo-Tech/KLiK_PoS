@@ -1018,6 +1018,7 @@ export default function InvoiceViewPage() {
       {showPaymentDialog && (
         <PaymentDialog
           isOpen={showPaymentDialog}
+          backLabel="Back to invoice"
           onClose={() => {
             setShowPaymentDialog(false)
             setSharingMode(null)
@@ -1070,6 +1071,7 @@ export default function InvoiceViewPage() {
       {showDraftPaymentDialog && (
         <PaymentDialog
           isOpen={showDraftPaymentDialog}
+          backLabel="Back to invoice"
           onClose={(paymentCompleted) => {
             setShowDraftPaymentDialog(false)
             if (paymentCompleted) {

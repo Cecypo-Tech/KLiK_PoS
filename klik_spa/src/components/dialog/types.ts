@@ -11,6 +11,8 @@ export interface PaymentDialogProps {
   onHoldOrder: (orderData: any) => void;
   isMobile?: boolean;
   isFullPage?: boolean;
+  /** Names where the back control returns to, e.g. "Back to cart". Defaults to "Back". */
+  backLabel?: string;
   initialSharingMode?: string | null;
   externalInvoiceData?: any;
   itemDiscounts?: any;

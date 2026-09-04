@@ -1245,6 +1245,7 @@ export default function CustomerDetailsPage() {
         {showDraftPaymentDialog && (
           <PaymentDialog
             isOpen={showDraftPaymentDialog}
+            backLabel="Back to list"
             onClose={(paymentCompleted) => {
               setShowDraftPaymentDialog(false);
               if (paymentCompleted) window.location.reload();

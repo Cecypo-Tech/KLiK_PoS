@@ -128,6 +128,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     onHoldOrder,
     isMobile = false,
     isFullPage = false,
+    backLabel = "Back",
     initialSharingMode = null,
     externalInvoiceData = null,
     itemDiscounts = {},
@@ -2296,6 +2297,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           isProcessingPayment={isProcessingPayment}
           isHoldingOrder={isHoldingOrder}
           onClose={onClose}
+          backLabel={backLabel}
           handleViewInvoice={handleViewInvoice}
           finalizeCompletedOrderState={(afterClear) => {
             void finalizeCompletedOrderState(afterClear);
