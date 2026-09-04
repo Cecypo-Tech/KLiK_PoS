@@ -46,7 +46,7 @@ export default function PaymentMethods({
   const amountInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const promote = (id: string) => {
-    setPromotedIds((current) => [...current, id]);
+    setPromotedIds((current) => (current.includes(id) ? current : [...current, id]));
     setPendingFocusId(id);
   };
   const demote = (id: string) => setPromotedIds((current) => current.filter((x) => x !== id));

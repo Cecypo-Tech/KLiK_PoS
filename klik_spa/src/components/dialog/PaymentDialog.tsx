@@ -177,6 +177,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
   const [showMpesaOptionsModal, setShowMpesaOptionsModal] = useState(false);
+  const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
   const [mpesaSearchTerm, setMpesaSearchTerm] = useState("");
   const [mpesaRegisterPayments, setMpesaRegisterPayments] = useState<MpesaRegisterPayment[]>([]);
@@ -1189,6 +1190,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       cancelled = true;
     };
   }, [showMpesaOptionsModal, posCompanyName, posProfileName, mpesaSearchTerm, getActiveMpesaPayment]);
+
+  useEffect(() => {
+    if (!showMpesaOptionsModal) return;
+    mpesaOptionsPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [showMpesaOptionsModal]);
 
   useEffect(() => {
     if (mpesaFlow?.source !== "stk" || !mpesaFlow?.requestName) return;
@@ -2289,7 +2295,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }
 
   return (
-    <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-40 bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
+    <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-[60] bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -2455,29 +2461,31 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </>
             )}
 
-            <MpesaOptionsModal
-              isOpen={showMpesaOptionsModal}
-              modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
-              amount={getActiveMpesaPayment()?.amount || 0}
-              phoneNumber={mpesaPhoneNumber}
-              currencySymbol={displayCurrencySymbol}
-              searchTerm={mpesaSearchTerm}
-              payments={mpesaRegisterPayments}
-              pendingCount={mpesaRegisterCount}
-              selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
-              selectedTotal={selectedMpesaTotal}
-              mergePayments={mergeMpesaPayments}
-              isLoadingPayments={isLoadingMpesaRegisterPayments}
-              isProcessing={isProcessingPayment}
-              onClose={() => setShowMpesaOptionsModal(false)}
-              onPhoneNumberChange={setMpesaPhoneNumber}
-              onSearchChange={setMpesaSearchTerm}
-              onTogglePayment={handleToggleMpesaPayment}
-              onToggleMergePayments={setMergeMpesaPayments}
-              onInitiateStk={() => void handleInitiateMpesaPayment()}
-              onAddPayments={() => void handleReconcileMpesaPayments()}
-              variant="panel"
-            />
+            <div ref={mpesaOptionsPanelRef}>
+              <MpesaOptionsModal
+                isOpen={showMpesaOptionsModal}
+                modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
+                amount={getActiveMpesaPayment()?.amount || 0}
+                phoneNumber={mpesaPhoneNumber}
+                currencySymbol={displayCurrencySymbol}
+                searchTerm={mpesaSearchTerm}
+                payments={mpesaRegisterPayments}
+                pendingCount={mpesaRegisterCount}
+                selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
+                selectedTotal={selectedMpesaTotal}
+                mergePayments={mergeMpesaPayments}
+                isLoadingPayments={isLoadingMpesaRegisterPayments}
+                isProcessing={isProcessingPayment}
+                onClose={() => setShowMpesaOptionsModal(false)}
+                onPhoneNumberChange={setMpesaPhoneNumber}
+                onSearchChange={setMpesaSearchTerm}
+                onTogglePayment={handleToggleMpesaPayment}
+                onToggleMergePayments={setMergeMpesaPayments}
+                onInitiateStk={() => void handleInitiateMpesaPayment()}
+                onAddPayments={() => void handleReconcileMpesaPayments()}
+                variant="panel"
+              />
+            </div>
           </div>
 
           <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">
