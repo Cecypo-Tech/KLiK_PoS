@@ -7,7 +7,9 @@
  *
  * Two rules exist to stop rows disappearing from under the cashier mid-sale:
  * a method holding an amount is always a row, and promoted methods are appended
- * rather than sorted into place.
+ * rather than sorted into place. A promoted method keeps its appended slot even
+ * after it gains an amount - it must not swap places with another promoted row
+ * just because the cashier typed into it.
  */
 
 export const VISIBLE_PAYMENT_METHOD_COUNT = 3;
@@ -41,14 +43,21 @@ export function partitionPaymentMethods<T extends RankedMethod>(
 
   const baseIds = new Set(base.map((method) => method.id));
 
-  const active = sorted.filter((method) => !baseIds.has(method.id) && method.amount > 0);
-  const activeIds = new Set(active.map((method) => method.id));
-
+  // Promoted methods keep their appended slot regardless of whether they later
+  // gain an amount - only base membership excludes a method from the promoted
+  // bucket, so a promoted row never gets re-spliced relative to another
+  // promoted row when the cashier types into it.
   const promoted = promotedIds
     .map((id) => sorted.find((method) => method.id === id))
-    .filter((method): method is T => Boolean(method) && !baseIds.has(method!.id) && !activeIds.has(method!.id));
+    .filter((method): method is T => Boolean(method) && !baseIds.has(method!.id));
 
-  const rows = [...base, ...active, ...promoted];
+  const promotedIdSet = new Set(promoted.map((method) => method.id));
+
+  const active = sorted.filter(
+    (method) => !baseIds.has(method.id) && !promotedIdSet.has(method.id) && method.amount > 0,
+  );
+
+  const rows = [...base, ...promoted, ...active];
   const rowIds = new Set(rows.map((method) => method.id));
 
   return { rows, tags: sorted.filter((method) => !rowIds.has(method.id)) };

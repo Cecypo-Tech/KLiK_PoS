@@ -43,6 +43,22 @@ describe("partitionPaymentMethods", () => {
     expect(tags).toEqual([]);
   });
 
+  it("keeps a promoted row's slot when it later gains an amount", () => {
+    // Regression: promoted rows must not re-sort relative to each other once one
+    // of them gains an amount and would otherwise be spliced in as "active".
+    const methods = [m("cash", 1, true), m("mpesa1", 2), m("mpesa2", 3), m("cheque", 4), m("card", 5)];
+    const promotedIds = ["card", "cheque"];
+
+    const before = partitionPaymentMethods(methods, promotedIds);
+    expect(ids(before.rows)).toEqual(["cash", "mpesa1", "mpesa2", "card", "cheque"]);
+
+    const methodsWithAmount = methods.map((method) =>
+      method.id === "cheque" ? { ...method, amount: 250 } : method,
+    );
+    const after = partitionPaymentMethods(methodsWithAmount, promotedIds);
+    expect(ids(after.rows)).toEqual(["cash", "mpesa1", "mpesa2", "card", "cheque"]);
+  });
+
   it("does not reorder the existing rows when something is promoted", () => {
     const methods = [m("cash", 1, true), m("mpesa1", 2), m("mpesa2", 3), m("cheque", 4)];
     const before = ids(partitionPaymentMethods(methods, []).rows);
