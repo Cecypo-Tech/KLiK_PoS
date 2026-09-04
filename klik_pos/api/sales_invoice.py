@@ -154,6 +154,142 @@ def _update_checkout_request(checkout_request_id, *, status, invoice_name=None, 
 	frappe.db.set_value(CHECKOUT_REQUEST_DOCTYPE, checkout_request_id, values, update_modified=True)
 
 
+# ---------------------------------------------------------------------------------------
+# Checkout failure handling - the naming-counter burn guard.
+#
+# 2026-09-03: production lost 38 of 266 POS receipt numbers (CS-26-) in three days. Every
+# missing number matched a Klik Checkout Request row with status=Failed and no invoice.
+#
+# The mechanism, and why the order below is load-bearing:
+#
+#   doc.insert() assigns the name FIRST - Document Naming Rule runs
+#   `UPDATE tabDocument Naming Rule SET counter = counter + 1` inside set_new_name() - and
+#   validates SECOND. So an ERPNext validation throw (a selling rate under valuation, say)
+#   leaves the counter incremented and no invoice row. The old handler caught that
+#   exception, recorded the failure and RETURNED normally, so nothing propagated and
+#   Frappe's request handler committed the transaction. The increment survived, the invoice
+#   never existed, and the receipt number was gone for good.
+#
+#   The desk (non-POS) path never had this bug: it lets the exception propagate, Frappe
+#   rolls back, and the counter is restored. Only swallowing the exception breaks it.
+#
+# Two rules keep this fixed. Break either one and the burn returns silently:
+#
+#   1. _abort_checkout() is the ONLY way to fail a checkout. Do not add a bare
+#      `return {"success": False, ...}` to an except block in this flow.
+#   2. Inside _abort_checkout the rollback happens FIRST, before anything is recorded or
+#      logged. Anything written before it - the Error Log row included - is discarded by it.
+#
+# A bare frappe.db.rollback() is NOT sufficient on its own: it also discards the claim row
+# that _claim_checkout_request inserted, and _update_checkout_request early-returns when
+# that row is gone. The failure record would silently no-op and the idempotency guard would
+# stop working - turning skipped receipt numbers into duplicate invoices, which is worse.
+# That is why _record_failed_checkout_request inserts as well as updates.
+#
+# Covered by klik_pos/tests/test_checkout_number_burn.py. If you rework checkout, keep
+# those tests passing rather than rewriting them to match the new behaviour.
+# ---------------------------------------------------------------------------------------
+
+_SUBMIT_SAVEPOINT = "klik_checkout_submit"
+
+
+class _CheckoutState:
+	"""What _abort_checkout needs in order to undo a checkout correctly.
+
+	The rollback turns on one fact: did the invoice reach the database before the failure?
+	That fact lives here rather than in a loose local flag so it cannot drift away from the
+	code that makes it true - mark_invoice_persisted() is both how the checkout is marked
+	Accepted and how the fact is recorded, so a future persist point cannot set one without
+	the other.
+	"""
+
+	def __init__(self):
+		self.checkout_request_id = None
+		self.claimed = False
+		self.invoice_name = None
+		self.savepoint = None
+
+	def mark_claimed(self, checkout_request_id):
+		self.checkout_request_id = checkout_request_id
+		self.claimed = bool(checkout_request_id)
+
+	def mark_invoice_persisted(self, invoice_name):
+		"""The invoice is in the database now: mark the checkout Accepted and arm the savepoint.
+
+		One call on purpose. The ledger must name the invoice before anything else can fail,
+		or a retry would not find it; and from this point a failure must no longer roll the
+		whole checkout back, because the draft is what Invoice History offers the cashier to
+		retry. Both facts start being true at the same instant, so they are set together.
+		"""
+		self.invoice_name = invoice_name
+		_update_checkout_request(self.checkout_request_id, status="Accepted", invoice_name=invoice_name)
+		frappe.db.savepoint(_SUBMIT_SAVEPOINT)
+		self.savepoint = _SUBMIT_SAVEPOINT
+
+
+def _record_failed_checkout_request(state, error):
+	"""Write the failure to the checkout ledger so a retry is told what happened.
+
+	Inserts when the row is absent and updates when it is present, because the Class A
+	rollback in _abort_checkout discards the claim row. Must run AFTER that rollback.
+	"""
+	if not state.claimed or not state.checkout_request_id:
+		return
+
+	if frappe.db.exists(CHECKOUT_REQUEST_DOCTYPE, state.checkout_request_id):
+		_update_checkout_request(
+			state.checkout_request_id,
+			status="Failed",
+			invoice_name=state.invoice_name,
+			error_message=error,
+		)
+		return
+
+	request = frappe.new_doc(CHECKOUT_REQUEST_DOCTYPE)
+	request.request_id = state.checkout_request_id
+	request.requested_by = frappe.session.user
+	request.status = "Failed"
+	request.error_message = _truncate_queue_error(error)
+	if state.invoice_name:
+		request.sales_invoice = state.invoice_name
+	request.insert(ignore_permissions=True)
+
+
+def _abort_checkout(state, error):
+	"""Fail a checkout without burning a receipt number. The step order is load-bearing.
+
+	Read the "naming-counter burn guard" comment above before changing anything here.
+	"""
+	# 1. UNDO - first, always. Everything written before this point is discarded by it.
+	if state.savepoint:
+		# The invoice exists. Undo the half-finished submit but keep the draft and the
+		# number it legitimately consumed, so Invoice History can retry it.
+		frappe.db.rollback(save_point=state.savepoint)
+	else:
+		# No invoice was ever written, so the naming counter increment is this checkout's
+		# only trace. A full rollback returns the receipt number to the sequence.
+		frappe.db.rollback()
+
+	# 2. RECORD - after the undo, or the rollback eats the record.
+	#    Bookkeeping must never replace the real error with one of its own.
+	try:
+		_record_failed_checkout_request(state, error)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Checkout Request Bookkeeping Error")
+
+	# 3. LOG - after the undo, for the same reason.
+	frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
+
+	# 4. RESPOND
+	response = {"success": False, "message": str(error)}
+	if state.checkout_request_id:
+		response["checkout_request_id"] = state.checkout_request_id
+	if state.invoice_name:
+		response["invoice_name"] = state.invoice_name
+		response["invoice_id"] = state.invoice_name
+	return response
+
+
 def _checkout_invoice_state(doc):
 	"""Where a recorded invoice actually got to, from the invoice itself."""
 	queue_status = str(getattr(doc, "queue_status", "") or "").strip().lower()
@@ -1655,7 +1791,7 @@ def create_and_submit_invoice(data):
 @frappe.whitelist()
 def queue_sales_invoice(data):
 	checkout_request_id = None
-	checkout_claimed = False
+	state = _CheckoutState()
 	try:
 		import time
 
@@ -1672,7 +1808,7 @@ def queue_sales_invoice(data):
 		existing_checkout = _claim_checkout_request(checkout_request_id)
 		if existing_checkout:
 			return _checkout_request_response(existing_checkout)
-		checkout_claimed = bool(checkout_request_id)
+		state.mark_claimed(checkout_request_id)
 
 		(
 			customer,
@@ -1744,8 +1880,9 @@ def queue_sales_invoice(data):
 			_mark_invoice_queued(doc, frappe.session.user)
 			doc.save(ignore_permissions=True)
 			# The document exists from here on, so the ledger must name it before anything
-			# else can fail — otherwise a retry would not find it.
-			_update_checkout_request(checkout_request_id, status="Accepted", invoice_name=doc.name)
+			# else can fail — otherwise a retry would not find it. This also arms the
+			# savepoint that stops _abort_checkout from rolling the saved invoice away.
+			state.mark_invoice_persisted(doc.name)
 
 			try:
 				_reserve_stock_for_queued_invoice(doc)
@@ -1794,7 +1931,7 @@ def queue_sales_invoice(data):
 			}
 		else:
 			doc.insert(ignore_permissions=True)
-			_update_checkout_request(checkout_request_id, status="Accepted", invoice_name=doc.name)
+			state.mark_invoice_persisted(doc.name)
 
 			if tax_id:
 				doc.db_set("tax_id", tax_id)
@@ -1834,16 +1971,10 @@ def queue_sales_invoice(data):
 			}
 
 	except Exception as e:
-		if checkout_claimed:
-			# Record the failure so a retry of the same key is told what happened instead of
-			# being left to guess whether an invoice exists. Bookkeeping must never replace
-			# the real error with one of its own.
-			try:
-				_update_checkout_request(checkout_request_id, status="Failed", error_message=e)
-			except Exception:
-				frappe.log_error(frappe.get_traceback(), "Checkout Request Bookkeeping Error")
-		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
-		return {"success": False, "message": str(e)}
+		# The only failure path for a checkout. Do not inline a bare
+		# `return {"success": False, ...}` here — see the "naming-counter burn guard"
+		# comment above _abort_checkout for what that costs.
+		return _abort_checkout(state, e)
 
 
 @frappe.whitelist()

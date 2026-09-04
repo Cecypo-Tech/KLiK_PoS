@@ -230,6 +230,15 @@ def create_held_order(data):
         return {"success": True, "order_name": so.name}
 
     except Exception as e:
+        # Roll back BEFORE logging, and never return without rolling back.
+        # so.insert() assigns the Sales Order name - incrementing the Document Naming Rule
+        # counter - before it validates, so swallowing the exception without a rollback
+        # lets Frappe's request handler commit that increment while no order exists. The
+        # order number is then burned permanently. This is the same defect that cost
+        # production 38 POS receipt numbers in Sept 2026; see the "naming-counter burn
+        # guard" comment in api/sales_invoice.py for the full mechanism.
+        # The Error Log row must be written after the rollback or it is discarded with it.
+        frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), "Create Held Order Error")
         return {"success": False, "message": str(e)}
 
