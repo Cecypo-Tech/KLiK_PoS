@@ -1,7 +1,9 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
-import { Circle, CheckCircle2 } from "lucide-react";
+import { Circle, CheckCircle2, Plus, X } from "lucide-react";
 import type { PaymentMethod } from "./types";
 import { isReferenceMethod } from "./paymentIcons";
+import { partitionPaymentMethods } from "../../utils/paymentMethodVisibility";
 
 interface PaymentMethodsProps {
   paymentMethods: PaymentMethod[];
@@ -28,6 +30,21 @@ export default function PaymentMethods({
 }: PaymentMethodsProps) {
   const disabled = invoiceSubmitted || isProcessingPayment;
 
+  const [promotedIds, setPromotedIds] = useState<string[]>([]);
+
+  const { rows, tags } = partitionPaymentMethods(
+    paymentMethods.map((method, index) => ({
+      ...method,
+      amount: method.amount || 0,
+      isDefault: method.isDefault ?? false,
+      idx: method.idx ?? index + 1,
+    })),
+    promotedIds,
+  );
+
+  const promote = (id: string) => setPromotedIds((current) => [...current, id]);
+  const demote = (id: string) => setPromotedIds((current) => current.filter((x) => x !== id));
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
@@ -36,7 +53,7 @@ export default function PaymentMethods({
       </div>
 
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-        {paymentMethods.map((method) => {
+        {rows.map((method) => {
           const isActive = (method.amount || 0) > 0;
           const showRef = isActive && isReferenceMethod(method.type, method.name);
 
@@ -96,10 +113,38 @@ export default function PaymentMethods({
                   className={`w-full sm:w-40 shrink-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
                 />
               )}
+
+              {promotedIds.includes(method.id) && !isActive && !disabled && (
+                <button
+                  type="button"
+                  onClick={() => demote(method.id)}
+                  aria-label={`Remove ${method.name}`}
+                  className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
           );
         })}
       </div>
+
+      {!disabled && tags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {tags.map((method) => (
+            <button
+              key={method.id}
+              type="button"
+              onClick={() => promote(method.id)}
+              aria-label={`Add ${method.name} as a payment method`}
+              className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 dark:border-gray-600 px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 hover:border-beveren-500 hover:text-beveren-600 transition-colors"
+            >
+              <Plus size={13} />
+              {method.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

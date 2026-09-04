@@ -457,6 +457,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         enabled: true,
         amount: paymentAmounts[mode.mode_of_payment] || 0,
         type: mode.type || "",
+        isDefault: mode.default === 1,
+        idx: mode.idx,
       };
     });
   }, [modes, paymentAmounts]);

@@ -27,6 +27,10 @@ export interface PaymentMethod {
   enabled: boolean;
   amount: number;
   type?: string; // mode_of_payment type: Cash | Bank | Phone | General (cheque by name)
+  /** POS Profile default mode. Always shown as a row. */
+  isDefault?: boolean;
+  /** Position in the POS Profile payments table. */
+  idx?: number;
 }
 
 export interface PaymentAmount {
