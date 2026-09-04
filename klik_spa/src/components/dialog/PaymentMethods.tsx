@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Circle, CheckCircle2, Plus, X } from "lucide-react";
 import type { PaymentMethod } from "./types";
@@ -42,8 +42,20 @@ export default function PaymentMethods({
     promotedIds,
   );
 
-  const promote = (id: string) => setPromotedIds((current) => [...current, id]);
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const amountInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const promote = (id: string) => {
+    setPromotedIds((current) => [...current, id]);
+    setPendingFocusId(id);
+  };
   const demote = (id: string) => setPromotedIds((current) => current.filter((x) => x !== id));
+
+  useEffect(() => {
+    if (!pendingFocusId) return;
+    amountInputRefs.current[pendingFocusId]?.focus();
+    setPendingFocusId(null);
+  }, [pendingFocusId]);
 
   return (
     <div>
@@ -81,6 +93,9 @@ export default function PaymentMethods({
               </span>
 
               <input
+                ref={(el) => {
+                  amountInputRefs.current[method.id] = el;
+                }}
                 type="number"
                 min="0"
                 step="0.01"
