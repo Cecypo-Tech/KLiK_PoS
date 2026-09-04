@@ -2305,7 +2305,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         />
 
         <div className="flex flex-1 min-h-0">
-          <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar space-y-6">
+          <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-6">
             {invoiceSubmitted && sharingMode ? (
               <SharingInterface
                 sharingMode={sharingMode}
@@ -2452,7 +2452,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             )}
           </div>
 
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600 flex-1 overflow-y-auto custom-scrollbar">
+          <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">
             <InvoicePreview
               invoiceSubmitted={invoiceSubmitted}
               invoiceData={invoiceData}
