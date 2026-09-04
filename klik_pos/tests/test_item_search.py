@@ -45,8 +45,11 @@ class TestGetItemByIdentifierPOSProfileErrors(FrappeTestCase):
         title = "Error fetching item by identifier: ANY-CODE"
         before = frappe.db.count("Error Log", {"method": title})
 
+        # item_search resolves the profile through get_current_pos_profile_lite; the old
+        # get_current_pos_profile name it used to patch no longer exists in this module,
+        # so the patch raised AttributeError before the assertion was ever reached.
         with patch(
-            "klik_pos.api.item.item_search.get_current_pos_profile",
+            "klik_pos.api.item.item_search.get_current_pos_profile_lite",
             side_effect=Exception("No POS Profile found for user test@example.com"),
         ):
             with self.assertRaises(frappe.ValidationError):

@@ -12,76 +12,61 @@ class TestCustomerAPI(FrappeTestCase):
 	def setUp(self):
 		super().setUp()
 
-	@patch("klik_pos.api.customer.get_customer_statistics")
-	@patch("frappe.db.get_value")
-	@patch("frappe.get_doc")
-	@patch("klik_pos.api.customer.get_current_pos_profile")
-	@patch("klik_pos.api.customer.get_user_company_and_currency")
-	@patch("frappe.permissions.get_user_permissions")
-	def test_get_customers_basic_functionality(
-		self,
-		mock_user_permissions,
-		mock_company_currency,
-		mock_pos_profile,
-		mock_get_doc,
-		mock_db_get_value,
-		mock_get_stats,
-	):
-		"""Test basic functionality of get_customers function"""
+	def test_get_customers_returns_the_matching_rows(self):
+		"""get_customers runs one permission-filtered SQL query and returns its rows.
 
-		mock_pos_profile.return_value = MagicMock(custom_business_type="B2C", customer_groups=[])
+		This test used to patch frappe.get_all and frappe.get_doc, matching an older
+		implementation that fetched names and then loaded each Customer doc. The endpoint
+		now runs a single SQL query through apply_sql_permissions, and that path calls
+		frappe.get_meta("Customer") — which itself goes through frappe.get_all. Patching
+		frappe.get_all globally therefore fed a MagicMock into Frappe's own meta loader and
+		the call died with "DocType Customer not found" before reaching any assertion.
 
-		mock_company_currency.return_value = ("Test Company", "USD")
+		Real rows and narrow, module-scoped patches instead: nothing here mocks a Frappe
+		primitive the framework also uses internally.
+		"""
+		token = frappe.generate_hash(length=10)
+		expected = set()
+		for label in ("One", "Two"):
+			doc = frappe.get_doc(
+				{
+					"doctype": "Customer",
+					"customer_name": f"GetCustomers {label} {token}",
+					"customer_type": "Individual",
+				}
+			).insert(ignore_permissions=True)
+			expected.add(doc.name)
+			self.addCleanup(
+				frappe.delete_doc, "Customer", doc.name, force=True, ignore_permissions=True
+			)
 
-		# Mock user permissions (no specific customer permissions)
-		mock_user_permissions.return_value = {}
+		company = frappe.defaults.get_user_default("Company")
+		currency = frappe.get_cached_value("Company", company, "default_currency")
 
-		from types import SimpleNamespace
+		with (
+			patch(
+				"klik_pos.api.customer.get_current_pos_profile",
+				return_value=MagicMock(custom_business_type="B2C", customer_groups=[]),
+			),
+			patch(
+				"klik_pos.api.customer.get_user_company_and_currency",
+				return_value=(company, currency),
+			),
+			# Loyalty is a separate endpoint with its own tests; it would otherwise pull the
+			# whole loyalty program setup into a query-shape test.
+			patch("klik_pos.api.customer.get_customer_loyalty_summary", return_value={}),
+			patch("frappe.permissions.get_user_permissions", return_value={}),
+		):
+			result = get_customers(limit=10, start=0, search=token)
 
-		with patch("frappe.get_all") as mock_get_all:
-			mock_get_all.return_value = [
-				SimpleNamespace(name="CUST-001"),
-				SimpleNamespace(name="CUST-002"),
-			]
+		self.assertTrue(result["success"], result.get("error"))
+		self.assertEqual({row["name"] for row in result["data"]}, expected)
+		self.assertEqual(result["total_count"], 2)
 
-			# Mock frappe.get_doc to return full Customer docs for each name
-			doc1 = MagicMock()
-			doc1.name = "CUST-001"
-			doc1.customer_name = "Test Customer 1"
-			doc1.customer_type = "Individual"
-			doc1.customer_group = "All Customer Groups"
-			doc1.territory = "All Territories"
-			doc1.default_currency = "USD"
-			doc1.customer_primary_contact = None
-			doc1.customer_primary_address = None
-
-			doc2 = MagicMock()
-			doc2.name = "CUST-002"
-			doc2.customer_name = "Test Customer 2"
-			doc2.customer_type = "Individual"
-			doc2.customer_group = "All Customer Groups"
-			doc2.territory = "All Territories"
-			doc2.default_currency = "USD"
-			doc2.customer_primary_contact = None
-			doc2.customer_primary_address = None
-
-			mock_get_doc.side_effect = [doc1, doc2]
-
-			mock_db_get_value.return_value = None
-
-			mock_get_stats.return_value = {"success": True, "data": {}}
-
-			result = get_customers(limit=10, start=0, search="")
-
-			self.assertTrue(result["success"])
-			self.assertEqual(len(result["data"]), 2)
-			self.assertEqual(result["data"][0]["name"], "CUST-001")
-			self.assertEqual(result["data"][0]["customer_name"], "Test Customer 1")
-			self.assertIn(result["data"][0]["customer_type"], ["individual", "Individual"])
-
-			mock_pos_profile.assert_called_once()
-			mock_company_currency.assert_called_once()
-			mock_user_permissions.assert_called_once()
+		row = result["data"][0]
+		self.assertIn(token, row["customer_name"])
+		self.assertEqual(row["customer_type"], "Individual")
+		self.assertEqual(row["company_currency"], currency)
 
 	@patch("klik_pos.api.customer.get_current_pos_profile")
 	@patch("frappe.permissions.get_user_permissions")
