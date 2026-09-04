@@ -2286,8 +2286,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-40 bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -2528,7 +2527,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             </div>
           </div>
         </div>
-      </div>
 
       <DeliveryPersonnelModal
         isOpen={showDeliveryPersonnelModal}
