@@ -19,6 +19,7 @@ interface ProductCardProps {
   onFocused?: () => void;
   onKeyboardAction?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   stockUnavailable?: boolean;
+  quantityBuffer?: string;
 }
 
 export default function ProductCard({
@@ -32,6 +33,7 @@ export default function ProductCard({
   onFocused,
   onKeyboardAction,
   stockUnavailable = false,
+  quantityBuffer = "",
 }: ProductCardProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -167,6 +169,15 @@ export default function ProductCard({
                   ? "Service"
                   : formatAvailability(item.available, stockUnavailable)}
             </div>
+          )}
+
+          {isFocused && quantityBuffer !== "" && (
+            <span
+              aria-live="polite"
+              className="absolute bottom-2 right-2 shrink-0 rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums z-10"
+            >
+              × {quantityBuffer}
+            </span>
           )}
 
           {isOutOfStock && (

@@ -20,6 +20,7 @@ interface ProductLineViewProps {
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
   stockUnavailable?: boolean
+  quantityBuffer?: string
 }
 
 export default function ProductLineView({
@@ -33,6 +34,7 @@ export default function ProductLineView({
   onItemFocus,
   onItemKeyDown,
   stockUnavailable = false,
+  quantityBuffer = "",
 }: ProductLineViewProps) {
   const [hoveredItemId, setHoveredItemId] = useState<string | number | null>(null)
   const [hoveredImageId, setHoveredImageId] = useState<string | number | null>(null)
@@ -226,6 +228,14 @@ export default function ProductLineView({
                               ? "Service"
                               : formatAvailability(isOutOfStock ? 0 : item.available, stockUnavailable)}
                         </p>
+                        {isRowFocused && quantityBuffer !== "" && (
+                          <span
+                            aria-live="polite"
+                            className="mt-0.5 inline-block rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                          >
+                            × {quantityBuffer}
+                          </span>
+                        )}
                       </div>
 
                       <div className="col-span-5 flex justify-end">
@@ -261,7 +271,7 @@ export default function ProductLineView({
                         </div>
                       </div>
 
-                      <div className={`col-span-2 flex items-center justify-center ${isDisabled ? "opacity-60" : ""}`}>
+                      <div className={`col-span-2 flex items-center justify-center gap-1 ${isDisabled ? "opacity-60" : ""}`}>
                         <span className={`font-medium text-sm ${
                           isOutOfStock ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"
                         }`}>
@@ -271,6 +281,14 @@ export default function ProductLineView({
                               ? "Service"
                               : formatAvailability(isOutOfStock ? 0 : item.available, stockUnavailable)}
                         </span>
+                        {isRowFocused && quantityBuffer !== "" && (
+                          <span
+                            aria-live="polite"
+                            className="shrink-0 rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                          >
+                            × {quantityBuffer}
+                          </span>
+                        )}
                       </div>
 
                       <div className={`col-span-1 flex items-center justify-center ${isDisabled ? "opacity-60" : ""}`}>
