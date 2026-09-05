@@ -608,20 +608,22 @@ class TestProcessMpesa(FrappeTestCase):
 			sorted(r.msisdn for r in rows),
 		)
 
-	def test_receipt_straddling_the_cap_embeds_only_what_fits(self):
-		"""A single receipt larger than the invoice's payable total must embed
-		only the part that fits; the remainder is visible as excess (via
-		`mpesa_reconciliation`, the public surface), not silently dropped.
+	def test_receipts_straddling_the_cap_embed_as_separate_rows(self):
+		"""Two receipts against a 100 invoice: A(60) fits entirely, B(70) embeds
+		40 and spills 30 as excess. Each must land in its own row carrying its
+		own transid -- not collapse into one 100 row with a comma-joined
+		reference, which is what the old per-mode accumulator produced.
 		"""
-		invoice = self._draft_invoice(rate=30)
+		invoice = self._draft_invoice(rate=100)
 		invoice.insert(ignore_permissions=True)
-		row = self._make_c2b_payment(amount=50, msisdn="254777777777")
+		row_a = self._make_c2b_payment(amount=60, msisdn="254777777777")
+		row_b = self._make_c2b_payment(amount=70, msisdn="254788888888")
 
 		result = process_mpesa(
 			doctype="Sales Invoice",
 			invoice_name=invoice.name,
 			customer=self.customer,
-			mpesa_payments=row.name,
+			mpesa_payments=f"{row_a.name},{row_b.name}",
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
@@ -632,17 +634,64 @@ class TestProcessMpesa(FrappeTestCase):
 
 		invoice.reload()
 		self.assertEqual(invoice.docstatus, 1)
-		self.assertEqual(len(invoice.payments), 1)
-		self.assertEqual(flt(invoice.payments[0].amount), 30)
-		self.assertEqual(invoice.payments[0].reference_no, row.transid)
+		self.assertEqual(len(invoice.payments), 2)
+		payments_by_ref = {p.reference_no: flt(p.amount) for p in invoice.payments}
+		self.assertEqual(
+			payments_by_ref,
+			{row_a.transid: 60, row_b.transid: 40},
+			"each receipt must keep its own row and transid, not merge into one "
+			"comma-joined row",
+		)
 
 		self.assertEqual(len(result["mpesa_reconciliation"]), 1)
 		recon = result["mpesa_reconciliation"][0]
-		self.assertEqual(flt(recon["excess_amount"]), 20)
+		self.assertEqual(flt(recon["excess_amount"]), 30)
 
-		row.reload()
-		self.assertEqual(row.docstatus, 1)
-		self.assertFalse(row.payment_entry)
+		row_a.reload()
+		row_b.reload()
+		self.assertEqual(row_a.docstatus, 1)
+		self.assertEqual(row_b.docstatus, 1)
+		self.assertFalse(row_a.payment_entry)
+		self.assertFalse(row_b.payment_entry)
+
+	def test_receipt_entirely_beyond_the_cap_gets_no_payment_row(self):
+		"""Once capacity is exhausted, a later receipt that fits within it not
+		at all contributes no payment row -- its full amount lands in the
+		excess, not a zero-amount row on the invoice.
+		"""
+		invoice = self._draft_invoice(rate=100)
+		invoice.insert(ignore_permissions=True)
+		row_a = self._make_c2b_payment(amount=60, msisdn="254711111112")
+		row_b = self._make_c2b_payment(amount=40, msisdn="254711111113")
+		row_c = self._make_c2b_payment(amount=25, msisdn="254711111114")
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=f"{row_a.name},{row_b.name},{row_c.name}",
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+			merge_payments=0,
+		)
+
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 2)
+		payments_by_ref = {p.reference_no: flt(p.amount) for p in invoice.payments}
+		self.assertEqual(payments_by_ref, {row_a.transid: 60, row_b.transid: 40})
+		self.assertNotIn(row_c.transid, payments_by_ref)
+
+		self.assertEqual(len(result["mpesa_reconciliation"]), 1)
+		recon = result["mpesa_reconciliation"][0]
+		self.assertEqual(flt(recon["excess_amount"]), 25)
+
+		row_c.reload()
+		self.assertEqual(row_c.docstatus, 1)
+		self.assertFalse(row_c.payment_entry)
 
 	def test_embedded_mpesa_is_visible_to_shift_reconciliation(self):
 		"""The paid portion must appear in the POS closing/drawer reconciliation,
