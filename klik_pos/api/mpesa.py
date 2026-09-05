@@ -89,7 +89,6 @@ def process_mpesa(
 	mode_of_payment: str,
 	auto_save: int = 1,
 	auto_submit: int = 0,
-	merge_payments: int = 0,
 ) -> dict:
 	"""Record one or more pending `Mpesa C2B Payment Register` rows against a
 	draft (unsubmitted) `Sales Invoice`, backing the POS checkout's "Add
@@ -124,7 +123,6 @@ def process_mpesa(
 		)
 
 	auto_submit = int(auto_submit or 0)
-	merge_payments = int(merge_payments or 0)
 
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
 	if invoice.docstatus != 0:
@@ -172,16 +170,10 @@ def process_mpesa(
 
 	total_amount = sum(flt(row.transamount) for row in register_rows)
 
-	if merge_payments:
-		reference_no = ",".join(row.transid for row in register_rows if row.transid)
-		payments_added = [
-			{"mode_of_payment": mode_of_payment, "amount": total_amount, "reference": reference_no}
-		]
-	else:
-		payments_added = [
-			{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
-			for row in register_rows
-		]
+	payments_added = [
+		{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
+		for row in register_rows
+	]
 
 	# Traceability only -- the register rows themselves stay untouched
 	# (docstatus=0) until the invoice is actually submitted; see
@@ -205,7 +197,6 @@ def process_mpesa(
 		"payments_added": payments_added,
 		"mpesa_payments": [{"name": row.name, "amount": row.transamount} for row in register_rows],
 		"total_amount": total_amount,
-		"merged": bool(merge_payments),
 		"saved": True,
 		"submitted": False,
 	}
@@ -233,11 +224,13 @@ def _embed_mpesa_payments(invoice) -> dict:
 	"""Pre-submit phase of the hybrid M-Pesa flow.
 
 	Embeds the recorded M-Pesa receipts into the *draft* invoice's own
-	`payments` child table, capped so the embedded total never exceeds the
-	invoice's payable total. This satisfies ERPNext's POS paid-amount
+	`payments` child table, one row per receipt (carrying its own
+	`reference_no`/`phone_number`), capped so the embedded total never exceeds
+	the invoice's payable total. This satisfies ERPNext's POS paid-amount
 	validation, balances the invoice GL through the normal POS path, and makes
 	the M-Pesa take visible to POS shift/drawer reconciliation -- which JOINs
-	`Sales Invoice Payment` and never sees Payment Entries.
+	`Sales Invoice Payment`, GROUPs BY mode_of_payment and never sees Payment
+	Entries, so per-receipt rows aggregate to the same total as before.
 
 	The overpaid remainder (received - embedded) is reported in the returned
 	summary so `_finalize_mpesa_reconciliation` can turn it into an unallocated
@@ -269,12 +262,11 @@ def _embed_mpesa_payments(invoice) -> dict:
 	capacity = max(payable - existing_payments, 0.0)
 
 	# Fill capacity in selection (FIFO) order across the recorded rows. A row
-	# may straddle the cap: part embedded, remainder excess. Track per mode so
-	# each embedded payment row and each excess Payment Entry uses the correct
+	# may straddle the cap: part embedded, remainder excess. Excess is still
+	# tracked per mode so each excess Payment Entry uses the correct
 	# Mode-of-Payment account.
 	remaining = capacity
-	embedded_by_mode: dict = {}
-	refs_by_mode: dict = {}
+	embedded_rows: list = []
 	excess_by_mode: dict = {}
 	excess_registers_by_mode: dict = {}
 
@@ -283,26 +275,26 @@ def _embed_mpesa_payments(invoice) -> dict:
 		mode = c.mode_of_payment
 		take = min(amt, remaining) if remaining > 0 else 0.0
 		if take > 0:
-			embedded_by_mode[mode] = embedded_by_mode.get(mode, 0.0) + take
-			if c.transid:
-				refs_by_mode.setdefault(mode, []).append(c.transid)
+			# One row per receipt, not one per mode: the printed receipt must
+			# show every M-Pesa payment, and an overpayment must be visible as
+			# an embedded part plus an excess. Shift close is unaffected: it
+			# GROUP BYs mode_of_payment.
+			embedded_rows.append(
+				{
+					"mode_of_payment": mode,
+					"amount": take,
+					"reference_no": c.transid or None,
+					"phone_number": c.msisdn or None,
+				}
+			)
 			remaining -= take
 		leftover = amt - take
 		if leftover > 0:
 			excess_by_mode[mode] = excess_by_mode.get(mode, 0.0) + leftover
 			excess_registers_by_mode.setdefault(mode, []).append(c.mpesa_c2b_payment_register)
 
-	for mode, amt in embedded_by_mode.items():
-		if amt <= 0:
-			continue
-		invoice.append(
-			"payments",
-			{
-				"mode_of_payment": mode,
-				"amount": amt,
-				"reference_no": ",".join(refs_by_mode.get(mode, [])) or None,
-			},
-		)
+	for row in embedded_rows:
+		invoice.append("payments", row)
 
 	# NOT set_missing_values(): when the invoice carries a real pos_profile
 	# (always true in production, unlike most fixtures in this test suite),
@@ -317,7 +309,7 @@ def _embed_mpesa_payments(invoice) -> dict:
 
 	return {
 		"received_total": received_total,
-		"embedded_total": sum(embedded_by_mode.values()),
+		"embedded_total": sum(r["amount"] for r in embedded_rows),
 		"excess_by_mode": excess_by_mode,
 		"excess_registers_by_mode": excess_registers_by_mode,
 	}

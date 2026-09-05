@@ -6,7 +6,7 @@ from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profi
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 
 from klik_pos.api.mpesa import process_mpesa
-from klik_pos.api.sales_invoice import submit_draft_invoice
+from klik_pos.api.sales_invoice import get_sales_invoices, submit_draft_invoice
 
 
 class TestProcessMpesa(FrappeTestCase):
@@ -139,12 +139,10 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["success"])
 		self.assertEqual(result["total_amount"], 100)
-		self.assertFalse(result["merged"])
 		self.assertFalse(result["submitted"])
 		self.assertNotIn("mpesa_reconciliation", result)
 		self.assertEqual(len(result["payments_added"]), 1)
@@ -169,46 +167,6 @@ class TestProcessMpesa(FrappeTestCase):
 		self.assertEqual(row.docstatus, 0)
 		self.assertFalse(row.payment_entry)
 
-	def test_multiple_rows_recorded_without_merge_effect(self):
-		invoice = self._draft_invoice()
-		invoice.insert(ignore_permissions=True)
-		row_a = self._make_c2b_payment(amount=40, msisdn="254722222222")
-		row_b = self._make_c2b_payment(amount=60, msisdn="")
-
-		result = process_mpesa(
-			doctype="Sales Invoice",
-			invoice_name=invoice.name,
-			customer=self.customer,
-			mpesa_payments=f"{row_a.name},{row_b.name}",
-			mode_of_payment="Cash",
-			auto_save=1,
-			auto_submit=0,
-			merge_payments=1,
-		)
-
-		self.assertTrue(result["success"])
-		self.assertTrue(result["merged"])
-		self.assertEqual(result["total_amount"], 100)
-		# merge_payments only affects the display summary now, since there's
-		# no embedded payment row to actually merge.
-		self.assertEqual(len(result["payments_added"]), 1)
-		expected_ref = f"{row_a.transid},{row_b.transid}"
-		self.assertEqual(result["payments_added"][0]["reference"], expected_ref)
-
-		invoice.reload()
-		self.assertEqual(len(invoice.payments), 0)
-
-		# One traceability row per selected register row regardless of the
-		# merge flag.
-		self.assertEqual(len(invoice.custom_mpesa_reconciled_payments), 2)
-		recorded_names = {c.mpesa_c2b_payment_register for c in invoice.custom_mpesa_reconciled_payments}
-		self.assertEqual(recorded_names, {row_a.name, row_b.name})
-
-		row_a.reload()
-		row_b.reload()
-		self.assertEqual(row_a.docstatus, 0)
-		self.assertEqual(row_b.docstatus, 0)
-
 	def test_already_consumed_row_is_rejected(self):
 		invoice = self._draft_invoice()
 		invoice.insert(ignore_permissions=True)
@@ -224,7 +182,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 		row.reload()
 		self.assertEqual(row.docstatus, 1)
@@ -241,7 +198,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		other_invoice.reload()
@@ -262,7 +218,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -283,7 +238,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		invoice.reload()
@@ -311,7 +265,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -359,7 +312,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -385,7 +337,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -410,7 +361,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=0,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -437,7 +387,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 		row.reload()
 		self.assertEqual(row.docstatus, 0)
@@ -478,7 +427,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		result = submit_draft_invoice(invoice.name, data=None)
@@ -546,7 +494,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment=mode_of_payment,
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		# Used to throw here: "Reference No and Reference Date is mandatory
@@ -566,6 +513,130 @@ class TestProcessMpesa(FrappeTestCase):
 		self.assertIn(row_b.transid, pe.reference_no)
 		self.assertNotIn(row_a.transid, pe.reference_no)
 
+	def test_each_reconciled_receipt_becomes_its_own_payment_row(self):
+		"""Three M-Pesa receipts reconciled onto one invoice must produce three
+		Sales Invoice Payment rows, each carrying its own transaction id and
+		phone number -- not one row lumped together by mode of payment. Shift
+		close is unaffected: it GROUP BYs mode_of_payment and SUMs amount, so
+		three rows aggregate to the same total as one.
+		"""
+		invoice = self._draft_invoice(rate=300)
+		invoice.insert(ignore_permissions=True)
+		rows = [
+			self._make_c2b_payment(amount=100, msisdn=f"25470000000{i}") for i in range(1, 4)
+		]
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=",".join(r.name for r in rows),
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+		)
+
+		self.assertTrue(result["submitted"])
+		# Exact pay across all three receipts -> no overpaid excess.
+		self.assertEqual(result["mpesa_reconciliation"], [])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 3)
+		self.assertEqual(sorted(flt(p.amount) for p in invoice.payments), [100, 100, 100])
+		self.assertEqual(
+			sorted(p.reference_no for p in invoice.payments),
+			sorted(r.transid for r in rows),
+			"each row must carry its own transid, not a comma-joined list",
+		)
+		self.assertEqual(
+			sorted(p.phone_number for p in invoice.payments),
+			sorted(r.msisdn for r in rows),
+		)
+
+	def test_receipts_straddling_the_cap_embed_as_separate_rows(self):
+		"""Two receipts against a 100 invoice: A(60) fits entirely, B(70) embeds
+		40 and spills 30 as excess. Each must land in its own row carrying its
+		own transid -- not collapse into one 100 row with a comma-joined
+		reference, which is what the old per-mode accumulator produced.
+		"""
+		invoice = self._draft_invoice(rate=100)
+		invoice.insert(ignore_permissions=True)
+		row_a = self._make_c2b_payment(amount=60, msisdn="254777777777")
+		row_b = self._make_c2b_payment(amount=70, msisdn="254788888888")
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=f"{row_a.name},{row_b.name}",
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+		)
+
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 2)
+		payments_by_ref = {p.reference_no: flt(p.amount) for p in invoice.payments}
+		self.assertEqual(
+			payments_by_ref,
+			{row_a.transid: 60, row_b.transid: 40},
+			"each receipt must keep its own row and transid, not merge into one "
+			"comma-joined row",
+		)
+
+		self.assertEqual(len(result["mpesa_reconciliation"]), 1)
+		recon = result["mpesa_reconciliation"][0]
+		self.assertEqual(flt(recon["excess_amount"]), 30)
+
+		row_a.reload()
+		row_b.reload()
+		self.assertEqual(row_a.docstatus, 1)
+		self.assertEqual(row_b.docstatus, 1)
+		self.assertFalse(row_a.payment_entry)
+		self.assertFalse(row_b.payment_entry)
+
+	def test_receipt_entirely_beyond_the_cap_gets_no_payment_row(self):
+		"""Once capacity is exhausted, a later receipt that fits within it not
+		at all contributes no payment row -- its full amount lands in the
+		excess, not a zero-amount row on the invoice.
+		"""
+		invoice = self._draft_invoice(rate=100)
+		invoice.insert(ignore_permissions=True)
+		row_a = self._make_c2b_payment(amount=60, msisdn="254711111112")
+		row_b = self._make_c2b_payment(amount=40, msisdn="254711111113")
+		row_c = self._make_c2b_payment(amount=25, msisdn="254711111114")
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=f"{row_a.name},{row_b.name},{row_c.name}",
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+		)
+
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 2)
+		payments_by_ref = {p.reference_no: flt(p.amount) for p in invoice.payments}
+		self.assertEqual(payments_by_ref, {row_a.transid: 60, row_b.transid: 40})
+		self.assertNotIn(row_c.transid, payments_by_ref)
+
+		self.assertEqual(len(result["mpesa_reconciliation"]), 1)
+		recon = result["mpesa_reconciliation"][0]
+		self.assertEqual(flt(recon["excess_amount"]), 25)
+
+		row_c.reload()
+		self.assertEqual(row_c.docstatus, 1)
+		self.assertFalse(row_c.payment_entry)
+
 	def test_embedded_mpesa_is_visible_to_shift_reconciliation(self):
 		"""The paid portion must appear in the POS closing/drawer reconciliation,
 		which aggregates `Sales Invoice Payment` by mode (never Payment Entries).
@@ -582,7 +653,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		# Mirror pos_entry._calculate_payment_reconciliation's aggregation.
@@ -599,3 +669,46 @@ class TestProcessMpesa(FrappeTestCase):
 		)
 		by_mode = {r.mode_of_payment: flt(r.total) for r in rows}
 		self.assertEqual(by_mode.get("Cash"), 100)
+
+	def test_three_same_mode_receipts_show_one_mode_in_invoice_list(self):
+		"""Three M-Pesa receipts reconciled onto one invoice all land under the
+		same mode of payment (per test_each_reconciled_receipt_becomes_its_own_
+		payment_row above: three rows, one mode each equal to "Cash" here).
+		`get_sales_invoices` -- which feeds Invoice History and Closing Shift --
+		used to assume a row count above one meant a genuine split across modes
+		and joined the raw rows into "Cash/Cash/Cash". That string no longer
+		equals any Mode of Payment name, so the till's mode filter (strict
+		equality against the dropdown) silently dropped every multi-receipt
+		same-mode sale. It must instead dedupe to the bare mode, "Cash".
+		"""
+		invoice = self._draft_invoice(rate=300)
+		invoice.insert(ignore_permissions=True)
+		rows = [
+			self._make_c2b_payment(amount=100, msisdn=f"25470000020{i}") for i in range(1, 4)
+		]
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=",".join(r.name for r in rows),
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+		)
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 3)
+
+		listing = get_sales_invoices(skip_opening_entry_filter=True, search=invoice.name)
+		self.assertTrue(listing["success"])
+		matches = [inv for inv in listing["data"] if inv["name"] == invoice.name]
+		self.assertEqual(len(matches), 1)
+		self.assertEqual(
+			matches[0]["mode_of_payment"],
+			"Cash",
+			"three same-mode rows must dedupe to the bare mode, not join into "
+			"a repeated string that no longer matches the Mode of Payment filter",
+		)

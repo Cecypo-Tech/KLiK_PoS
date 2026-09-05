@@ -1432,12 +1432,17 @@ def _process_invoices(invoices, cashier_names_map, payment_methods_map, items_ma
 		inv["payment_methods"] = payment_methods
 
 		# Set backward-compatible mode_of_payment field
-		if len(payment_methods) == 0:
+		# Dedupe modes (order-preserving): with one row per receipt, several rows can now
+		# share a single mode (e.g. three M-Pesa receipts), and joining the raw rows would
+		# turn that into "Mpesa/Mpesa/Mpesa" which no longer matches the Mode of Payment
+		# filter dropdown used by Invoice History / Closing Shift.
+		modes = list(dict.fromkeys(pm["mode_of_payment"] for pm in payment_methods))
+		if len(modes) == 0:
 			inv["mode_of_payment"] = "-"
-		elif len(payment_methods) == 1:
-			inv["mode_of_payment"] = payment_methods[0]["mode_of_payment"]
+		elif len(modes) == 1:
+			inv["mode_of_payment"] = modes[0]
 		else:
-			inv["mode_of_payment"] = "/".join([pm["mode_of_payment"] for pm in payment_methods])
+			inv["mode_of_payment"] = "/".join(modes)
 
 		# Set items and calculate return data
 		items = items_map.get(inv.name, [])
@@ -1533,13 +1538,16 @@ def get_invoice_details(invoice_id):
 			for p in (getattr(invoice, "payments", []) or [])
 		]
 		invoice_data["payment_methods"] = payments
-		if not payments:
+		# Dedupe modes (order-preserving) before joining: several rows can now share a single
+		# mode (one row per receipt), so a row count above one no longer means a genuine split
+		# across modes. Only a distinct-mode count above one is.
+		modes = list(dict.fromkeys(p["mode_of_payment"] for p in payments))
+		if len(modes) == 0:
 			invoice_data["mode_of_payment"] = "-"
-		elif len(payments) == 1:
-			invoice_data["mode_of_payment"] = payments[0]["mode_of_payment"]
+		elif len(modes) == 1:
+			invoice_data["mode_of_payment"] = modes[0]
 		else:
-			# A split payment is genuinely more than one mode; joining matches the list view.
-			invoice_data["mode_of_payment"] = "/".join(p["mode_of_payment"] for p in payments)
+			invoice_data["mode_of_payment"] = "/".join(modes)
 
 		return {
 			"success": True,
@@ -4331,14 +4339,17 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 							)
 
 			invoice.payment_methods = payment_methods
-			# Keep backward compatibility - show first payment method or combined display
-			if len(payment_methods) == 0:
+			# Keep backward compatibility - show first payment method or combined display.
+			# Dedupe modes (order-preserving): one row per receipt means several rows can
+			# share a single mode, so join the distinct modes, not the raw rows.
+			modes = list(dict.fromkeys(pm["mode_of_payment"] for pm in payment_methods))
+			if len(modes) == 0:
 				invoice.payment_method = "-"
-			elif len(payment_methods) == 1:
-				invoice.payment_method = payment_methods[0]["mode_of_payment"]
+			elif len(modes) == 1:
+				invoice.payment_method = modes[0]
 			else:
 				# Show combined payment methods like "Cash/Credit Card"
-				invoice.payment_method = "/".join([pm["mode_of_payment"] for pm in payment_methods])
+				invoice.payment_method = "/".join(modes)
 
 		return {"success": True, "data": invoices}
 
