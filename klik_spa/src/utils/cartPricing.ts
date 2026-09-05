@@ -35,7 +35,7 @@ interface DiscountDataLike {
   customRateIncludesTax?: boolean;
 }
 
-type DiscountMapLike = Record<string, DiscountDataLike | undefined>;
+export type DiscountMapLike = Record<string, DiscountDataLike | undefined>;
 
 interface RateOptions {
   itemDiscounts?: DiscountMapLike;

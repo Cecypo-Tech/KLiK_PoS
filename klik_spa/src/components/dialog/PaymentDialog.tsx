@@ -2526,6 +2526,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
           <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">
             <InvoicePreview
+              itemDiscounts={itemDiscounts}
+              isTaxIncludedInBasicRate={isTaxIncludedInBasicRate}
               invoiceSubmitted={invoiceSubmitted}
               invoiceData={invoiceData}
               submittedInvoice={submittedInvoice}
