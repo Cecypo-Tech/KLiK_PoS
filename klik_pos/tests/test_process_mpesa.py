@@ -566,6 +566,84 @@ class TestProcessMpesa(FrappeTestCase):
 		self.assertIn(row_b.transid, pe.reference_no)
 		self.assertNotIn(row_a.transid, pe.reference_no)
 
+	def test_each_reconciled_receipt_becomes_its_own_payment_row(self):
+		"""Three M-Pesa receipts reconciled onto one invoice must produce three
+		Sales Invoice Payment rows, each carrying its own transaction id and
+		phone number -- not one row lumped together by mode of payment. Shift
+		close is unaffected: it GROUP BYs mode_of_payment and SUMs amount, so
+		three rows aggregate to the same total as one.
+		"""
+		invoice = self._draft_invoice(rate=300)
+		invoice.insert(ignore_permissions=True)
+		rows = [
+			self._make_c2b_payment(amount=100, msisdn=f"25470000000{i}") for i in range(1, 4)
+		]
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=",".join(r.name for r in rows),
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+			merge_payments=0,
+		)
+
+		self.assertTrue(result["submitted"])
+		# Exact pay across all three receipts -> no overpaid excess.
+		self.assertEqual(result["mpesa_reconciliation"], [])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 3)
+		self.assertEqual(sorted(flt(p.amount) for p in invoice.payments), [100, 100, 100])
+		self.assertEqual(
+			sorted(p.reference_no for p in invoice.payments),
+			sorted(r.transid for r in rows),
+			"each row must carry its own transid, not a comma-joined list",
+		)
+		self.assertEqual(
+			sorted(p.phone_number for p in invoice.payments),
+			sorted(r.msisdn for r in rows),
+		)
+
+	def test_receipt_straddling_the_cap_embeds_only_what_fits(self):
+		"""A single receipt larger than the invoice's payable total must embed
+		only the part that fits; the remainder is visible as excess (via
+		`mpesa_reconciliation`, the public surface), not silently dropped.
+		"""
+		invoice = self._draft_invoice(rate=30)
+		invoice.insert(ignore_permissions=True)
+		row = self._make_c2b_payment(amount=50, msisdn="254777777777")
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=row.name,
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+			merge_payments=0,
+		)
+
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 1)
+		self.assertEqual(flt(invoice.payments[0].amount), 30)
+		self.assertEqual(invoice.payments[0].reference_no, row.transid)
+
+		self.assertEqual(len(result["mpesa_reconciliation"]), 1)
+		recon = result["mpesa_reconciliation"][0]
+		self.assertEqual(flt(recon["excess_amount"]), 20)
+
+		row.reload()
+		self.assertEqual(row.docstatus, 1)
+		self.assertFalse(row.payment_entry)
+
 	def test_embedded_mpesa_is_visible_to_shift_reconciliation(self):
 		"""The paid portion must appear in the POS closing/drawer reconciliation,
 		which aggregates `Sales Invoice Payment` by mode (never Payment Entries).
