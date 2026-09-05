@@ -89,7 +89,6 @@ def process_mpesa(
 	mode_of_payment: str,
 	auto_save: int = 1,
 	auto_submit: int = 0,
-	merge_payments: int = 0,
 ) -> dict:
 	"""Record one or more pending `Mpesa C2B Payment Register` rows against a
 	draft (unsubmitted) `Sales Invoice`, backing the POS checkout's "Add
@@ -124,7 +123,6 @@ def process_mpesa(
 		)
 
 	auto_submit = int(auto_submit or 0)
-	merge_payments = int(merge_payments or 0)
 
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
 	if invoice.docstatus != 0:
@@ -172,16 +170,10 @@ def process_mpesa(
 
 	total_amount = sum(flt(row.transamount) for row in register_rows)
 
-	if merge_payments:
-		reference_no = ",".join(row.transid for row in register_rows if row.transid)
-		payments_added = [
-			{"mode_of_payment": mode_of_payment, "amount": total_amount, "reference": reference_no}
-		]
-	else:
-		payments_added = [
-			{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
-			for row in register_rows
-		]
+	payments_added = [
+		{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
+		for row in register_rows
+	]
 
 	# Traceability only -- the register rows themselves stay untouched
 	# (docstatus=0) until the invoice is actually submitted; see
@@ -205,7 +197,6 @@ def process_mpesa(
 		"payments_added": payments_added,
 		"mpesa_payments": [{"name": row.name, "amount": row.transamount} for row in register_rows],
 		"total_amount": total_amount,
-		"merged": bool(merge_payments),
 		"saved": True,
 		"submitted": False,
 	}

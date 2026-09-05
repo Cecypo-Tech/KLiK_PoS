@@ -139,12 +139,10 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["success"])
 		self.assertEqual(result["total_amount"], 100)
-		self.assertFalse(result["merged"])
 		self.assertFalse(result["submitted"])
 		self.assertNotIn("mpesa_reconciliation", result)
 		self.assertEqual(len(result["payments_added"]), 1)
@@ -169,46 +167,6 @@ class TestProcessMpesa(FrappeTestCase):
 		self.assertEqual(row.docstatus, 0)
 		self.assertFalse(row.payment_entry)
 
-	def test_multiple_rows_recorded_without_merge_effect(self):
-		invoice = self._draft_invoice()
-		invoice.insert(ignore_permissions=True)
-		row_a = self._make_c2b_payment(amount=40, msisdn="254722222222")
-		row_b = self._make_c2b_payment(amount=60, msisdn="")
-
-		result = process_mpesa(
-			doctype="Sales Invoice",
-			invoice_name=invoice.name,
-			customer=self.customer,
-			mpesa_payments=f"{row_a.name},{row_b.name}",
-			mode_of_payment="Cash",
-			auto_save=1,
-			auto_submit=0,
-			merge_payments=1,
-		)
-
-		self.assertTrue(result["success"])
-		self.assertTrue(result["merged"])
-		self.assertEqual(result["total_amount"], 100)
-		# merge_payments only affects the display summary now, since there's
-		# no embedded payment row to actually merge.
-		self.assertEqual(len(result["payments_added"]), 1)
-		expected_ref = f"{row_a.transid},{row_b.transid}"
-		self.assertEqual(result["payments_added"][0]["reference"], expected_ref)
-
-		invoice.reload()
-		self.assertEqual(len(invoice.payments), 0)
-
-		# One traceability row per selected register row regardless of the
-		# merge flag.
-		self.assertEqual(len(invoice.custom_mpesa_reconciled_payments), 2)
-		recorded_names = {c.mpesa_c2b_payment_register for c in invoice.custom_mpesa_reconciled_payments}
-		self.assertEqual(recorded_names, {row_a.name, row_b.name})
-
-		row_a.reload()
-		row_b.reload()
-		self.assertEqual(row_a.docstatus, 0)
-		self.assertEqual(row_b.docstatus, 0)
-
 	def test_already_consumed_row_is_rejected(self):
 		invoice = self._draft_invoice()
 		invoice.insert(ignore_permissions=True)
@@ -224,7 +182,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 		row.reload()
 		self.assertEqual(row.docstatus, 1)
@@ -241,7 +198,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		other_invoice.reload()
@@ -262,7 +218,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -283,7 +238,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		invoice.reload()
@@ -311,7 +265,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -359,7 +312,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -385,7 +337,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=1,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -410,7 +361,6 @@ class TestProcessMpesa(FrappeTestCase):
 				mode_of_payment="Cash",
 				auto_save=0,
 				auto_submit=0,
-				merge_payments=0,
 			)
 
 		invoice.reload()
@@ -437,7 +387,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 		row.reload()
 		self.assertEqual(row.docstatus, 0)
@@ -478,7 +427,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		result = submit_draft_invoice(invoice.name, data=None)
@@ -546,7 +494,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment=mode_of_payment,
 			auto_save=1,
 			auto_submit=0,
-			merge_payments=0,
 		)
 
 		# Used to throw here: "Reference No and Reference Date is mandatory
@@ -587,7 +534,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -627,7 +573,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -673,7 +618,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		self.assertTrue(result["submitted"])
@@ -709,7 +653,6 @@ class TestProcessMpesa(FrappeTestCase):
 			mode_of_payment="Cash",
 			auto_save=1,
 			auto_submit=1,
-			merge_payments=0,
 		)
 
 		# Mirror pos_entry._calculate_payment_reconciliation's aggregation.

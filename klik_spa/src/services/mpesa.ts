@@ -55,7 +55,6 @@ export interface MpesaQuickPayResponse {
   }>;
   mpesa_payments?: Array<{ name: string; amount: number }>;
   total_amount?: number;
-  merged?: boolean;
   saved?: boolean;
   submitted?: boolean;
   error?: string;
@@ -133,7 +132,6 @@ export async function processKlikPosMpesaPayments(payload: {
   mode_of_payment: string;
   auto_save?: 0 | 1;
   auto_submit?: 0 | 1;
-  merge_payments?: 0 | 1;
 }) {
   const csrfToken = window.csrf_token;
   const response = await fetch(
