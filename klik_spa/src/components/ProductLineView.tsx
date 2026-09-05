@@ -284,7 +284,7 @@ export default function ProductLineView({
                         {isRowFocused && quantityBuffer !== "" && (
                           <span
                             aria-live="polite"
-                            className="rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                            className="shrink-0 rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
                           >
                             × {quantityBuffer}
                           </span>

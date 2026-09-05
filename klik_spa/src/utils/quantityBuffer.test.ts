@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appendDigit, deleteDigit, bufferToQuantity, MAX_QUANTITY_DIGITS } from "./quantityBuffer";
+import { appendDigit, deleteDigit, bufferToQuantity, MAX_QUANTITY_DIGITS, OVERFLOW } from "./quantityBuffer";
 
 describe("appendDigit", () => {
   it("builds a quantity one digit at a time", () => {
@@ -7,10 +7,31 @@ describe("appendDigit", () => {
     expect(appendDigit("3", "7")).toBe("37");
   });
 
-  it("clears the buffer rather than truncating when the cap is exceeded", () => {
+  it("goes sticky-overflow rather than truncating when the cap is exceeded", () => {
     // A wedge scanner types a long barcode. Truncating would leave "4901" and a
-    // trailing Enter would add 4901 units; clearing makes it add 1 instead.
-    expect(appendDigit("4901", "2")).toBe("");
+    // trailing Enter would add 4901 units; overflowing sticks so Enter adds 1
+    // instead, no matter how many more digits the scanner still has to type.
+    expect(appendDigit("4901", "2")).toBe(OVERFLOW);
+  });
+
+  it("stays overflowed for every digit after the cap, instead of cycling", () => {
+    // This is the bug: a naive "reset to empty on overflow" cycles with a period
+    // of MAX_QUANTITY_DIGITS + 1, so a barcode longer than that leaves a plausible
+    // -looking tail in the buffer instead of failing safe.
+    const ean13 = "4901234567894";
+    const result = [...ean13].reduce(appendDigit, "");
+    expect(bufferToQuantity(result)).toBe(1);
+  });
+
+  it("stays overflowed for a 14-digit code (length ≡ 4 mod 5, the worst case for cycling)", () => {
+    const code128 = "12345678901234";
+    const result = [...code128].reduce(appendDigit, "");
+    expect(bufferToQuantity(result)).toBe(1);
+  });
+
+  it("ignores further digits once overflowed, and only a terminator clears it", () => {
+    expect(appendDigit(OVERFLOW, "9")).toBe(OVERFLOW);
+    expect(deleteDigit(OVERFLOW)).toBe("");
   });
 
   it("accepts exactly the cap", () => {
@@ -51,5 +72,9 @@ describe("bufferToQuantity", () => {
 
   it("never returns less than one", () => {
     expect(bufferToQuantity("0")).toBe(1);
+  });
+
+  it("treats the overflow sentinel as one", () => {
+    expect(bufferToQuantity(OVERFLOW)).toBe(1);
   });
 });

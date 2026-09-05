@@ -11,7 +11,7 @@ import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
-import { appendDigit, deleteDigit, bufferToQuantity } from "../utils/quantityBuffer";
+import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
 
 
 interface ProductGridProps {
@@ -40,7 +40,10 @@ export default function ProductGrid({
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
-  const [pendingCartItem, setPendingCartItem] = useState<MenuItem | null>(null);
+  // Carries the quantity the cashier had typed before the PIN prompt interrupted them,
+  // so resuming after a correct PIN adds what was actually typed instead of silently
+  // dropping it back to 1.
+  const [pendingCartItem, setPendingCartItem] = useState<{ item: MenuItem; quantity: number } | null>(null);
   const [variantTemplateItem, setVariantTemplateItem] = useState<MenuItem | null>(null);
 
   const defaultView = posDetails?.custom_default_view || "Grid View";
@@ -53,6 +56,10 @@ export default function ProductGrid({
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
   const [quantityBuffer, setQuantityBuffer] = useState("");
+  // OVERFLOW is a real, meaningful buffer state (it means "1", stickily, until a
+  // terminator clears it) but it is not a quantity a cashier typed — the badge must
+  // show nothing for it rather than the sentinel character itself.
+  const displayQuantityBuffer = quantityBuffer === OVERFLOW ? "" : quantityBuffer;
 
   // A scanner-only till types barcodes into whatever is focused; digits there are
   // never a quantity, so the shortcut is switched off entirely.
@@ -72,7 +79,21 @@ export default function ProductGrid({
     [filteredItems, hideUnavailableItems, stockUnavailable],
   );
 
-  useEffect(() => { setFocusedIndex(-1); setQuantityBuffer(""); }, [inStockItems]);
+  // inStockItems is a fresh array identity every render — productStore's
+  // getFilteredItems() returns a new filter(...) result on every call, and the
+  // background 30s stock refresh triggers one even when the item set itself hasn't
+  // changed. Keying on identity would wipe focus and the in-progress quantity buffer
+  // on a mere stock tick; keying on the item set means a genuine search/filter/
+  // pagination change still resets both, while a stock-value-only refresh leaves them
+  // alone.
+  const itemsSignature = useMemo(() => inStockItems.map((item) => item.id).join('|'), [inStockItems]);
+  useEffect(() => { setFocusedIndex(-1); setQuantityBuffer(""); }, [itemsSignature]);
+
+  // Structural guarantee that the buffer never survives a focus change, however it
+  // happens: arrow keys, Tab/Shift+Tab, a click on another row, or MenuGrid's F3 ->
+  // ArrowDown jump straight to index 0. Typing a digit never changes focusedIndex, so
+  // this never fires mid-buffer.
+  useEffect(() => { setQuantityBuffer(''); }, [focusedIndex]);
 
   useEffect(() => {
     if (requiresSalespersonPin) {
@@ -120,7 +141,7 @@ export default function ProductGrid({
       }
 
       if (!currentSalesperson) {
-        setPendingCartItem(item);
+        setPendingCartItem({ item, quantity });
         setShowSalespersonModal(true);
         return;
       }
@@ -131,7 +152,10 @@ export default function ProductGrid({
 
   const handleItemKeyDown = useCallback((index: number, item: MenuItem, e: React.KeyboardEvent) => {
     if (quantityShortcutEnabled) {
-      if (/^[0-9]$/.test(e.key)) {
+      // Ctrl/Cmd/Alt+digit are browser and OS bindings (switch tab, reset zoom, ...),
+      // never a typed quantity — let them fall through untouched rather than
+      // swallowing them and appending a phantom digit.
+      if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setQuantityBuffer((current) => appendDigit(current, e.key));
         return;
@@ -151,6 +175,9 @@ export default function ProductGrid({
     }
 
     if (e.key === 'ArrowDown') {
+      // Redundant with the focusedIndex effect above once the next row actually takes
+      // focus (its onFocus will clear the buffer too) — kept anyway as a same-tick clear
+      // so the badge never flashes stale for a frame, and it's free.
       e.preventDefault();
       setQuantityBuffer('');
       document.querySelector<HTMLElement>(`[data-product-index="${index + 1}"]`)?.focus();
@@ -158,6 +185,9 @@ export default function ProductGrid({
       e.preventDefault();
       setQuantityBuffer('');
       if (index === 0) {
+        // This jump goes to the search input, not another product row, so
+        // focusedIndex never changes and the focusedIndex effect above will NOT
+        // fire — this explicit clear is the only thing that clears the buffer here.
         const el = document.getElementById('pos-search-input') as HTMLInputElement | null;
         el?.focus();
         el?.select();
@@ -193,7 +223,7 @@ export default function ProductGrid({
       return;
     }
 
-    void addItemToCart(itemToAdd);
+    void addItemToCart(itemToAdd.item, itemToAdd.quantity);
   }, [addItemToCart, pendingCartItem]);
 
   const handleVariantSelected = useCallback(async (variant: MenuItem) => {
@@ -266,7 +296,7 @@ export default function ProductGrid({
           focusedIndex={focusedIndex}
           onItemFocus={setFocusedIndex}
           onItemKeyDown={handleItemKeyDown}
-          quantityBuffer={quantityBuffer}
+          quantityBuffer={displayQuantityBuffer}
         />
 
         {onLoadMore && (
@@ -384,7 +414,7 @@ export default function ProductGrid({
             isFocused={focusedIndex === i}
             onFocused={() => setFocusedIndex(i)}
             onKeyboardAction={(e) => handleItemKeyDown(i, item, e)}
-            quantityBuffer={focusedIndex === i ? quantityBuffer : ""}
+            quantityBuffer={focusedIndex === i ? displayQuantityBuffer : ""}
           />
         ))}
       </div>
