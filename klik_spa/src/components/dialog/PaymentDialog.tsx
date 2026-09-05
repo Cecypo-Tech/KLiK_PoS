@@ -183,7 +183,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [mpesaRegisterPayments, setMpesaRegisterPayments] = useState<MpesaRegisterPayment[]>([]);
   const [mpesaRegisterCount, setMpesaRegisterCount] = useState(0);
   const [selectedMpesaPayments, setSelectedMpesaPayments] = useState<MpesaRegisterPayment[]>([]);
-  const [mergeMpesaPayments, setMergeMpesaPayments] = useState(true);
   const [isLoadingMpesaRegisterPayments, setIsLoadingMpesaRegisterPayments] = useState(false);
   const [loyaltyPointsInput, setLoyaltyPointsInput] = useState("");
   const [appliedLoyalty, setAppliedLoyalty] = useState<AppliedLoyaltyRedemption | null>(null);
@@ -858,7 +857,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         mode_of_payment: activeMpesaPayment.method,
         auto_save: 1,
         auto_submit: 0,
-        merge_payments: mergeMpesaPayments ? 1 : 0,
       });
 
       setPaymentAmounts((prev) => ({
@@ -2297,14 +2295,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           pendingCount={mpesaRegisterCount}
           selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
           selectedTotal={selectedMpesaTotal}
-          mergePayments={mergeMpesaPayments}
           isLoadingPayments={isLoadingMpesaRegisterPayments}
           isProcessing={isProcessingPayment}
           onClose={() => setShowMpesaOptionsModal(false)}
           onPhoneNumberChange={setMpesaPhoneNumber}
           onSearchChange={setMpesaSearchTerm}
           onTogglePayment={handleToggleMpesaPayment}
-          onToggleMergePayments={setMergeMpesaPayments}
           onInitiateStk={() => void handleInitiateMpesaPayment()}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
@@ -2509,14 +2505,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 pendingCount={mpesaRegisterCount}
                 selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
                 selectedTotal={selectedMpesaTotal}
-                mergePayments={mergeMpesaPayments}
                 isLoadingPayments={isLoadingMpesaRegisterPayments}
                 isProcessing={isProcessingPayment}
                 onClose={() => setShowMpesaOptionsModal(false)}
                 onPhoneNumberChange={setMpesaPhoneNumber}
                 onSearchChange={setMpesaSearchTerm}
                 onTogglePayment={handleToggleMpesaPayment}
-                onToggleMergePayments={setMergeMpesaPayments}
                 onInitiateStk={() => void handleInitiateMpesaPayment()}
                 onAddPayments={() => void handleReconcileMpesaPayments()}
                 variant="panel"

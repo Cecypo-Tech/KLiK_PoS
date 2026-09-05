@@ -13,14 +13,12 @@ interface MpesaOptionsModalProps {
   pendingCount: number;
   selectedPaymentNames: string[];
   selectedTotal: number;
-  mergePayments: boolean;
   isLoadingPayments: boolean;
   isProcessing: boolean;
   onClose: () => void;
   onPhoneNumberChange: (value: string) => void;
   onSearchChange: (value: string) => void;
   onTogglePayment: (paymentName: string) => void;
-  onToggleMergePayments: (checked: boolean) => void;
   onInitiateStk: () => void;
   onAddPayments: () => void;
   /** "modal" keeps the overlay (mobile). "panel" renders inline for the full-screen desktop checkout. */
@@ -38,14 +36,12 @@ export default function MpesaOptionsModal({
   pendingCount,
   selectedPaymentNames,
   selectedTotal,
-  mergePayments,
   isLoadingPayments,
   isProcessing,
   onClose,
   onPhoneNumberChange,
   onSearchChange,
   onTogglePayment,
-  onToggleMergePayments,
   onInitiateStk,
   onAddPayments,
   variant = "modal",
@@ -177,16 +173,6 @@ export default function MpesaOptionsModal({
                 })
               )}
             </div>
-
-            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={mergePayments}
-                onChange={(event) => onToggleMergePayments(event.target.checked)}
-                disabled={isProcessing}
-              />
-              <span>Merge selected payments into one row</span>
-            </label>
 
             <div className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
               <span className="text-gray-600 dark:text-gray-300">Selected total</span>
