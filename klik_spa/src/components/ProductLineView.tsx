@@ -120,14 +120,6 @@ export default function ProductLineView({
                   } ${!isDisabled && "cursor-pointer"}`}
                   onClick={() => !isDisabled && onAddToCart(item)}
                 >
-                  {isRowFocused && quantityBuffer !== "" && (
-                    <span
-                      aria-live="polite"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 z-10 shrink-0 rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
-                    >
-                      × {quantityBuffer}
-                    </span>
-                  )}
                   {/* Image zoom preview — rendered at row level to escape column clipping */}
                   {hoveredImageId === item.id && item.image && !isMobile && (
                     <div className="absolute left-10 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
@@ -236,6 +228,14 @@ export default function ProductLineView({
                               ? "Service"
                               : formatAvailability(isOutOfStock ? 0 : item.available, stockUnavailable)}
                         </p>
+                        {isRowFocused && quantityBuffer !== "" && (
+                          <span
+                            aria-live="polite"
+                            className="mt-0.5 inline-block rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                          >
+                            × {quantityBuffer}
+                          </span>
+                        )}
                       </div>
 
                       <div className="col-span-5 flex justify-end">
@@ -271,7 +271,7 @@ export default function ProductLineView({
                         </div>
                       </div>
 
-                      <div className={`col-span-2 flex items-center justify-center ${isDisabled ? "opacity-60" : ""}`}>
+                      <div className={`col-span-2 flex items-center justify-center gap-1 ${isDisabled ? "opacity-60" : ""}`}>
                         <span className={`font-medium text-sm ${
                           isOutOfStock ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"
                         }`}>
@@ -281,6 +281,14 @@ export default function ProductLineView({
                               ? "Service"
                               : formatAvailability(isOutOfStock ? 0 : item.available, stockUnavailable)}
                         </span>
+                        {isRowFocused && quantityBuffer !== "" && (
+                          <span
+                            aria-live="polite"
+                            className="rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                          >
+                            × {quantityBuffer}
+                          </span>
+                        )}
                       </div>
 
                       <div className={`col-span-1 flex items-center justify-center ${isDisabled ? "opacity-60" : ""}`}>
