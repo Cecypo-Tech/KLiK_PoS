@@ -266,6 +266,7 @@ export default function ProductGrid({
           focusedIndex={focusedIndex}
           onItemFocus={setFocusedIndex}
           onItemKeyDown={handleItemKeyDown}
+          quantityBuffer={quantityBuffer}
         />
 
         {onLoadMore && (
@@ -383,6 +384,7 @@ export default function ProductGrid({
             isFocused={focusedIndex === i}
             onFocused={() => setFocusedIndex(i)}
             onKeyboardAction={(e) => handleItemKeyDown(i, item, e)}
+            quantityBuffer={focusedIndex === i ? quantityBuffer : ""}
           />
         ))}
       </div>

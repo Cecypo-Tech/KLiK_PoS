@@ -20,6 +20,7 @@ interface ProductLineViewProps {
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
   stockUnavailable?: boolean
+  quantityBuffer?: string
 }
 
 export default function ProductLineView({
@@ -33,6 +34,7 @@ export default function ProductLineView({
   onItemFocus,
   onItemKeyDown,
   stockUnavailable = false,
+  quantityBuffer = "",
 }: ProductLineViewProps) {
   const [hoveredItemId, setHoveredItemId] = useState<string | number | null>(null)
   const [hoveredImageId, setHoveredImageId] = useState<string | number | null>(null)
@@ -118,6 +120,14 @@ export default function ProductLineView({
                   } ${!isDisabled && "cursor-pointer"}`}
                   onClick={() => !isDisabled && onAddToCart(item)}
                 >
+                  {isRowFocused && quantityBuffer !== "" && (
+                    <span
+                      aria-live="polite"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 z-10 shrink-0 rounded-md bg-beveren-600 px-2 py-0.5 text-xs font-semibold text-white tabular-nums"
+                    >
+                      × {quantityBuffer}
+                    </span>
+                  )}
                   {/* Image zoom preview — rendered at row level to escape column clipping */}
                   {hoveredImageId === item.id && item.image && !isMobile && (
                     <div className="absolute left-10 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
