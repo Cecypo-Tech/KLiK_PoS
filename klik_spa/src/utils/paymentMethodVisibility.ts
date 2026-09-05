@@ -38,7 +38,7 @@ export function partitionPaymentMethods<T extends RankedMethod>(
   // displacing the last of the head rather than adding a fourth row.
   const base =
     defaultMethod && !head.includes(defaultMethod)
-      ? [...sorted.slice(0, Math.max(visibleCount - 1, 0)), defaultMethod].sort((a, b) => a.idx - b.idx)
+      ? [...sorted.slice(0, Math.max(visibleCount - 1, 0)), defaultMethod]
       : head;
 
   const baseIds = new Set(base.map((method) => method.id));
@@ -47,9 +47,16 @@ export function partitionPaymentMethods<T extends RankedMethod>(
   // gain an amount - only base membership excludes a method from the promoted
   // bucket, so a promoted row never gets re-spliced relative to another
   // promoted row when the cashier types into it.
+  //
+  // The !baseIds.has() guard below looks dead - no current test reaches it, because
+  // only a tag can be promoted and a tag is by definition not already a row. It is
+  // kept on purpose: `methods` can change while a promotion is held (the modes list
+  // refreshes, or a mode ahead of this one is disabled), which can slide a promoted
+  // method into `base`. Without the guard it would then appear in both buckets -
+  // duplicate React keys and a doubled payment row on a till.
   const promoted = promotedIds
     .map((id) => sorted.find((method) => method.id === id))
-    .filter((method): method is T => Boolean(method) && !baseIds.has(method!.id));
+    .filter((method): method is T => method !== undefined && !baseIds.has(method.id));
 
   const promotedIdSet = new Set(promoted.map((method) => method.id));
 
