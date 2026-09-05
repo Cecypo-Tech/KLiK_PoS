@@ -11,6 +11,7 @@ import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
+import { appendDigit, deleteDigit, bufferToQuantity } from "../utils/quantityBuffer";
 
 
 interface ProductGridProps {
@@ -35,7 +36,7 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
-  const { addToCart, cartItems, updateQuantity, removeItem } = useCartStore();
+  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -51,6 +52,12 @@ export default function ProductGrid({
 
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
+  const [quantityBuffer, setQuantityBuffer] = useState("");
+
+  // A scanner-only till types barcodes into whatever is focused; digits there are
+  // never a quantity, so the shortcut is switched off entirely.
+  const quantityShortcutEnabled = !scannerOnly;
+
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Mirrors the backend's stand-down: when stock could not be read every balance is 0, so
@@ -65,7 +72,7 @@ export default function ProductGrid({
     [filteredItems, hideUnavailableItems, stockUnavailable],
   );
 
-  useEffect(() => { setFocusedIndex(-1); }, [inStockItems]);
+  useEffect(() => { setFocusedIndex(-1); setQuantityBuffer(""); }, [inStockItems]);
 
   useEffect(() => {
     if (requiresSalespersonPin) {
@@ -83,23 +90,20 @@ export default function ProductGrid({
     setPendingCartItem(null);
   }, [isSalespersonLockActive]);
 
-  const addConcreteItemToCart = useCallback(async (item: MenuItem) => {
-    await addToCart({
-      ...item,
-      item_code: item.id,
-    });
-  }, [addToCart]);
+  const addConcreteItemToCart = useCallback(async (item: MenuItem, quantity = 1) => {
+    await addToCartWithQuantity({ ...item, item_code: item.id }, quantity);
+  }, [addToCartWithQuantity]);
 
-  const addItemToCart = useCallback(async (item: MenuItem) => {
+  const addItemToCart = useCallback(async (item: MenuItem, quantity = 1) => {
     if (item.is_variant_template || item.has_variants) {
       setVariantTemplateItem(item);
       return;
     }
 
-    await addConcreteItemToCart(item);
+    await addConcreteItemToCart(item, quantity);
   }, [addConcreteItemToCart]);
 
-  const handleAddToCart = useCallback(async (item: MenuItem) => {
+  const handleAddToCart = useCallback(async (item: MenuItem, quantity = 1) => {
     if (isItemOutOfStock(item, stockUnavailable)) return;
     if (scannerOnly) return;
 
@@ -122,15 +126,37 @@ export default function ProductGrid({
       }
     }
 
-    await addItemToCart(item);
+    await addItemToCart(item, quantity);
   }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable]);
 
   const handleItemKeyDown = useCallback((index: number, item: MenuItem, e: React.KeyboardEvent) => {
+    if (quantityShortcutEnabled) {
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        setQuantityBuffer((current) => appendDigit(current, e.key));
+        return;
+      }
+      if (e.key === 'Backspace' && quantityBuffer !== '') {
+        // Only while the buffer holds something. Empty, it must still fall through
+        // to the global "jump back to the search box" binding.
+        e.preventDefault();
+        setQuantityBuffer((current) => deleteDigit(current));
+        return;
+      }
+      if (e.key === 'Escape' && quantityBuffer !== '') {
+        e.preventDefault();
+        setQuantityBuffer('');
+        return;
+      }
+    }
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      setQuantityBuffer('');
       document.querySelector<HTMLElement>(`[data-product-index="${index + 1}"]`)?.focus();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      setQuantityBuffer('');
       if (index === 0) {
         const el = document.getElementById('pos-search-input') as HTMLInputElement | null;
         el?.focus();
@@ -140,19 +166,23 @@ export default function ProductGrid({
       }
     } else if (e.key === '+' || e.key === '=' || e.key === 'Enter') {
       e.preventDefault();
-      void handleAddToCart(item);
+      const quantity = bufferToQuantity(quantityBuffer);
+      setQuantityBuffer('');
+      void handleAddToCart(item, quantity);
     } else if (e.key === '-') {
       e.preventDefault();
+      const step = bufferToQuantity(quantityBuffer);
+      setQuantityBuffer('');
       const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
       if (cartItem) {
-        if (cartItem.quantity <= 1) {
+        if (cartItem.quantity <= step) {
           removeItem(cartItem.id);
         } else {
-          void updateQuantity(cartItem.id, cartItem.quantity - 1);
+          void updateQuantity(cartItem.id, cartItem.quantity - step);
         }
       }
     }
-  }, [cartItems, handleAddToCart, removeItem, updateQuantity]);
+  }, [cartItems, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
