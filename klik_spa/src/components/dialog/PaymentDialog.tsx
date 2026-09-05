@@ -2145,7 +2145,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                           </div>
                         )}
                       </div>
-                    ) : undefined
+                    ) : (
+                      // Rendered inert rather than hidden: a control that simply vanishes cannot
+                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
+                      // button emits no click, so the explanation would never fire.
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() =>
+                          toast.info(
+                            posDetails?.name
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
+                      >
+                        Is Credit Sale
+                      </button>
+                    )
                   }
                 />
                 {renderLoyaltyRedemption()}
@@ -2385,7 +2403,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                           </div>
                         )}
                       </div>
-                    ) : undefined
+                    ) : (
+                      // Rendered inert rather than hidden: a control that simply vanishes cannot
+                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
+                      // button emits no click, so the explanation would never fire.
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() =>
+                          toast.info(
+                            posDetails?.name
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
+                      >
+                        Is Credit Sale
+                      </button>
+                    )
                   }
                 />
 
