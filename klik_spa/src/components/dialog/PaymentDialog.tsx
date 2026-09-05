@@ -128,6 +128,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     onHoldOrder,
     isMobile = false,
     isFullPage = false,
+    backLabel = "Back",
     initialSharingMode = null,
     externalInvoiceData = null,
     itemDiscounts = {},
@@ -176,12 +177,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
   const [showMpesaOptionsModal, setShowMpesaOptionsModal] = useState(false);
+  const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
   const [mpesaSearchTerm, setMpesaSearchTerm] = useState("");
   const [mpesaRegisterPayments, setMpesaRegisterPayments] = useState<MpesaRegisterPayment[]>([]);
   const [mpesaRegisterCount, setMpesaRegisterCount] = useState(0);
   const [selectedMpesaPayments, setSelectedMpesaPayments] = useState<MpesaRegisterPayment[]>([]);
-  const [mergeMpesaPayments, setMergeMpesaPayments] = useState(true);
   const [isLoadingMpesaRegisterPayments, setIsLoadingMpesaRegisterPayments] = useState(false);
   const [loyaltyPointsInput, setLoyaltyPointsInput] = useState("");
   const [appliedLoyalty, setAppliedLoyalty] = useState<AppliedLoyaltyRedemption | null>(null);
@@ -456,6 +457,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         enabled: true,
         amount: paymentAmounts[mode.mode_of_payment] || 0,
         type: mode.type || "",
+        isDefault: mode.default === 1,
+        idx: mode.idx,
       };
     });
   }, [modes, paymentAmounts]);
@@ -854,7 +857,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         mode_of_payment: activeMpesaPayment.method,
         auto_save: 1,
         auto_submit: 0,
-        merge_payments: mergeMpesaPayments ? 1 : 0,
       });
 
       setPaymentAmounts((prev) => ({
@@ -1186,6 +1188,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       cancelled = true;
     };
   }, [showMpesaOptionsModal, posCompanyName, posProfileName, mpesaSearchTerm, getActiveMpesaPayment]);
+
+  useEffect(() => {
+    if (!showMpesaOptionsModal) return;
+    mpesaOptionsPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [showMpesaOptionsModal]);
 
   useEffect(() => {
     if (mpesaFlow?.source !== "stk" || !mpesaFlow?.requestName) return;
@@ -2136,7 +2143,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                           </div>
                         )}
                       </div>
-                    ) : undefined
+                    ) : (
+                      // Rendered inert rather than hidden: a control that simply vanishes cannot
+                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
+                      // button emits no click, so the explanation would never fire.
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() =>
+                          toast.info(
+                            posDetails?.name
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
+                      >
+                        Is Credit Sale
+                      </button>
+                    )
                   }
                 />
                 {renderLoyaltyRedemption()}
@@ -2270,14 +2295,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           pendingCount={mpesaRegisterCount}
           selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
           selectedTotal={selectedMpesaTotal}
-          mergePayments={mergeMpesaPayments}
           isLoadingPayments={isLoadingMpesaRegisterPayments}
           isProcessing={isProcessingPayment}
           onClose={() => setShowMpesaOptionsModal(false)}
           onPhoneNumberChange={setMpesaPhoneNumber}
           onSearchChange={setMpesaSearchTerm}
           onTogglePayment={handleToggleMpesaPayment}
-          onToggleMergePayments={setMergeMpesaPayments}
           onInitiateStk={() => void handleInitiateMpesaPayment()}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
@@ -2286,8 +2309,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-[60] bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -2297,6 +2319,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           isProcessingPayment={isProcessingPayment}
           isHoldingOrder={isHoldingOrder}
           onClose={onClose}
+          backLabel={backLabel}
           handleViewInvoice={handleViewInvoice}
           finalizeCompletedOrderState={(afterClear) => {
             void finalizeCompletedOrderState(afterClear);
@@ -2306,7 +2329,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         />
 
         <div className="flex flex-1 min-h-0">
-          <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar space-y-6">
+          <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-6">
             {invoiceSubmitted && sharingMode ? (
               <SharingInterface
                 sharingMode={sharingMode}
@@ -2376,7 +2399,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                           </div>
                         )}
                       </div>
-                    ) : undefined
+                    ) : (
+                      // Rendered inert rather than hidden: a control that simply vanishes cannot
+                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
+                      // button emits no click, so the explanation would never fire.
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() =>
+                          toast.info(
+                            posDetails?.name
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
+                      >
+                        Is Credit Sale
+                      </button>
+                    )
                   }
                 />
 
@@ -2451,10 +2492,36 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 />
               </>
             )}
+
+            <div ref={mpesaOptionsPanelRef}>
+              <MpesaOptionsModal
+                isOpen={showMpesaOptionsModal}
+                modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
+                amount={getActiveMpesaPayment()?.amount || 0}
+                phoneNumber={mpesaPhoneNumber}
+                currencySymbol={displayCurrencySymbol}
+                searchTerm={mpesaSearchTerm}
+                payments={mpesaRegisterPayments}
+                pendingCount={mpesaRegisterCount}
+                selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
+                selectedTotal={selectedMpesaTotal}
+                isLoadingPayments={isLoadingMpesaRegisterPayments}
+                isProcessing={isProcessingPayment}
+                onClose={() => setShowMpesaOptionsModal(false)}
+                onPhoneNumberChange={setMpesaPhoneNumber}
+                onSearchChange={setMpesaSearchTerm}
+                onTogglePayment={handleToggleMpesaPayment}
+                onInitiateStk={() => void handleInitiateMpesaPayment()}
+                onAddPayments={() => void handleReconcileMpesaPayments()}
+                variant="panel"
+              />
+            </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-600 flex-1 overflow-y-auto custom-scrollbar">
+          <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">
             <InvoicePreview
+              itemDiscounts={itemDiscounts}
+              isTaxIncludedInBasicRate={isTaxIncludedInBasicRate}
               invoiceSubmitted={invoiceSubmitted}
               invoiceData={invoiceData}
               submittedInvoice={submittedInvoice}
@@ -2528,35 +2595,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             </div>
           </div>
         </div>
-      </div>
 
       <DeliveryPersonnelModal
         isOpen={showDeliveryPersonnelModal}
         onClose={() => setShowDeliveryPersonnelModal(false)}
         onSelect={(name) => setSelectedDeliveryPersonnel(name)}
-      />
-
-      <MpesaOptionsModal
-        isOpen={showMpesaOptionsModal}
-        modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
-        amount={getActiveMpesaPayment()?.amount || 0}
-        phoneNumber={mpesaPhoneNumber}
-        currencySymbol={displayCurrencySymbol}
-        searchTerm={mpesaSearchTerm}
-        payments={mpesaRegisterPayments}
-        pendingCount={mpesaRegisterCount}
-        selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
-        selectedTotal={selectedMpesaTotal}
-        mergePayments={mergeMpesaPayments}
-        isLoadingPayments={isLoadingMpesaRegisterPayments}
-        isProcessing={isProcessingPayment}
-        onClose={() => setShowMpesaOptionsModal(false)}
-        onPhoneNumberChange={setMpesaPhoneNumber}
-        onSearchChange={setMpesaSearchTerm}
-        onTogglePayment={handleToggleMpesaPayment}
-        onToggleMergePayments={setMergeMpesaPayments}
-        onInitiateStk={() => void handleInitiateMpesaPayment()}
-        onAddPayments={() => void handleReconcileMpesaPayments()}
       />
     </div>
   );

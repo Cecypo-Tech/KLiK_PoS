@@ -13,16 +13,16 @@ interface MpesaOptionsModalProps {
   pendingCount: number;
   selectedPaymentNames: string[];
   selectedTotal: number;
-  mergePayments: boolean;
   isLoadingPayments: boolean;
   isProcessing: boolean;
   onClose: () => void;
   onPhoneNumberChange: (value: string) => void;
   onSearchChange: (value: string) => void;
   onTogglePayment: (paymentName: string) => void;
-  onToggleMergePayments: (checked: boolean) => void;
   onInitiateStk: () => void;
   onAddPayments: () => void;
+  /** "modal" keeps the overlay (mobile). "panel" renders inline for the full-screen desktop checkout. */
+  variant?: "modal" | "panel";
 }
 
 export default function MpesaOptionsModal({
@@ -36,22 +36,26 @@ export default function MpesaOptionsModal({
   pendingCount,
   selectedPaymentNames,
   selectedTotal,
-  mergePayments,
   isLoadingPayments,
   isProcessing,
   onClose,
   onPhoneNumberChange,
   onSearchChange,
   onTogglePayment,
-  onToggleMergePayments,
   onInitiateStk,
   onAddPayments,
+  variant = "modal",
 }: MpesaOptionsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className={variant === "panel"
+      ? "w-full"
+      : "fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4"}>
+      <div className={variant === "panel"
+        ? "w-full rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 overflow-hidden"
+        : "w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"}>
+
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">M-Pesa Payment Options</h2>
@@ -169,16 +173,6 @@ export default function MpesaOptionsModal({
                 })
               )}
             </div>
-
-            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={mergePayments}
-                onChange={(event) => onToggleMergePayments(event.target.checked)}
-                disabled={isProcessing}
-              />
-              <span>Merge selected payments into one row</span>
-            </label>
 
             <div className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
               <span className="text-gray-600 dark:text-gray-300">Selected total</span>

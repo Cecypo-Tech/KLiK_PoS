@@ -11,6 +11,8 @@ export interface PaymentDialogProps {
   onHoldOrder: (orderData: any) => void;
   isMobile?: boolean;
   isFullPage?: boolean;
+  /** Names where the back control returns to, e.g. "Back to cart". Defaults to "Back". */
+  backLabel?: string;
   initialSharingMode?: string | null;
   externalInvoiceData?: any;
   itemDiscounts?: any;
@@ -25,6 +27,10 @@ export interface PaymentMethod {
   enabled: boolean;
   amount: number;
   type?: string; // mode_of_payment type: Cash | Bank | Phone | General (cheque by name)
+  /** POS Profile default mode. Always shown as a row. */
+  isDefault?: boolean;
+  /** Position in the POS Profile payments table. */
+  idx?: number;
 }
 
 export interface PaymentAmount {

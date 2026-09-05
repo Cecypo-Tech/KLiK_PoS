@@ -1,4 +1,6 @@
 import { formatCurrencyWithSymbol } from "../../utils/currency";
+import { getEffectiveItemRate, type DiscountMapLike } from "../../utils/cartPricing";
+import { roundCurrency } from "../../utils/currencyMath";
 import type { Calculations, PaymentAmount } from "./types";
 import type { CartItem } from "../../../types";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -20,6 +22,10 @@ interface InvoicePreviewProps {
   isB2B: boolean;
   isB2C: boolean;
   currentDate: string;
+  /** Per-item discounts and custom rates, needed to resolve the effective rate. */
+  itemDiscounts?: DiscountMapLike;
+  /** POS Profile is_tax_included_in_basic_rate — decides whether a rate carries tax. */
+  isTaxIncludedInBasicRate?: boolean;
 }
 
 export default function InvoicePreview({
@@ -39,6 +45,8 @@ export default function InvoicePreview({
   isB2B,
   isB2C,
   currentDate,
+  itemDiscounts = {},
+  isTaxIncludedInBasicRate = false,
 }: InvoicePreviewProps) {
   if (invoiceSubmitted && invoiceData) {
     return (
@@ -70,19 +78,26 @@ export default function InvoicePreview({
 
       <div className="space-y-2 mb-4">
         {cartItems.length > 0 ? (
-          cartItems.map((item, index) => (
+          cartItems.map((item, index) => {
+            // item.price is the price-list rate. A manually keyed rate, a percentage
+            // discount or a discount amount all live elsewhere, so a service item with
+            // no price list rendered "0.00" here while the Subtotal below it — which
+            // does go through this util — was correct.
+            const lineRate = getEffectiveItemRate(item, { itemDiscounts, isTaxIncludedInBasicRate });
+            return (
             <div key={index} className="flex justify-between text-sm">
               <div className="flex-1">
                 <p className="font-medium text-gray-900 dark:text-white">{item.name}</p>
                 <p className="text-gray-600 dark:text-gray-400">
-                  {item.quantity} x {formatCurrencyWithSymbol(item.price, displayCurrencySymbol)}
+                  {item.quantity} x {formatCurrencyWithSymbol(lineRate, displayCurrencySymbol)}
                 </p>
               </div>
               <p className="font-medium text-gray-900 dark:text-white">
-                {formatCurrencyWithSymbol(item.quantity * item.price, displayCurrencySymbol)}
+                {formatCurrencyWithSymbol(roundCurrency(item.quantity * lineRate), displayCurrencySymbol)}
               </p>
             </div>
-          ))
+            );
+          })
         ) : (
           <div className="space-y-4">
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">

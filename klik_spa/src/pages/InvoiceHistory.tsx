@@ -1446,6 +1446,7 @@ const getStatusBadge = (status: string) => {
         {showDraftPaymentDialog && (
           <PaymentDialog
             isOpen={showDraftPaymentDialog}
+            backLabel="Back to list"
             onClose={(paymentCompleted) => {
               setShowDraftPaymentDialog(false);
               if (paymentCompleted) {
