@@ -6,7 +6,7 @@ from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profi
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 
 from klik_pos.api.mpesa import process_mpesa
-from klik_pos.api.sales_invoice import submit_draft_invoice
+from klik_pos.api.sales_invoice import get_sales_invoices, submit_draft_invoice
 
 
 class TestProcessMpesa(FrappeTestCase):
@@ -669,3 +669,46 @@ class TestProcessMpesa(FrappeTestCase):
 		)
 		by_mode = {r.mode_of_payment: flt(r.total) for r in rows}
 		self.assertEqual(by_mode.get("Cash"), 100)
+
+	def test_three_same_mode_receipts_show_one_mode_in_invoice_list(self):
+		"""Three M-Pesa receipts reconciled onto one invoice all land under the
+		same mode of payment (per test_each_reconciled_receipt_becomes_its_own_
+		payment_row above: three rows, one mode each equal to "Cash" here).
+		`get_sales_invoices` -- which feeds Invoice History and Closing Shift --
+		used to assume a row count above one meant a genuine split across modes
+		and joined the raw rows into "Cash/Cash/Cash". That string no longer
+		equals any Mode of Payment name, so the till's mode filter (strict
+		equality against the dropdown) silently dropped every multi-receipt
+		same-mode sale. It must instead dedupe to the bare mode, "Cash".
+		"""
+		invoice = self._draft_invoice(rate=300)
+		invoice.insert(ignore_permissions=True)
+		rows = [
+			self._make_c2b_payment(amount=100, msisdn=f"25470000020{i}") for i in range(1, 4)
+		]
+
+		result = process_mpesa(
+			doctype="Sales Invoice",
+			invoice_name=invoice.name,
+			customer=self.customer,
+			mpesa_payments=",".join(r.name for r in rows),
+			mode_of_payment="Cash",
+			auto_save=1,
+			auto_submit=1,
+		)
+		self.assertTrue(result["submitted"])
+
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(len(invoice.payments), 3)
+
+		listing = get_sales_invoices(skip_opening_entry_filter=True, search=invoice.name)
+		self.assertTrue(listing["success"])
+		matches = [inv for inv in listing["data"] if inv["name"] == invoice.name]
+		self.assertEqual(len(matches), 1)
+		self.assertEqual(
+			matches[0]["mode_of_payment"],
+			"Cash",
+			"three same-mode rows must dedupe to the bare mode, not join into "
+			"a repeated string that no longer matches the Mode of Payment filter",
+		)
