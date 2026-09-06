@@ -20,11 +20,11 @@ export const MULTI_INVOICE_RETURN_ENABLED = false;
 
 /**
  * Sales Dashboard v2 — the server-aggregated page that balances billed against collected
- * and deni, replacing the client-side sums of the original.
+ * and credit, replacing the client-side sums of the original.
  *
  * OFF until the validation script has been run against a real closed shift on the site
  * being deployed to: the point of v2 is that its numbers can be checked, so it should not
  * be turned on anywhere they have not been. The old page keeps serving meanwhile, and is
  * deleted a week after the deploy that flips this.
  */
-export const DASHBOARD_V2_ENABLED = false;
+export const DASHBOARD_V2_ENABLED = true;
