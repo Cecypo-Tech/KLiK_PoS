@@ -34,9 +34,9 @@ export interface DashboardIdentity {
   collected: number;
   collected_at_sale: number;
   collected_later: number;
-  deni: number;
-  deni_invoices: number;
-  deni_customers: number;
+  credit: number;
+  credit_invoices: number;
+  credit_customers: number;
   refunds_owed: number;
   write_off: number;
   unexplained: number;
@@ -214,8 +214,8 @@ export function contextParts(
   const { identity, scope } = summary;
   const parts: string[] = [`${identity.invoices} sale${identity.invoices === 1 ? "" : "s"}`];
 
-  if (identity.deni_invoices > 0) {
-    parts.push(`${identity.deni_invoices} on credit`);
+  if (identity.credit_invoices > 0) {
+    parts.push(`${identity.credit_invoices} on credit`);
   }
   if (identity.returns > 0) {
     parts.push(

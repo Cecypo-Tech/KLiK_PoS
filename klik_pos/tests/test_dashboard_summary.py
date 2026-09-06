@@ -5,7 +5,7 @@ replaces:
 
 1. Every submitted invoice in scope is counted - the old page summed the 100 most recently
    modified invoices, so a busy till saw an arbitrary total rather than a slightly wrong one.
-2. Credit sales are money too. Deni carries no `Sales Invoice Payment` rows, so it was in
+2. Credit sales are money too. Credit carries no `Sales Invoice Payment` rows, so it was in
    headline revenue and absent from the payment breakdown; the identity below is what makes
    that impossible to reintroduce.
 3. Money collected after the sale, through a Payment Entry, is attributed to the invoice's
@@ -15,7 +15,7 @@ The invoices are seeded into a date window years away from any real data on the 
 the window is asserted empty before seeding - a shared dev site is exactly where a test
 that quietly measures somebody else's invoices passes while proving nothing.
 
-Deni and return invoices are created as ordinary Sales Invoices with the POS profile
+Credit and return invoices are created as ordinary Sales Invoices with the POS profile
 stamped on afterwards. Writing them through the POS builder would test the checkout, not
 the aggregation, and would drag the profile's partial-payment flag into a test that has
 nothing to do with it.
@@ -144,7 +144,7 @@ class TestDashboardSummary(FrappeTestCase):
 		super().setUpClass()
 
 		baseline = _summary()
-		if baseline["identity"]["billed"] or baseline["identity"]["deni"]:
+		if baseline["identity"]["billed"] or baseline["identity"]["credit"]:
 			raise AssertionError(
 				f"the seed window {DAY_ONE}..{DAY_TWO} already holds invoices "
 				f"({baseline['identity']}); every expectation below would be measuring them too"
@@ -156,7 +156,7 @@ class TestDashboardSummary(FrappeTestCase):
 		cls.split = _invoice(DAY_ONE, [(1, 200), (2, 25)], shares=[0.4, 0.6])
 		cls.day_two = _invoice(DAY_TWO, [(3, 30), (1, 10)], shares=[1.0])
 
-		cls.deni = _invoice(DAY_ONE, [(1, 300), (1, 100)], is_pos=False)
+		cls.credit_sale = _invoice(DAY_ONE, [(1, 300), (1, 100)], is_pos=False)
 		cls.settled_later = _invoice(DAY_TWO, [(1, 500), (1, 100)], is_pos=False)
 		cls.later_payment = _settle(cls.settled_later, 250, "Cheque")
 
@@ -185,7 +185,7 @@ class TestDashboardSummary(FrappeTestCase):
 
 		cls.outside = _invoice(OUTSIDE, [(1, 4242)], shares=[1.0])
 
-		for doc in (cls.cash, cls.split, cls.day_two, cls.deni, cls.settled_later, cls.refund_owed):
+		for doc in (cls.cash, cls.split, cls.day_two, cls.credit_sale, cls.settled_later, cls.refund_owed):
 			doc.reload()
 
 		cls.summary = _summary()
@@ -199,17 +199,17 @@ class TestDashboardSummary(FrappeTestCase):
 	def test_billed_counts_every_submitted_invoice_in_the_window(self):
 		expected = sum(
 			_payable(doc)
-			for doc in (self.cash, self.split, self.day_two, self.deni, self.settled_later, self.refund_owed)
+			for doc in (self.cash, self.split, self.day_two, self.credit_sale, self.settled_later, self.refund_owed)
 		)
 
 		self.assertAlmostEqual(self.summary["identity"]["billed"], flt(expected, 2), places=2)
 
-	def test_a_credit_sale_is_reported_as_deni(self):
+	def test_a_credit_sale_is_reported_as_credit(self):
 		identity = self.summary["identity"]
-		expected = _payable(self.deni) + (_payable(self.settled_later) - 250)
+		expected = _payable(self.credit_sale) + (_payable(self.settled_later) - 250)
 
-		self.assertAlmostEqual(identity["deni"], flt(expected, 2), places=2)
-		self.assertEqual(identity["deni_invoices"], 2)
+		self.assertAlmostEqual(identity["credit"], flt(expected, 2), places=2)
+		self.assertEqual(identity["credit_invoices"], 2)
 
 	def test_money_collected_later_is_credited_to_the_invoice_s_range(self):
 		identity = self.summary["identity"]
@@ -269,7 +269,7 @@ class TestDashboardSummary(FrappeTestCase):
 
 	def test_narrowing_to_one_day_narrows_the_money(self):
 		day_one = _summary(date_to=DAY_ONE)
-		expected = sum(_payable(doc) for doc in (self.cash, self.split, self.deni))
+		expected = sum(_payable(doc) for doc in (self.cash, self.split, self.credit_sale))
 
 		self.assertAlmostEqual(day_one["identity"]["billed"], flt(expected, 2), places=2)
 		self.assertEqual(day_one["identity"]["unexplained"], 0.0)
@@ -322,10 +322,18 @@ class TestDashboardSummaryScopeAndPermissions(FrappeTestCase):
 				company=COMPANY, date_range="custom", date_from=DAY_TWO, date_to=DAY_ONE
 			)
 
-	def test_a_custom_range_longer_than_a_quarter_is_refused(self):
+	def test_a_year_to_date_range_is_allowed(self):
+		"""The cap guards the database, not the reader's questions; a year must fit."""
+		summary = get_dashboard_summary(
+			company=COMPANY, date_range="custom", date_from="2019-01-01", date_to="2019-12-31"
+		)
+
+		self.assertEqual(summary["scope"]["date_from"], "2019-01-01")
+
+	def test_a_custom_range_longer_than_a_year_is_refused(self):
 		with self.assertRaises(frappe.ValidationError):
 			get_dashboard_summary(
-				company=COMPANY, date_range="custom", date_from="2019-01-01", date_to="2019-12-31"
+				company=COMPANY, date_range="custom", date_from="2018-01-01", date_to="2019-12-31"
 			)
 
 	def test_a_profile_of_another_company_is_refused_not_dropped(self):

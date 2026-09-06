@@ -47,9 +47,9 @@ const summary = (over: Partial<DashboardSummary["scope"]> = {}, identity: Partia
       collected: 0,
       collected_at_sale: 0,
       collected_later: 0,
-      deni: 0,
-      deni_invoices: 0,
-      deni_customers: 0,
+      credit: 0,
+      credit_invoices: 0,
+      credit_customers: 0,
       refunds_owed: 0,
       write_off: 0,
       unexplained: 0,
@@ -202,7 +202,7 @@ describe("contextParts", () => {
 
   it("counts credit sales and returns when there are any", () => {
     const parts = contextParts(
-      summary({ date_from: "2026-09-06", date_to: "2026-09-06" }, { deni_invoices: 2, returns: 1, returns_total: -100 }),
+      summary({ date_from: "2026-09-06", date_to: "2026-09-06" }, { credit_invoices: 2, returns: 1, returns_total: -100 }),
       money
     );
     expect(parts).toEqual(["7 sales", "2 on credit", "1 return (KES -100.00)", "2026-09-06"]);

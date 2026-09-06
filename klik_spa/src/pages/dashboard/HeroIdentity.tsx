@@ -8,7 +8,7 @@ interface Props {
 }
 
 /**
- * Billed, collected, deni — the three figures that answer "where is my money", and the one
+ * Billed, collected, credit — the three figures that answer "where is my money", and the one
  * line that ties them together. The old page led with revenue alone, which said nothing
  * about whether the money had actually arrived.
  */
@@ -23,14 +23,14 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
           note={identity.collected_later ? `${formatMoney(identity.collected_later)} on account` : undefined}
         />
         <Figure
-          label="Deni"
-          value={formatMoney(identity.deni)}
+          label="Credit"
+          value={formatMoney(identity.credit)}
           note={
-            identity.deni_invoices
-              ? `${identity.deni_invoices} invoice${identity.deni_invoices === 1 ? "" : "s"}, ${identity.deni_customers} customer${identity.deni_customers === 1 ? "" : "s"}`
+            identity.credit_invoices
+              ? `${identity.credit_invoices} invoice${identity.credit_invoices === 1 ? "" : "s"}, ${identity.credit_customers} customer${identity.credit_customers === 1 ? "" : "s"}`
               : undefined
           }
-          tone={identity.deni ? "warn" : undefined}
+          tone={identity.credit ? "warn" : undefined}
         />
       </div>
 
@@ -47,7 +47,8 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {formatMoney(identity.unexplained)} is unaccounted for. Billed should equal collected
-            plus deni; a difference here is a data problem worth chasing, not a rounding artefact.
+            plus credit; a difference here is a data problem worth chasing, not a rounding
+            artefact.
           </span>
         </p>
       )}

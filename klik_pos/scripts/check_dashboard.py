@@ -94,7 +94,7 @@ def _naive_closing_totals(opening_entry):
 
 def _report(summary, invoice_names):
 	"""Recompute the identity from the documents themselves and print every difference."""
-	billed = billed_gross = deni = refunds = write_off = 0.0
+	billed = billed_gross = credit = refunds = write_off = 0.0
 	at_sale: dict[str, float] = {}
 	change = 0.0
 
@@ -112,7 +112,7 @@ def _report(summary, invoice_names):
 
 		outstanding = flt(doc.outstanding_amount) * (flt(doc.conversion_rate) or 1)
 		if outstanding > 0.001:
-			deni += outstanding
+			credit += outstanding
 		elif doc.is_return and outstanding < -0.001:
 			refunds += -outstanding
 
@@ -163,7 +163,7 @@ def _report(summary, invoice_names):
 	check("billed_gross", identity["billed_gross"], billed_gross)
 	check("collected_at_sale", identity["collected_at_sale"], sum(at_sale.values()))
 	check("collected_later", identity["collected_later"], sum(later.values()))
-	check("deni", identity["deni"], deni)
+	check("credit", identity["credit"], credit)
 	check("refunds_owed", identity["refunds_owed"], refunds)
 	check("write_off", identity["write_off"], write_off)
 	check("unexplained (must be 0)", identity["unexplained"], 0)

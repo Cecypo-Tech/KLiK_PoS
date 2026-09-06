@@ -2,15 +2,15 @@
 
 The old dashboard fetched the 100 most recently modified invoices and summed them in the
 browser, so a till past its hundredth sale of the period showed an arbitrary total rather
-than a slightly wrong one. Worse, the money never balanced: unpaid (deni) invoices carry
-no `Sales Invoice Payment` rows, so credit sales sat in headline revenue and were absent
+than a slightly wrong one. Worse, the money never balanced: unpaid (credit) invoices carry
+no `Sales Invoice Payment` rows, so unpaid sales sat in headline revenue and were absent
 from the payment breakdown, and the two figures were sourced differently by construction
 - revenue from `grand_total` (billed), percentages from payment rows (collected).
 
 This module answers the whole page from one call, in company currency, over any range and
 any set of the caller's tills, and holds itself to an identity the reader can check:
 
-    billed == collected_at_sale + collected_later + deni - refunds_owed + write_off
+    billed == collected_at_sale + collected_later + credit - refunds_owed + write_off
 
 The residual is returned as `identity.unexplained` instead of being hidden. Every term
 comes from the same set of invoices, so a nonzero residual is a data bug worth chasing,
@@ -33,7 +33,11 @@ from frappe.utils import add_days, add_to_date, flt, get_first_day, getdate, now
 from klik_pos.api.sales_invoice import _can_view_sales_dashboard
 
 VALID_RANGES = ("shift", "today", "week", "month", "custom")
-MAX_CUSTOM_RANGE_DAYS = 92
+
+# A year. The cap exists so one mistyped date cannot ask the till's database to scan its
+# whole history mid-shift, not to tell an owner which windows are worth looking at - the
+# original quarter refused an ordinary year-to-date question.
+MAX_CUSTOM_RANGE_DAYS = 366
 
 # The threshold api/customer.py already uses to call a balance settled, restated here so
 # a rounding remainder of a cent is not reported as an unpaid credit sale.
@@ -110,9 +114,9 @@ def get_dashboard_summary(
 		"collected": flt(collected_at_sale + collected_later, 2),
 		"collected_at_sale": flt(collected_at_sale, 2),
 		"collected_later": flt(collected_later, 2),
-		"deni": flt(billed["deni"], 2),
-		"deni_invoices": int(billed["credit_invoices"]),
-		"deni_customers": int(billed["credit_customers"]),
+		"credit": flt(billed["credit"], 2),
+		"credit_invoices": int(billed["credit_invoices"]),
+		"credit_customers": int(billed["credit_customers"]),
 		"refunds_owed": flt(billed["refunds_owed"], 2),
 		"write_off": flt(billed["write_off"], 2),
 		"invoices": int(billed["invoices"]),
@@ -124,7 +128,7 @@ def get_dashboard_summary(
 		identity["billed"]
 		- identity["collected_at_sale"]
 		- identity["collected_later"]
-		- identity["deni"]
+		- identity["credit"]
 		+ identity["refunds_owed"]
 		- identity["write_off"],
 		2,
@@ -311,9 +315,9 @@ def _empty_response(company, scope) -> dict:
 			"collected": 0.0,
 			"collected_at_sale": 0.0,
 			"collected_later": 0.0,
-			"deni": 0.0,
-			"deni_invoices": 0,
-			"deni_customers": 0,
+			"credit": 0.0,
+			"credit_invoices": 0,
+			"credit_customers": 0,
 			"refunds_owed": 0.0,
 			"write_off": 0.0,
 			"unexplained": 0.0,
@@ -362,7 +366,7 @@ def _billed(condition: str, params: dict) -> dict:
 			COALESCE(SUM(si.base_write_off_amount), 0) AS write_off,
 			COALESCE(SUM(CASE WHEN si.outstanding_amount > %(eps)s
 				THEN si.outstanding_amount * COALESCE(NULLIF(si.conversion_rate, 0), 1)
-				ELSE 0 END), 0) AS deni,
+				ELSE 0 END), 0) AS credit,
 			COALESCE(SUM(CASE WHEN si.is_return = 1 AND si.outstanding_amount < -%(eps)s
 				THEN -si.outstanding_amount * COALESCE(NULLIF(si.conversion_rate, 0), 1)
 				ELSE 0 END), 0) AS refunds_owed,
@@ -408,7 +412,7 @@ def _collected_at_sale(condition: str, params: dict) -> tuple[list, float]:
 
 
 def _collected_later(condition: str, params: dict) -> list:
-	"""Deni settled afterwards, by the mode it was settled in.
+	"""Credit settled afterwards, by the mode it was settled in.
 
 	Only the amount allocated to an in-scope invoice counts: one Payment Entry can settle
 	several invoices, and counting its `paid_amount` would credit this shift with money
