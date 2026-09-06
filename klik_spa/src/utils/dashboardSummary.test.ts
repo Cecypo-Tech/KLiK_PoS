@@ -5,6 +5,7 @@ import {
   contextParts,
   exceptionHref,
   exceptionLabel,
+  exceptionsCoverMoreThanScope,
   fillHourGaps,
   isExternalHref,
   isScopeComplete,
@@ -312,5 +313,33 @@ describe("fillHourGaps", () => {
 
   it("stays empty when nothing sold", () => {
     expect(fillHourGaps([])).toEqual([]);
+  });
+});
+
+describe("exceptionsCoverMoreThanScope", () => {
+  const withScope = (profiles: string[], available: string[], exceptions = 1) =>
+    ({
+      ...summary({ pos_profiles: profiles, available_profiles: available }),
+      exceptions: Array.from({ length: exceptions }, () => ({
+        key: "failed_submissions",
+        count: 1,
+        link: null,
+      })),
+      exceptions_cover_company: true,
+    }) as DashboardSummary;
+
+  it("warns when the reader narrowed to some of the tills", () => {
+    expect(exceptionsCoverMoreThanScope(withScope(["Till 1"], ["Till 1", "Till 2"]))).toBe(true);
+  });
+
+  it("stays quiet when every till is already in scope", () => {
+    expect(exceptionsCoverMoreThanScope(withScope([], ["Till 1", "Till 2"]))).toBe(false);
+    expect(
+      exceptionsCoverMoreThanScope(withScope(["Till 1", "Till 2"], ["Till 1", "Till 2"]))
+    ).toBe(false);
+  });
+
+  it("stays quiet when there is nothing to report", () => {
+    expect(exceptionsCoverMoreThanScope(withScope(["Till 1"], ["Till 1", "Till 2"], 0))).toBe(false);
   });
 });

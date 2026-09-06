@@ -85,6 +85,8 @@ export interface DashboardSummary {
   identity: DashboardIdentity;
   collected_by_mode: ModeRow[];
   exceptions: ExceptionRow[];
+  /** Exceptions are counted for the whole company, not only the tills in scope. */
+  exceptions_cover_company: boolean;
   performance: DashboardPerformance;
 }
 
@@ -260,6 +262,20 @@ export function fillHourGaps(
     filled.push(byHour.get(hour) ?? { hour, amount: 0, count: 0 });
   }
   return filled;
+}
+
+/**
+ * Whether the exception strip is reporting on more tills than the reader selected.
+ *
+ * The money answers for the chosen tills; the exceptions answer for the shop, so that work
+ * stranded on a renamed or deleted till cannot hide. Where the two differ the strip has to
+ * say so, or a manager looking at one till reads another till's failures as their own.
+ */
+export function exceptionsCoverMoreThanScope(summary: DashboardSummary): boolean {
+  const { scope } = summary;
+  if (!summary.exceptions_cover_company || summary.exceptions.length === 0) return false;
+  const selected = scope.pos_profiles.length;
+  return selected > 0 && selected < scope.available_profiles.length;
 }
 
 /** The earliest start among the open shifts, as HH:MM. */

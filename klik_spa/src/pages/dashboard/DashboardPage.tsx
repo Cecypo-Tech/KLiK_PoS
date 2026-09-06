@@ -8,6 +8,7 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import {
   contextParts,
+  exceptionsCoverMoreThanScope,
   isExternalHref,
   readStoredScope,
   todayIso,
@@ -128,7 +129,11 @@ export default function DashboardPage() {
                   onNavigate={openLink}
                 />
               </div>
-              <ExceptionStrip exceptions={summary.exceptions} onNavigate={openLink} />
+              <ExceptionStrip
+                exceptions={summary.exceptions}
+                coversMoreThanScope={exceptionsCoverMoreThanScope(summary)}
+                onNavigate={openLink}
+              />
             </div>
 
             <PerformanceTier

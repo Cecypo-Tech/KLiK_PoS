@@ -139,6 +139,7 @@ def get_dashboard_summary(
 		"identity": identity,
 		"collected_by_mode": mode_rows,
 		"exceptions": _exceptions(company, scope, mpesa["unmapped"]),
+		"exceptions_cover_company": True,
 		"performance": _performance(condition, params, billed),
 	}
 
@@ -328,6 +329,7 @@ def _empty_response(company, scope) -> dict:
 		},
 		"collected_by_mode": [],
 		"exceptions": [],
+		"exceptions_cover_company": True,
 		"performance": {
 			"kpis": {"revenue": 0.0, "invoices": 0, "average": 0.0, "items": 0.0},
 			"hourly": [],
@@ -562,16 +564,21 @@ def _shortcode_to_mode(company: str) -> dict:
 def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 	"""Only what is actually wrong, each row carrying where to go and see it.
 
-	Counts are deliberately not date-scoped: a submission that failed on Friday is still
-	unresolved on Monday, and a dashboard that hides it once the range moves on is how it
-	stays unresolved.
+	Counted across the whole company rather than the tills the reader picked, and never
+	date-scoped. Both narrowings hide the same way: a submission that failed on Friday is
+	still unresolved on Monday, and work stranded on a till that was renamed, disabled or
+	deleted is the work most likely to be forgotten - on dev, six queued drafts sat on a
+	"POS Profile A" that no longer exists, invisible behind a per-till filter while Invoice
+	History listed them plainly.
+
+	So the money above answers for the tills you chose; this strip answers for the shop.
+	The client says so when the two differ.
 	"""
-	profiles = scope["pos_profiles"]
 	rows = []
 
 	failed = frappe.db.count(
 		"Sales Invoice",
-		{"docstatus": 0, "queue_status": "Failed", "pos_profile": ["in", profiles], "company": company},
+		{"docstatus": 0, "queue_status": "Failed", "company": company},
 	)
 	if failed:
 		rows.append(
@@ -587,7 +594,6 @@ def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 		{
 			"docstatus": 0,
 			"queue_status": ["in", ["Queued", "Processing"]],
-			"pos_profile": ["in", profiles],
 			"company": company,
 		},
 	)
@@ -618,15 +624,22 @@ def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 			}
 		)
 
-	stale_shifts = frappe.db.count(
-		"POS Opening Entry",
+	# A shift counts as this shop's if either its company or its till says so. They can
+	# disagree - dev has two open entries on a Dev Co till stamped "Wind Power LLC" - and
+	# trusting only the company field drops shifts that are plainly on your own counter.
+	stale_shifts = frappe.db.sql(
+		"""
+		SELECT COUNT(*)
+		FROM `tabPOS Opening Entry`
+		WHERE status = 'Open' AND docstatus = 1 AND period_start_date < %(today)s
+			AND (company = %(company)s OR pos_profile IN %(profiles)s)
+		""",
 		{
-			"status": "Open",
-			"docstatus": 1,
-			"pos_profile": ["in", profiles],
-			"period_start_date": ["<", nowdate()],
+			"today": nowdate(),
+			"company": company,
+			"profiles": tuple(scope.get("available_profiles") or [""]) or ("",),
 		},
-	)
+	)[0][0]
 	if stale_shifts:
 		rows.append({"key": "shifts_open_past_today", "count": stale_shifts, "link": None})
 

@@ -387,7 +387,7 @@ def _no_open_shifts(doctype, *args, **kwargs):
 _real_get_all = frappe.get_all
 
 
-def _draft_invoice(queue_status):
+def _draft_invoice(queue_status, pos_profile=PROFILE):
 	si = frappe.new_doc("Sales Invoice")
 	si.update(
 		{
@@ -401,7 +401,15 @@ def _draft_invoice(queue_status):
 	)
 	si.append("items", {"item_code": ITEM, "qty": 1, "rate": 10})
 	si.insert(ignore_permissions=True)
-	frappe.db.set_value("Sales Invoice", si.name, "queue_status", queue_status, update_modified=False)
+	# Written at DB level so a till that no longer exists can be stamped on: that is exactly
+	# the state a renamed or deleted POS Profile leaves its unfinished sales in.
+	frappe.db.set_value(
+		"Sales Invoice",
+		si.name,
+		{"queue_status": queue_status, "pos_profile": pos_profile},
+		update_modified=False,
+	)
+	si.reload()
 	return si
 
 
@@ -432,9 +440,9 @@ class TestDashboardExceptions(FrappeTestCase):
 
 	A dev or staging site already carries stale held orders and shifts somebody left open;
 	asserting absolute counts here would pin this test to that mess and fail the first time
-	anybody cleaned it up. The counts are deliberately not date-scoped in the endpoint - a
-	submission that failed on Friday is still unresolved on Monday, and a page that hides it
-	once the range moves on is how it stays unresolved.
+	anybody cleaned it up. The counts are deliberately neither date-scoped nor till-scoped in
+	the endpoint - a submission that failed on Friday is still unresolved on Monday, and a
+	sale stranded on a till that was since renamed is the one most likely to be forgotten.
 	"""
 
 	@classmethod
@@ -447,6 +455,8 @@ class TestDashboardExceptions(FrappeTestCase):
 		cls.processing = _draft_invoice("Processing")
 		cls.stale_hold = _held_order(hours_old=5)
 		cls.fresh_hold = _held_order(hours_old=0)
+		# The regression: a till that is gone from the POS Profile list entirely.
+		cls.orphaned = _draft_invoice("Failed", pos_profile=f"Deleted Till {frappe.generate_hash(length=6)}")
 
 		cls.after = _exception_counts()
 
@@ -454,11 +464,47 @@ class TestDashboardExceptions(FrappeTestCase):
 		return self.after.get(key, 0) - self.before.get(key, 0)
 
 	def test_a_failed_submission_is_reported(self):
-		self.assertEqual(self._delta("failed_submissions"), 1)
+		"""Two: one on a live till, one stranded on a till that no longer exists."""
+		self.assertEqual(self._delta("failed_submissions"), 2)
+
+	def test_work_stranded_on_a_deleted_till_is_still_counted(self):
+		"""The strip answers for the shop, not for the tills the reader happened to pick.
+
+		Scoped per-till, this draft was invisible on the dashboard while Invoice History
+		listed it - which is how six queued drafts sat unnoticed on dev behind a POS Profile
+		that had been deleted.
+		"""
+		narrowed = _summary(pos_profiles=[PROFILE])
+		counts = {row["key"]: row["count"] for row in narrowed["exceptions"]}
+
+		self.assertNotIn(
+			self.orphaned.pos_profile, narrowed["scope"]["pos_profiles"], "fixture is not orphaned"
+		)
+		self.assertEqual(counts.get("failed_submissions", 0) - self.before.get("failed_submissions", 0), 2)
+		self.assertTrue(narrowed["exceptions_cover_company"])
 
 	def test_queued_and_processing_are_counted_together(self):
 		"""Both mean the same thing to the reader: a sale the server has not finished."""
 		self.assertEqual(self._delta("queued_submissions"), 2)
+
+	def test_a_shift_left_open_on_our_till_counts_whatever_company_it_names(self):
+		"""Dev carries two open entries on a Dev Co till stamped with another company.
+
+		Reading the company field alone drops them, which would tell an owner that nothing is
+		open on a counter that plainly has a shift running.
+		"""
+		counts = {row["key"]: row["count"] for row in _summary()["exceptions"]}
+		open_on_our_tills = frappe.db.count(
+			"POS Opening Entry",
+			{
+				"status": "Open",
+				"docstatus": 1,
+				"pos_profile": PROFILE,
+				"period_start_date": ["<", frappe.utils.nowdate()],
+			},
+		)
+
+		self.assertGreaterEqual(counts.get("shifts_open_past_today", 0), open_on_our_tills)
 
 	def test_only_a_forgotten_hold_counts(self):
 		self.assertEqual(self._delta("stale_held_orders"), 1)
