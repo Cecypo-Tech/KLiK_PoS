@@ -284,14 +284,18 @@ def _calculate_closing_entry_totals(opening_entry_name):
 
 	try:
 		# Aggregate all totals in a single efficient SQL query
+		# One row per invoice. The join onto `Sales Invoice Item` that used to be here
+		# multiplied every parent-level sum by the invoice's line count, so a shift of
+		# six invoices reported 1,466.24 where the invoices totalled 1,346.76. Quantity
+		# comes from the parent's own `total_qty` instead, which is what the items would
+		# have summed to.
 		aggregated = frappe.db.sql(
 			"""
 			SELECT
 				COALESCE(SUM(si.net_total), 0) as net_total,
 				COALESCE(SUM(si.grand_total), 0) as grand_total,
-				COALESCE(SUM(sii.qty), 0) as total_quantity
+				COALESCE(SUM(si.total_qty), 0) as total_quantity
 			FROM `tabSales Invoice` si
-			LEFT JOIN `tabSales Invoice Item` sii ON si.name = sii.parent
 			WHERE si.custom_pos_opening_entry = %s
 			  AND si.docstatus = 1
 			""",
