@@ -59,7 +59,9 @@ REGISTER_URL_DOCTYPE = "Mpesa C2B Payment Register URL"
 # Where an exception row lands when the reader taps it. The SPA reads these as routes, so
 # they are named here once rather than rebuilt in the components.
 INVOICE_HISTORY_ROUTE = "/invoice"
-MPESA_REGISTER_ROUTE = "/mpesa-register"
+# The register has no page in the SPA; it is read in the Desk, so this link deliberately
+# leaves the app. Anything under /app is opened as a full navigation by the client.
+MPESA_REGISTER_ROUTE = "/app/mpesa-c2b-payment-register"
 
 
 @frappe.whitelist()
@@ -79,8 +81,12 @@ def get_dashboard_summary(
 	date_range = (kwargs.get("range") or date_range or "shift").strip()
 
 	company = _resolve_company(company)
-	profiles = _resolve_profiles(company, pos_profiles)
+	available = _available_profiles(company)
+	profiles = _resolve_profiles(company, pos_profiles, available)
 	scope = _resolve_scope(company, profiles, date_range, date_from, date_to)
+	# The picker needs to know which tills exist, not only which were asked for; without it
+	# the client cannot offer the choice without a second round trip.
+	scope["available_profiles"] = available
 
 	if not profiles:
 		# A company with no POS profile the caller may read is not an error; it is an
@@ -164,7 +170,17 @@ def _resolve_company(company: str | None) -> str:
 	return company
 
 
-def _resolve_profiles(company: str, pos_profiles) -> list[str]:
+def _available_profiles(company: str) -> list[str]:
+	"""Every enabled till of the company, in name order."""
+	return [
+		row.name
+		for row in frappe.get_all(
+			"POS Profile", filters={"company": company, "disabled": 0}, fields=["name"], order_by="name"
+		)
+	]
+
+
+def _resolve_profiles(company: str, pos_profiles, available: list[str]) -> list[str]:
 	"""The tills to report on: those asked for, or every enabled one of the company.
 
 	A profile belonging to another company is refused rather than quietly dropped - a
@@ -175,12 +191,6 @@ def _resolve_profiles(company: str, pos_profiles) -> list[str]:
 	if isinstance(pos_profiles, str):  # a bare "Till 1" rather than a JSON list
 		pos_profiles = [pos_profiles]
 
-	available = [
-		row.name
-		for row in frappe.get_all(
-			"POS Profile", filters={"company": company, "disabled": 0}, fields=["name"], order_by="name"
-		)
-	]
 	if not pos_profiles:
 		return available
 
@@ -623,7 +633,7 @@ def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 				"count": sum(row["count"] for row in unmapped_mpesa),
 				"amount": flt(sum(row["amount"] for row in unmapped_mpesa), 2),
 				"shortcodes": [row["shortcode"] for row in unmapped_mpesa],
-				"link": {"route": MPESA_REGISTER_ROUTE, "params": {}},
+				"link": {"route": MPESA_REGISTER_ROUTE, "params": {"docstatus": "0"}},
 			}
 		)
 

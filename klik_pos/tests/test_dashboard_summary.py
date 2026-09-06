@@ -466,3 +466,12 @@ class TestDashboardExceptions(FrappeTestCase):
 		"""Empty means 'All clear' in one line, not a strip of zeroes to read past."""
 		for row in _summary()["exceptions"]:
 			self.assertGreater(row["count"], 0)
+
+
+class TestDashboardScopeReporting(FrappeTestCase):
+	def test_the_scope_names_every_till_the_reader_could_pick(self):
+		"""The till picker is built from this; a second round trip to fill it is not offered."""
+		scope = _summary()["scope"]
+
+		self.assertIn(PROFILE, scope["available_profiles"])
+		self.assertTrue(set(scope["pos_profiles"]).issubset(set(scope["available_profiles"])))

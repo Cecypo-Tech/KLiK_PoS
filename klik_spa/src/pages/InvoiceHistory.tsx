@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   FileText,
   Clock,
@@ -94,6 +94,29 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
   }
 };
 
+/**
+ * A tab named in the URL, as the Sales Dashboard's exception rows name it.
+ *
+ * The link has to win over the remembered filters for that visit, or tapping "2 sales failed
+ * to submit" lands the reader on whatever tab they were last looking at. It is deliberately
+ * not written back to storage: the reader followed a link, they did not change their mind
+ * about where Invoice History should open next time.
+ */
+const URL_TAB_ALIASES: Record<string, string> = {
+  queue_failed: "queue_failed",
+  queued: "queued",
+  draft: "Draft",
+};
+
+const getUrlTab = (search: string): string | null => {
+  try {
+    const requested = new URLSearchParams(search).get("tab");
+    return requested ? (URL_TAB_ALIASES[requested] ?? null) : null;
+  } catch {
+    return null;
+  }
+};
+
 const getInitialViewMode = (): "cards" | "list" => {
   if (typeof window === "undefined") {
     return "list";
@@ -107,8 +130,12 @@ const getInitialViewMode = (): "cards" | "list" => {
 export default function InvoiceHistoryPage() {
   const initialFilters = getInitialInvoiceHistoryFilters();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlTab = getUrlTab(searchParams.toString());
   const isMobile = useMediaQuery("(max-width: 1024px)");
-  const [activeTab, setActiveTab] = useState(initialFilters.activeTab);
+  const [activeTab, setActiveTab] = useState(urlTab ?? initialFilters.activeTab);
+  // One write is skipped so a tab arrived at by link does not become the remembered one.
+  const skipFilterPersist = useRef(Boolean(urlTab));
   const [searchTerm, setSearchTerm] = useState(initialFilters.searchTerm);
   const [dateFilter, setDateFilter] = useState(initialFilters.dateFilter);
   const [customerFilter, setCustomerFilter] = useState(initialFilters.customerFilter);
@@ -245,6 +272,11 @@ export default function InvoiceHistoryPage() {
   }, [viewMode]);
 
   useEffect(() => {
+    if (skipFilterPersist.current) {
+      skipFilterPersist.current = false;
+      return;
+    }
+
     window.localStorage.setItem(
       INVOICE_HISTORY_FILTERS_KEY,
       JSON.stringify({
@@ -278,6 +310,7 @@ export default function InvoiceHistoryPage() {
   const tabs = [
     { id: "all", name: "All Invoices", icon: FileText, color: "text-gray-600" },
     { id: "queue_failed", name: "Failed Queue", icon: AlertTriangle, color: "text-rose-600" },
+    { id: "queued", name: "Queued", icon: Clock, color: "text-amber-600" },
     { id: "Draft", name: "Draft", icon: FilePlus, color: "text-gray-500" },
     { id: "Unpaid", name: "Unpaid", icon: Clock, color: "text-yellow-600" },
     { id: "Partly Paid", name: "Partly Paid", icon: AlertTriangle, color: "text-orange-600" },
@@ -379,7 +412,11 @@ const getStatusBadge = (status: string) => {
           ? true
           : activeTab === "queue_failed"
             ? queueStatus.toLowerCase() === "failed"
-            : invoiceStatus === tabStatus;
+            : activeTab === "queued"
+              // Queued and Processing are one thing to the reader: a sale the server has
+              // not finished with.
+              ? ["queued", "processing"].includes(queueStatus.toLowerCase())
+              : invoiceStatus === tabStatus;
       const matchesPayment = paymentFilter === "all" || invoice.paymentMethod === paymentFilter;
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase());
