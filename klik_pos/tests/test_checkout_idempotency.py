@@ -23,6 +23,7 @@ from klik_pos.api.sales_invoice import (
 	get_checkout_request_status,
 	queue_sales_invoice,
 )
+from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode
 
 ITEM_GROUP = "TEST-CHECKOUT-IDEM-GROUP"
 ITEM_CODE = "TEST-CHECKOUT-IDEM-ITEM"
@@ -294,9 +295,7 @@ class TestCheckoutEndToEnd(FrappeTestCase):
 		cls.warehouse = cls.pos_profile.warehouse or frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
 		)
-		cls.payment_mode = frappe.db.get_value(
-			"POS Payment Method", {"parent": cls.pos_profile.name}, "mode_of_payment"
-		)
+		cls.payment_mode = pick_payment_mode(cls.pos_profile.name)
 		cls.customer = frappe.db.get_value(
 			"Sales Invoice", {"docstatus": 1, "is_return": 0, "company": cls.company}, "customer"
 		)
@@ -372,20 +371,23 @@ class TestCheckoutEndToEnd(FrappeTestCase):
 		self.addCleanup(_delete_requests, self.request_id)
 
 	def _payload(self):
+		items = [
+			{
+				"id": ITEM_CODE,
+				"item_code": ITEM_CODE,
+				"quantity": 1,
+				"price": 100,
+				"uom": "Nos",
+			}
+		]
+		# Pay what the invoice actually demands, tax included - see pos_fixtures.payable_total.
+		total = payable_total(self.customer, items, self.payment_mode)
 		return {
 			"checkout_request_id": self.request_id,
 			"customer": {"id": self.customer},
-			"items": [
-				{
-					"id": ITEM_CODE,
-					"item_code": ITEM_CODE,
-					"quantity": 1,
-					"price": 100,
-					"uom": "Nos",
-				}
-			],
-			"amountPaid": 100,
-			"paymentMethods": [{"method": self.payment_mode, "amount": 100}],
+			"items": items,
+			"amountPaid": total,
+			"paymentMethods": [{"method": self.payment_mode, "amount": total}],
 			"businessType": "B2C",
 		}
 
