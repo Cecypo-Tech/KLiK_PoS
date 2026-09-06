@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { buildSummaryQuery, type DashboardSummary, type ScopeRequest } from "../utils/dashboardSummary";
+import {
+  buildSummaryQuery,
+  isScopeComplete,
+  type DashboardSummary,
+  type ScopeRequest,
+} from "../utils/dashboardSummary";
 
 const ENDPOINT = "/api/method/klik_pos.api.dashboard.get_dashboard_summary";
 
@@ -20,8 +25,17 @@ export function useDashboardSummary(request: ScopeRequest) {
   // The query string is the identity of the request: a new object with the same scope must
   // not refetch, and a changed scope must never leave the previous answer on screen.
   const query = buildSummaryQuery(request);
+  const isComplete = isScopeComplete(request);
 
   useEffect(() => {
+    if (!isComplete) {
+      // Half-filled form, not a failure: say what is missing and ask nothing of the server.
+      setSummary(null);
+      setError("Pick both dates to see a custom range.");
+      setIsLoading(false);
+      return;
+    }
+
     let isCurrent = true;
     const controller = new AbortController();
 
@@ -59,7 +73,7 @@ export function useDashboardSummary(request: ScopeRequest) {
       isCurrent = false;
       controller.abort();
     };
-  }, [query, reloadToken]);
+  }, [query, isComplete, reloadToken]);
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 

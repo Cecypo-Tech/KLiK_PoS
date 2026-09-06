@@ -1,8 +1,17 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { DashboardPerformance } from "../../utils/dashboardSummary";
+import { fillHourGaps, type DashboardPerformance } from "../../utils/dashboardSummary";
 
 const OPEN_KEY = "dashboard-performance-open";
+
+/**
+ * The hourly chart's height, in pixels rather than as a Tailwind class alone.
+ *
+ * The bars were sized with a percentage height, which collapses to nothing inside a flex
+ * column whose own height is content-derived: the chart rendered as an empty band with an
+ * axis under it, in both themes. Pixels resolve the same everywhere.
+ */
+const CHART_HEIGHT = 96;
 
 interface Props {
   performance: DashboardPerformance;
@@ -26,7 +35,8 @@ export default function PerformanceTier({ performance, formatMoney, defaultOpen 
     writeOpen(next);
   };
 
-  const { kpis, hourly, top_items: topItems, cashiers, recent } = performance;
+  const { kpis, top_items: topItems, cashiers, recent } = performance;
+  const hourly = fillHourGaps(performance.hourly);
   const peakHour = Math.max(1, ...hourly.map((bucket) => bucket.amount));
   const topItem = Math.max(1, ...topItems.map((item) => item.amount));
   const topCashier = Math.max(1, ...cashiers.map((row) => row.amount));
@@ -53,15 +63,20 @@ export default function PerformanceTier({ performance, formatMoney, defaultOpen 
 
           {hourly.length > 0 && (
             <Block title="By hour">
-              <div className="flex h-24 items-end gap-1">
+              <div className="flex items-end gap-1" style={{ height: CHART_HEIGHT + 18 }}>
                 {hourly.map((bucket) => (
                   <div key={bucket.hour} className="flex flex-1 flex-col items-center gap-1">
                     <div
                       className="w-full rounded-t bg-beveren-500/80"
-                      style={{ height: `${Math.max(2, (bucket.amount / peakHour) * 100)}%` }}
+                      style={{
+                        height: Math.max(2, Math.round((bucket.amount / peakHour) * CHART_HEIGHT)),
+                      }}
                       title={`${bucket.hour}:00 — ${formatMoney(bucket.amount)}`}
                     />
-                    <span className="text-[10px] text-gray-400">{bucket.hour}</span>
+                    {/* Every third hour, or the axis turns into a wall of digits. */}
+                    <span className="text-[10px] text-gray-400">
+                      {bucket.hour % 3 === 0 ? bucket.hour : ""}
+                    </span>
                   </div>
                 ))}
               </div>

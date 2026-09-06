@@ -5,9 +5,12 @@ import {
   contextParts,
   exceptionHref,
   exceptionLabel,
+  fillHourGaps,
   isExternalHref,
+  isScopeComplete,
   readStoredScope,
   shiftStartTime,
+  todayIso,
   unmatchedHref,
   writeStoredScope,
   type DashboardSummary,
@@ -179,6 +182,20 @@ describe("contextParts", () => {
     expect(parts).toContain("since 08:02, Till 2, Till 1 open");
   });
 
+  it("names a till once even when it has several shifts open", () => {
+    const parts = contextParts(
+      summary({
+        open_shifts: [
+          { name: "OPE-1", pos_profile: "Till 1", period_start_date: "2026-09-06 08:02:11" },
+          { name: "OPE-2", pos_profile: "Till 1", period_start_date: "2026-09-06 13:24:00" },
+          { name: "OPE-3", pos_profile: "Till 1", period_start_date: "2026-09-06 22:52:00" },
+        ],
+      }),
+      money
+    );
+    expect(parts).toContain("since 08:02, Till 1 open");
+  });
+
   it("says plainly when it fell back to today", () => {
     expect(contextParts(summary({ fallback: "today" }), money)).toContain("no shift open — showing today");
   });
@@ -255,5 +272,45 @@ describe("scope storage", () => {
     delete (globalThis as unknown as { window?: unknown }).window;
     expect(readStoredScope()).toBeNull();
     expect(() => writeStoredScope({ range: "today", profiles: [] })).not.toThrow();
+  });
+});
+
+describe("isScopeComplete", () => {
+  it("holds back a half-filled custom range instead of asking the server", () => {
+    expect(isScopeComplete({ range: "custom", profiles: [], dateFrom: "2026-09-01" })).toBe(false);
+    expect(isScopeComplete({ range: "custom", profiles: [] })).toBe(false);
+  });
+
+  it("is satisfied by both ends, and by any other range", () => {
+    expect(
+      isScopeComplete({ range: "custom", profiles: [], dateFrom: "2026-09-01", dateTo: "2026-09-06" })
+    ).toBe(true);
+    expect(isScopeComplete({ range: "shift", profiles: [] })).toBe(true);
+  });
+});
+
+describe("todayIso", () => {
+  it("uses the reader's own day, not UTC's", () => {
+    // 20:30 on the 6th in a timezone behind UTC is already the 7th in UTC.
+    expect(todayIso(new Date(2026, 8, 6, 20, 30))).toBe("2026-09-06");
+  });
+});
+
+describe("fillHourGaps", () => {
+  it("fills the quiet hours between the first and last sale", () => {
+    const filled = fillHourGaps([
+      { hour: 9, amount: 100, count: 1 },
+      { hour: 12, amount: 50, count: 2 },
+    ]);
+    expect(filled.map((b) => b.hour)).toEqual([9, 10, 11, 12]);
+    expect(filled.map((b) => b.amount)).toEqual([100, 0, 0, 50]);
+  });
+
+  it("does not invent hours before the first sale or after the last", () => {
+    expect(fillHourGaps([{ hour: 14, amount: 10, count: 1 }]).map((b) => b.hour)).toEqual([14]);
+  });
+
+  it("stays empty when nothing sold", () => {
+    expect(fillHourGaps([])).toEqual([]);
   });
 });

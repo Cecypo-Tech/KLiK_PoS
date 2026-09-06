@@ -10,6 +10,7 @@ import {
   contextParts,
   isExternalHref,
   readStoredScope,
+  todayIso,
   writeStoredScope,
   type RangeKey,
   type ScopeRequest,
@@ -51,6 +52,17 @@ export default function DashboardPage() {
 
   const { summary, isLoading, error, refresh } = useDashboardSummary(request);
 
+  // Switching to Dates with nothing filled in would ask the server for a range that does
+  // not exist yet; open on today instead, which the reader then widens.
+  const applyScope = (next: ScopeRequest) => {
+    if (next.range === "custom" && (!next.dateFrom || !next.dateTo)) {
+      const today = todayIso();
+      setRequest({ ...next, dateFrom: next.dateFrom || today, dateTo: next.dateTo || today });
+      return;
+    }
+    setRequest(next);
+  };
+
   // Exception rows lead to two different places: pages of this app, and the Desk.
   const openLink = (href: string) => {
     if (isExternalHref(href)) {
@@ -86,7 +98,7 @@ export default function DashboardPage() {
         <ScopeBar
           request={request}
           availableProfiles={summary?.scope.available_profiles || []}
-          onChange={setRequest}
+          onChange={applyScope}
         />
 
         {error && (
@@ -128,7 +140,9 @@ export default function DashboardPage() {
         )}
       </main>
 
-      <BottomNavigation />
+      {/* The rail already carries navigation on desktop; both at once is two of everything,
+          and the bar covers the foot of the page. */}
+      {!isDesktop && <BottomNavigation />}
     </div>
   );
 }
@@ -144,11 +158,14 @@ function companyName(posDetails: unknown): string | undefined {
 function initialScope(company?: string): ScopeRequest {
   const stored = readStoredScope();
   const range = stored?.range && RANGES.includes(stored.range) ? stored.range : "shift";
+  // A stored custom range with an end missing would reopen the page on a prompt rather than
+  // on figures; today is the honest starting point, and the reader widens it from there.
+  const today = todayIso();
   return {
     range,
     profiles: Array.isArray(stored?.profiles) ? (stored?.profiles as string[]) : [],
-    dateFrom: stored?.dateFrom,
-    dateTo: stored?.dateTo,
+    dateFrom: range === "custom" ? stored?.dateFrom || today : stored?.dateFrom,
+    dateTo: range === "custom" ? stored?.dateTo || today : stored?.dateTo,
     company,
   };
 }

@@ -120,6 +120,24 @@ export function buildSummaryQuery(request: ScopeRequest): string {
 }
 
 /**
+ * Whether this scope can be asked for yet.
+ *
+ * A custom range with one end missing is not an error the reader made; it is a half-filled
+ * form. Asking anyway returns "A custom range needs both date_from and date_to", which is
+ * the server explaining itself to the wrong audience.
+ */
+export function isScopeComplete(request: ScopeRequest): boolean {
+  return request.range !== "custom" || Boolean(request.dateFrom && request.dateTo);
+}
+
+/** Today, in the reader's own timezone rather than UTC. */
+export function todayIso(now: Date = new Date()): string {
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/**
  * Modes that took no money collapse into one line.
  *
  * A mode with unmatched M-Pesa receipts keeps its own row even at zero: the badge is the
@@ -207,7 +225,9 @@ export function contextParts(
 
   if (scope.open_shifts.length > 0) {
     const since = shiftStartTime(scope.open_shifts);
-    const tills = scope.open_shifts.map((shift) => shift.pos_profile).join(", ");
+    // One till can have several shifts open at once (dev had three on one profile), and
+    // naming it once per shift read as three tills that do not exist.
+    const tills = [...new Set(scope.open_shifts.map((shift) => shift.pos_profile))].join(", ");
     parts.push(since ? `since ${since}, ${tills} open` : `${tills} open`);
   } else if (scope.fallback === "today") {
     parts.push("no shift open — showing today");
@@ -216,6 +236,30 @@ export function contextParts(
   }
 
   return parts;
+}
+
+/**
+ * A continuous run of hours from the first sale to the last, zeroes included.
+ *
+ * The server returns only the hours that took money. Rendered directly, five busy hours
+ * become five blocks each a fifth of the width, which reads as five equal periods rather
+ * than as a trading day with quiet stretches in it.
+ */
+export function fillHourGaps(
+  hourly: Array<{ hour: number; amount: number; count: number }>
+): Array<{ hour: number; amount: number; count: number }> {
+  if (hourly.length === 0) return [];
+
+  const byHour = new Map(hourly.map((bucket) => [bucket.hour, bucket]));
+  const hours = hourly.map((bucket) => bucket.hour);
+  const first = Math.min(...hours);
+  const last = Math.max(...hours);
+
+  const filled = [];
+  for (let hour = first; hour <= last; hour++) {
+    filled.push(byHour.get(hour) ?? { hour, amount: 0, count: 0 });
+  }
+  return filled;
 }
 
 /** The earliest start among the open shifts, as HH:MM. */
