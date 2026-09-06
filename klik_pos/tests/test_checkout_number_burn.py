@@ -39,6 +39,12 @@ from klik_pos.api.sales_invoice import (
 	_record_failed_checkout_request,
 	queue_sales_invoice,
 )
+from klik_pos.tests.pos_fixtures import (
+	default_sales_tax_template,
+	payable_total,
+	pick_payment_mode,
+	pos_profile_settings,
+)
 
 ITEM_GROUP = "TEST-BURN-GROUP"
 ITEM_CODE = "TEST-BURN-ITEM"
@@ -369,9 +375,7 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 		cls.warehouse = cls.pos_profile.warehouse or frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
 		)
-		cls.payment_mode = frappe.db.get_value(
-			"POS Payment Method", {"parent": cls.pos_profile.name}, "mode_of_payment"
-		)
+		cls.payment_mode = pick_payment_mode(cls.pos_profile.name)
 		if not (cls.warehouse and cls.payment_mode):
 			return
 		cls.customer = _ensure_customer()
@@ -444,20 +448,25 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 
 	def _payload(self, request_id):
 		self.addCleanup(_delete_requests, request_id)
+		items = [
+			{
+				"id": ITEM_CODE,
+				"item_code": ITEM_CODE,
+				"quantity": 1,
+				"price": 100,
+				"uom": "Nos",
+			}
+		]
+		# Pay what the invoice actually demands, tax included. Paying the line price
+		# makes every sale here partially paid, which only passes while the POS Profile
+		# happens to allow partial payment.
+		total = payable_total(self.customer, items, self.payment_mode)
 		return {
 			"checkout_request_id": request_id,
 			"customer": {"id": self.customer},
-			"items": [
-				{
-					"id": ITEM_CODE,
-					"item_code": ITEM_CODE,
-					"quantity": 1,
-					"price": 100,
-					"uom": "Nos",
-				}
-			],
-			"amountPaid": 100,
-			"paymentMethods": [{"method": self.payment_mode, "amount": 100}],
+			"items": items,
+			"amountPaid": total,
+			"paymentMethods": [{"method": self.payment_mode, "amount": total}],
 			"businessType": "B2C",
 		}
 
@@ -622,11 +631,18 @@ class TestRestrictedSalesUser(FrappeTestCase):
 		cls.warehouse = profile.warehouse or frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
 		)
-		cls.payment_mode = frappe.db.get_value(
-			"POS Payment Method", {"parent": profile.name}, "mode_of_payment"
-		)
+		cls.payment_mode = pick_payment_mode(profile.name)
 		if not (cls.warehouse and cls.payment_mode):
 			return
+		# The cashier has an Express role, and erpnext_express refuses tax rows with no
+		# template. A profile with no template gets exactly that from the company default
+		# (ERPNext's set_pos_fields blanks the name, keeps the rows), so pin the template
+		# the way a real profile would have it. Administrator never sees this check.
+		template = profile.taxes_and_charges or default_sales_tax_template(profile.company)
+		if template:
+			pinned = pos_profile_settings(profile.name, taxes_and_charges=template)
+			pinned.__enter__()
+			cls.addClassCleanup(pinned.__exit__, None, None, None)
 		cls.customer = _ensure_customer()
 
 		if not frappe.db.exists("Item Group", R_ITEM_GROUP):
@@ -753,20 +769,24 @@ class TestRestrictedSalesUser(FrappeTestCase):
 	def _payload(self, price):
 		request_id = frappe.generate_hash(length=24)
 		self.addCleanup(_delete_requests, request_id)
+		# `price` is the LINE price - the price-floor rule under test applies to the item
+		# rate, not to the amount tendered. Only the tendered amount is the payable total.
+		items = [
+			{
+				"id": R_ITEM_CODE,
+				"item_code": R_ITEM_CODE,
+				"quantity": 1,
+				"price": price,
+				"uom": "Nos",
+			}
+		]
+		total = payable_total(self.customer, items, self.payment_mode)
 		return {
 			"checkout_request_id": request_id,
 			"customer": {"id": self.customer},
-			"items": [
-				{
-					"id": R_ITEM_CODE,
-					"item_code": R_ITEM_CODE,
-					"quantity": 1,
-					"price": price,
-					"uom": "Nos",
-				}
-			],
-			"amountPaid": price,
-			"paymentMethods": [{"method": self.payment_mode, "amount": price}],
+			"items": items,
+			"amountPaid": total,
+			"paymentMethods": [{"method": self.payment_mode, "amount": total}],
 			"businessType": "B2C",
 		}
 

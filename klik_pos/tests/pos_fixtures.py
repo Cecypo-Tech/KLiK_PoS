@@ -48,17 +48,33 @@ def payable_total(customer, items, mode_of_payment):
 
 
 @contextlib.contextmanager
-def partial_payment(profile_name, allowed):
-	"""Pin POS Profile.allow_partial_payment for the block, restoring it afterwards.
+def pos_profile_settings(profile_name, **values):
+	"""Pin POS Profile fields for the block, restoring them afterwards - even on failure.
 
-	It has to be a DB write: ERPNext reads the flag from the invoice's linked POS Profile
-	during validation, so patching a cached profile object never reaches it.
+	It has to be a DB write: ERPNext reads the profile from the invoice's link during
+	validation (`set_pos_fields`, the partial-payment check), so patching a cached profile
+	object never reaches it. Two fields have bitten so far:
+
+	- allow_partial_payment: gates any underpaid sale.
+	- taxes_and_charges: `set_pos_fields` copies it onto every POS invoice, blanking a
+	  company-default template while leaving its tax rows behind. erpnext_express then
+	  rejects "tax rows without a template" for any user with an Express role - so a
+	  cashier cannot sell at all on a profile with no template, while Administrator can.
 	"""
-	original = frappe.db.get_value("POS Profile", profile_name, "allow_partial_payment")
-	frappe.db.set_value("POS Profile", profile_name, "allow_partial_payment", 1 if allowed else 0)
+	original = frappe.db.get_value("POS Profile", profile_name, list(values), as_dict=True)
+	for field, value in values.items():
+		frappe.db.set_value("POS Profile", profile_name, field, value)
 	frappe.db.commit()
 	try:
 		yield
 	finally:
-		frappe.db.set_value("POS Profile", profile_name, "allow_partial_payment", original)
+		for field in values:
+			frappe.db.set_value("POS Profile", profile_name, field, original[field])
 		frappe.db.commit()
+
+
+def default_sales_tax_template(company):
+	"""The company's default Sales Taxes and Charges Template, or None."""
+	return frappe.db.get_value(
+		"Sales Taxes and Charges Template", {"company": company, "is_default": 1}, "name"
+	)
