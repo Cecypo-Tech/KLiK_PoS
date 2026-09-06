@@ -82,35 +82,11 @@ class TestProcessMpesa(FrappeTestCase):
 		return invoice
 
 	def _make_c2b_payment(self, amount=100, msisdn="254700000001"):
-		# full_name is a derived/read-only field recomputed from
-		# firstname/lastname in before_insert -> set_missing_values(); it
-		# can't be set directly on insert.
-		doc = frappe.get_doc(
-			{
-				"doctype": "Mpesa C2B Payment Register",
-				"businessshortcode": self.shortcode,
-				"transactiontype": "Pay Bill",
-				"transid": f"TX{frappe.generate_hash(length=8).upper()}",
-				"transtime": "120000",
-				"transamount": amount,
-				"billrefnumber": f"BILL{frappe.generate_hash(length=6).upper()}",
-				"msisdn": msisdn,
-				"firstname": "Zawadi",
-				"lastname": "Mwangi",
-				"posting_date": frappe.utils.nowdate(),
-				"posting_time": frappe.utils.nowtime(),
-				"company": self.company,
-			}
+		from klik_pos.tests.mpesa_fixtures import make_c2b_payment
+
+		return make_c2b_payment(
+			company=self.company, shortcode=self.shortcode, amount=amount, msisdn=msisdn
 		)
-		doc.insert(ignore_permissions=True)
-		# set_missing_values() hardcodes currency="KES", but _Test Company's
-		# receivable account is INR-denominated, and create_payment_entry()
-		# throws on a party/transaction currency mismatch. Real companies
-		# configured for Mpesa are always KES-denominated -- this override is
-		# a _Test Company fixture artifact only, not a production concern.
-		frappe.db.set_value("Mpesa C2B Payment Register", doc.name, "currency", "INR")
-		doc.reload()
-		return doc
 
 	def _ensure_bank_mode_of_payment(self, mode_of_payment="Cheque", account="_Test Bank - _TC"):
 		# Real M-Pesa modes of payment resolve to a Bank-type account (unlike
