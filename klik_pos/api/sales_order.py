@@ -20,9 +20,11 @@ from klik_pos.api.sales_invoice import (
 def _assert_held_order_access(so):
     """Ensure the SO is a KLiK held order the current user/session may act on.
 
-    Scoping rules (POS context): the order must belong to the caller's active
-    opening entry, or — when there is no active session — have been created by
-    the caller. System Managers bypass the check.
+    In order: it must be a held order at all; System Managers bypass the rest. Then it
+    must belong to the caller's active shift, or be stranded on their own till with no live
+    shift behind it, or - when the caller has no shift open - simply be theirs. Anyone
+    else's work is allowed only on a till whose POS Profile permits it, which is the same
+    rule the Draft tab lists by.
     """
     if not so.custom_is_klik_held:
         frappe.throw(_("Order {0} is not a KLiK held order.").format(so.name))
@@ -32,10 +34,42 @@ def _assert_held_order_access(so):
 
     opening_entry = get_current_pos_opening_entry()
     if opening_entry:
-        if so.custom_pos_opening_entry != opening_entry:
-            frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
-    elif so.owner != frappe.session.user:
+        if so.custom_pos_opening_entry == opening_entry:
+            return
+        if _is_orphaned_on_this_till(so) and _may_act_on_others_work(so):
+            # Stranded on this counter by an earlier session. Refusing it left the order
+            # unusable by anyone but a System Manager while still sitting in the Draft tab,
+            # so the cashier who found it could neither serve it nor clear it.
+            return
         frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
+    elif not _may_act_on_others_work(so):
+        frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
+
+
+def _may_act_on_others_work(so):
+    """Your own order always; someone else's only where the till allows it.
+
+    The same rule the Draft tab lists by, so a cashier is never shown an order they are then
+    refused when they tap it.
+    """
+    return so.owner == frappe.session.user or _till_allows_other_cashiers()
+
+
+def _is_orphaned_on_this_till(so):
+    """Whether this held order belongs to the caller's till but to no live shift."""
+    try:
+        pos_doc = _get_active_pos_profile()
+    except Exception:
+        return False
+
+    profile = getattr(pos_doc, "name", None)
+    if not profile or so.custom_pos_profile != profile:
+        return False
+
+    if not so.custom_pos_opening_entry:
+        return True
+    status = frappe.db.get_value("POS Opening Entry", so.custom_pos_opening_entry, "status")
+    return status != "Open"
 
 
 def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
@@ -534,8 +568,56 @@ def checkout_held_order(order_id, data=None):
 # Internal — called from pos_entry.py on shift close
 # ---------------------------------------------------------------------------
 
+def _orphaned_held_orders(opening_entry_name):
+    """Held orders on this till that no shift close will ever reach.
+
+    An order held while no shift was open is stamped with an empty opening entry, because
+    that is what get_current_pos_opening_entry returns then. The sweep below matches on the
+    opening entry, so those orders were never swept by anything: they sat in the Draft tab
+    for good, and a cashier in a later shift could not even open them.
+
+    Also collected: orders pointing at an opening entry that has since been closed or
+    deleted, which are stranded for the same reason.
+
+    Two guards keep this from reaching into work that is still live. The order must be on
+    the same till as the shift being closed, and it must predate that shift - anything held
+    since this shift opened would have been stamped with it, so an unstamped newer order
+    belongs to a session this close knows nothing about.
+    """
+    entry = frappe.db.get_value(
+        "POS Opening Entry", opening_entry_name, ["pos_profile", "period_start_date"], as_dict=True
+    )
+    if not entry or not entry.pos_profile or not entry.period_start_date:
+        return []
+
+    rows = frappe.db.sql(
+        """
+        SELECT so.name
+        FROM `tabSales Order` so
+        LEFT JOIN `tabPOS Opening Entry` ope ON ope.name = so.custom_pos_opening_entry
+        WHERE so.custom_is_klik_held = 1
+          AND so.docstatus = 0
+          AND so.custom_pos_profile = %(profile)s
+          AND so.modified < %(started)s
+          AND (
+                so.custom_pos_opening_entry IS NULL
+                OR so.custom_pos_opening_entry = ''
+                OR ope.name IS NULL
+                OR ope.status = 'Closed'
+              )
+        """,
+        {"profile": entry.pos_profile, "started": entry.period_start_date},
+        as_dict=True,
+    )
+    return [row.name for row in rows]
+
+
 def delete_held_orders_for_opening_entry(opening_entry_name):
-    """Delete all held Sales Orders linked to a POS session (called on shift close)."""
+    """Delete the held Sales Orders a shift close is responsible for.
+
+    That is this session's own held orders, plus any stranded on the same till by an earlier
+    session that could never be swept - see _orphaned_held_orders.
+    """
     try:
         names = frappe.get_all(
             "Sales Order",
@@ -546,6 +628,9 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
             },
             pluck="name",
         )
+        for name in _orphaned_held_orders(opening_entry_name):
+            if name not in names:
+                names.append(name)
         deleted = 0
         for name in names:
             try:
