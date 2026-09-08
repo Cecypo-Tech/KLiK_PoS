@@ -217,6 +217,22 @@ def install_mpesa_reconciled_payment_child():
                     "description": "Name of the unallocated Payment Entry holding this receipt's overpaid excess as reusable customer credit (plain text, not a Link).",
                     "read_only": 1,
                 },
+                {
+                    "fieldname": "payment_entry",
+                    "label": "Payment Entry",
+                    "fieldtype": "Data",
+                    "description": "The Payment Entry created for this receipt's full amount (plain text, not a Link).",
+                    "read_only": 1,
+                    "in_list_view": 1,
+                },
+                {
+                    "fieldname": "allocated_amount",
+                    "label": "Allocated to this Invoice",
+                    "fieldtype": "Currency",
+                    "description": "How much of the receipt's Payment Entry this invoice took as an advance. The rest stays unallocated on that entry.",
+                    "read_only": 1,
+                    "in_list_view": 1,
+                },
             ],
             "permissions": [],
         })
@@ -237,6 +253,22 @@ def install_mpesa_reconciled_payment_child():
                 "fieldtype": "Data",
                 "description": "Name of the unallocated Payment Entry holding this receipt's overpaid excess as reusable customer credit (plain text, not a Link).",
                 "read_only": 1,
+            },
+            {
+                "fieldname": "payment_entry",
+                "label": "Payment Entry",
+                "fieldtype": "Data",
+                "description": "The Payment Entry created for this receipt's full amount (plain text, not a Link).",
+                "read_only": 1,
+                "in_list_view": 1,
+            },
+            {
+                "fieldname": "allocated_amount",
+                "label": "Allocated to this Invoice",
+                "fieldtype": "Currency",
+                "description": "How much of the receipt's Payment Entry this invoice took as an advance. The rest stays unallocated on that entry.",
+                "read_only": 1,
+                "in_list_view": 1,
             },
         ]
         existing = {f.fieldname for f in child.fields}

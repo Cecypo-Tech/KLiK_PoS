@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.setup.pos_profile_fields import (
@@ -84,8 +85,9 @@ class TestPosProfileFeatureFields(FrappeTestCase):
 
 class TestPosExtraFieldsChild(FrappeTestCase):
     def test_child_doctype_and_table_field_exist_after_install(self):
-        from klik_pos.setup.pos_profile_fields import install_pos_extra_fields_child
         import frappe
+
+        from klik_pos.setup.pos_profile_fields import install_pos_extra_fields_child
 
         install_pos_extra_fields_child()
         self.assertTrue(frappe.db.exists("DocType", "POS Extra Field"))
@@ -99,3 +101,20 @@ class TestPosExtraFieldsChild(FrappeTestCase):
         # second call must not raise
         install_pos_extra_fields_child()
         install_pos_extra_fields_child()
+
+
+class TestMpesaReconciledPaymentChild(FrappeTestCase):
+    def test_child_table_carries_the_payment_entry_and_allocation(self):
+        """One receipt is one Payment Entry now; the trace row has to say which, and how
+        much of it this invoice took. Without these two columns the register-side link is
+        the only pointer and it did not exist before this work."""
+        from klik_pos.setup.pos_profile_fields import install_mpesa_reconciled_payment_child
+
+        install_mpesa_reconciled_payment_child()
+        frappe.clear_cache(doctype="POS Mpesa Reconciled Payment")
+        fields = {f.fieldname: f for f in frappe.get_meta("POS Mpesa Reconciled Payment").fields}
+
+        self.assertEqual(fields["payment_entry"].fieldtype, "Data")
+        self.assertTrue(fields["payment_entry"].read_only)
+        self.assertEqual(fields["allocated_amount"].fieldtype, "Currency")
+        self.assertTrue(fields["allocated_amount"].read_only)
