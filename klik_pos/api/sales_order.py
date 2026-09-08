@@ -13,7 +13,6 @@ from klik_pos.api.sales_invoice import (
     parse_invoice_data,
 )
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -204,10 +203,27 @@ def create_held_order(data):
 
         target_order_id = data.get("held_order_id") if isinstance(data, dict) else None
 
+        # Every field is named, even the unused ones. Collapsing them to `_` rebound the
+        # translation function imported at the top of this module, so the frappe.throw below
+        # raised "'NoneType' object is not callable" instead of its own message - and the
+        # except block reported that to the cashier as the reason their order would not hold.
         (
-            customer, items, _, sales_and_tax_charges, _, business_type,
-            roundoff_amount, delivery_charge, delivery_personnel, _,
-            _, _, salesperson, tax_id, _, _,
+            customer,
+            items,
+            _amount_paid,
+            sales_and_tax_charges,
+            _mode_of_payment,
+            business_type,
+            roundoff_amount,
+            delivery_charge,
+            delivery_personnel,
+            _is_credit_sale,
+            _allow_partial_payment,
+            _due_date,
+            salesperson,
+            tax_id,
+            _enable_background_submission,
+            _loyalty_redemption,
         ) = parse_invoice_data(data)
 
         cart_meta = _build_cart_meta(
@@ -326,15 +342,58 @@ def delete_held_order(order_id):
         return {"success": False, "error": str(e)}
 
 
+def _till_allows_other_cashiers():
+    """Whether this till lets its users see held orders they did not ring.
+
+    Delegates to the same helper Invoice History uses for invoices, so the two surfaces
+    cannot drift into disagreeing about what one POS Profile setting means. A till with no
+    resolvable profile reads as "no", which is the behaviour the page had before the flag
+    existed.
+    """
+    from klik_pos.api.sales_invoice import _profile_allows_other_cashiers
+
+    try:
+        pos_doc = _get_active_pos_profile()
+    except Exception:
+        return False
+    return _profile_allows_other_cashiers(pos_doc)
+
+
+def _attach_cashier_names(orders):
+    """Add each order's owner full name, the identity the history filters compare against."""
+    owners = {o.get("owner") for o in orders if o.get("owner")}
+    names = {}
+    if owners:
+        names = {
+            row.name: row.full_name
+            for row in frappe.get_all(
+                "User", filters={"name": ["in", list(owners)]}, fields=["name", "full_name"]
+            )
+        }
+    for order in orders:
+        order["cashier_name"] = names.get(order.get("owner")) or order.get("owner") or ""
+    return orders
+
+
 @frappe.whitelist()
 def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=False):
     """List held Sales Orders.
 
     By default lists held orders for the current POS session (used by the
     Closing Shift page). When ``skip_opening_entry_filter`` is true (used by the
-    Invoice History page), the opening-entry restriction is dropped and results
-    are scoped by role instead: System Managers/Administrators see all, other
-    users see only their own — mirroring ``get_sales_invoices``.
+    Invoice History page), the opening-entry restriction is dropped and results are
+    scoped the same way ``get_sales_invoices`` scopes its history surface: an
+    Administrator or System Manager sees all, and so does everyone on a till whose
+    POS Profile sets ``custom_allow_viewing_other_cashiers``; otherwise you see your own.
+
+    That flag used to be read for invoices and ignored here, so a shop that had
+    deliberately opened its till up still found the Draft tab showing one cashier's
+    held orders and nobody else's.
+
+    Each row carries ``cashier_name`` - the owner's full name, which is the identity
+    Invoice History filters on. Returning only the email made every held order fail the
+    comparison against a cashier filter holding a full name, so a cashier restricted to
+    their own work saw an empty Draft tab rather than their own held orders.
     """
     try:
         if isinstance(skip_opening_entry_filter, str):
@@ -343,17 +402,19 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
         limit = int(limit) if limit else 50
         start = int(start) if start else 0
         is_admin_user = "System Manager" in frappe.get_roles() or "Administrator" in frappe.get_roles()
+        may_see_other_cashiers = is_admin_user or _till_allows_other_cashiers()
 
         filters = {"custom_is_klik_held": 1, "docstatus": 0}
         if skip_opening_entry_filter:
-            if not is_admin_user:
+            if not may_see_other_cashiers:
                 filters["owner"] = frappe.session.user
         else:
             opening_entry = get_current_pos_opening_entry()
             if opening_entry:
                 filters["custom_pos_opening_entry"] = opening_entry
-            elif not is_admin_user:
-                # No active session — only show the caller's own held orders
+            elif not may_see_other_cashiers:
+                # No active session — only show the caller's own held orders, unless the
+                # till is one that lets its users see each other's.
                 filters["owner"] = frappe.session.user
 
         orders = frappe.get_all(
@@ -377,6 +438,8 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 or term in (o.customer_name or "").lower()
                 or term in (o.customer or "").lower()
             ]
+
+        _attach_cashier_names(orders)
 
         order_names = [o.name for o in orders]
         items_map = {}

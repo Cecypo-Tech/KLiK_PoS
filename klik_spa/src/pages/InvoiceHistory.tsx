@@ -180,7 +180,9 @@ export default function InvoiceHistoryPage() {
         name: o.name,
         date: o.transaction_date || new Date().toISOString().split("T")[0],
         time: "",
-        cashier: o.cashier || o.owner || "",
+        // Full name, not the email: the cashier filter compares against full names, so an
+        // email here made every held order fail it and the Draft tab came up empty.
+        cashier: o.cashier_name || o.cashier || o.owner || "",
         cashierId: o.owner || "",
         customer: o.customer_name || o.customer || "",
         customerId: o.customer || "",
