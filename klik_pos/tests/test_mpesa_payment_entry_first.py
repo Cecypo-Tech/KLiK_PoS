@@ -173,6 +173,23 @@ class TestAllocationBeforeSubmit(MpesaFirstCase):
 		self.assertEqual(rows, [(MODE, 0.0)])
 		self.assertEqual(flt(invoice.paid_amount), 0.0)
 
+	def test_a_retry_does_not_allocate_the_same_receipt_twice(self):
+		"""A checkout that failed after this step re-enters it with last attempt's advances
+		still on the draft. The receipt must not be taken twice."""
+		invoice = self._record(self._draft(rate=500), self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
+		first = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		advances_after_first = [(a.reference_name, flt(a.allocated_amount)) for a in invoice.advances]
+
+		second = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+
+		self.assertEqual([(a.reference_name, flt(a.allocated_amount)) for a in invoice.advances], advances_after_first)
+		self.assertEqual(flt(invoice.total_advance), 500.0)
+		self.assertEqual(second["allocated_total"], first["allocated_total"])
+		self.assertEqual(second["by_register"], first["by_register"])
+		self.assertEqual(len([p for p in invoice.payments if p.mode_of_payment == MODE]), 1, "the zero row is not duplicated either")
+
 	def test_it_refuses_a_submitted_invoice(self):
 		invoice = self._record(self._draft(rate=100), self._receipt(100))
 		_allocate_receipts_before_submit(invoice)
