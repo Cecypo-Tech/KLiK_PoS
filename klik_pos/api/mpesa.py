@@ -220,6 +220,72 @@ def _pending_mpesa_rows(invoice) -> list:
 	]
 
 
+def _stamp_klik_fields(pe, invoice, child):
+	"""Everything a later reader needs to find this entry from the shift, the receipt or the phone."""
+	updates = {}
+	meta = frappe.get_meta("Payment Entry")
+	if meta.has_field("custom_pos_opening_entry") and invoice.get("custom_pos_opening_entry"):
+		updates["custom_pos_opening_entry"] = invoice.custom_pos_opening_entry
+	if meta.has_field("custom_is_created_from_klik"):
+		updates["custom_is_created_from_klik"] = 1
+	if meta.has_field("custom_mpesa_receipt_number") and child.transid:
+		updates["custom_mpesa_receipt_number"] = child.transid
+	if meta.has_field("custom_mpesa_phone_number") and child.msisdn:
+		updates["custom_mpesa_phone_number"] = child.msisdn
+	if updates:
+		# The entry is already submitted; these are informational columns with no GL effect.
+		frappe.db.set_value("Payment Entry", pe.name, updates, update_modified=False)
+
+
+def _ensure_receipt_payment_entries(invoice) -> dict:
+	"""One submitted Payment Entry per recorded receipt, for the receipt's whole amount.
+
+	Idempotent by construction: a trace row that already names an entry, or a register row
+	that does, is reused. That is what makes a checkout retry safe - the first attempt may
+	have created the entry and then failed at invoice submit, and the money it recorded is
+	real either way.
+
+	Created here rather than by the register's own `submit_payment` so klik controls the
+	stamping and so `Mpesa C2B Payment Register.before_submit` cannot allocate the entry to
+	whatever its billref happens to match. Returns {register_row_name: payment_entry_name}
+	and sets `child.payment_entry` on the draft; the caller saves the draft.
+	"""
+	from frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry import create_payment_entry
+
+	by_register = {}
+	for child in invoice.get("custom_mpesa_reconciled_payments") or []:
+		register = child.mpesa_c2b_payment_register
+		existing = child.payment_entry or frappe.db.get_value(
+			"Mpesa C2B Payment Register", register, "payment_entry"
+		)
+		if existing and frappe.db.get_value("Payment Entry", existing, "docstatus") == 1:
+			child.payment_entry = existing
+			by_register[register] = existing
+			continue
+
+		pe = create_payment_entry(
+			invoice.company,
+			invoice.customer,
+			flt(child.amount),
+			invoice.currency,
+			child.mode_of_payment,
+			party_type="Customer",
+			reference_no=child.transid or register,
+			reference_date=invoice.posting_date,
+			posting_date=invoice.posting_date,
+			submit=1,
+		)
+		_stamp_klik_fields(pe, invoice, child)
+		child.payment_entry = pe.name
+		by_register[register] = pe.name
+
+	return by_register
+
+
+def _allocate_receipts_before_submit(invoice):
+	raise NotImplementedError
+
+
 def _embed_mpesa_payments(invoice) -> dict:
 	"""Pre-submit phase of the hybrid M-Pesa flow.
 
