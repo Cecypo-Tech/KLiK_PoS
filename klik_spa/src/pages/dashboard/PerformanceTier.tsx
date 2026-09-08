@@ -83,6 +83,9 @@ export default function PerformanceTier({ performance, formatMoney, defaultOpen 
             </Block>
           )}
 
+          {/* Three lists, three columns once there is room. Stacked full width they ran the
+              page on for screens at a time, which is what pushed the money off the top. */}
+          <div className="grid gap-5 lg:grid-cols-3">
           {topItems.length > 0 && (
             <Block title="Top products">
               {topItems.map((item) => (
@@ -134,6 +137,7 @@ export default function PerformanceTier({ performance, formatMoney, defaultOpen 
               </ul>
             </Block>
           )}
+          </div>
         </div>
       )}
     </section>

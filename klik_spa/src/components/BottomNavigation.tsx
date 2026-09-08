@@ -9,6 +9,8 @@ export default function BottomNavigation() {
   const { userInfo } = useUserInfo()
   const { posDetails } = usePOSProfileStore()
 
+  // Hidden, not disabled: a greyed-out icon with "you don't have access" is a promise the
+  // till cannot keep, and every cashier who taps it learns nothing except that it is there.
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
 
    const menuItems = [
@@ -40,38 +42,33 @@ export default function BottomNavigation() {
           if (item.requiresEditCreatePermission && posDetails?.custom_allow_to_create_and_edit_customers !== 1) {
             return null
           }
-          const disabled = item.requiresSalesDashboard && !canAccessSalesDashboard
+          if (item.requiresSalesDashboard && !canAccessSalesDashboard) {
+            return null // Not for this user — see canAccessSalesDashboard above
+          }
           return (
           <button
             key={index}
             onClick={() => handleNav(item)}
-            disabled={disabled}
-            title={disabled ? "Sales Dashboard — you don't have access" : item.label}
+            title={item.label}
             className={`flex flex-col items-center justify-center min-w-0 flex-1 py-2 px-1 transition-colors ${
-              disabled
-                ? "opacity-50 cursor-not-allowed text-gray-400 dark:text-gray-500"
-                : (isActive(item.path)
+              isActive(item.path)
                 ? "text-beveren-600 dark:text-beveren-400"
-                : "text-gray-400 dark:text-gray-500")
+                : "text-gray-400 dark:text-gray-500"
             }`}
           >
             <item.icon
               size={20}
               className={`mb-1 ${
-                disabled
-                  ? "text-gray-400 dark:text-gray-500"
-                  : (isActive(item.path)
+                isActive(item.path)
                   ? "text-beveren-600 dark:text-beveren-400"
-                  : "text-gray-400 dark:text-gray-500")
+                  : "text-gray-400 dark:text-gray-500"
               }`}
             />
             <span
               className={`text-xs font-medium truncate ${
-                disabled
-                  ? "text-gray-400 dark:text-gray-500"
-                  : (isActive(item.path)
+                isActive(item.path)
                   ? "text-beveren-600 dark:text-beveren-400"
-                  : "text-gray-400 dark:text-gray-500")
+                  : "text-gray-400 dark:text-gray-500"
               }`}
             >
               {item.label}

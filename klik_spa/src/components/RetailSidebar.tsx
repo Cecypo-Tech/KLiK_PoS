@@ -10,6 +10,8 @@ export default function RetailSidebar() {
   const { userInfo } = useUserInfo()
   const {posDetails} = usePOSProfileStore()
 
+  // Hidden, not disabled: a greyed-out icon with "you don't have access" is a promise the
+  // till cannot keep, and every cashier who taps it learns nothing except that it is there.
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
 
   const menuItems = [
@@ -66,25 +68,22 @@ export default function RetailSidebar() {
       {/* Menu Items - Flexible space */}
       <div className="flex-1 flex flex-col items-center py-6 space-y-4">
         {menuItems.map((item, index) => {
-          const disabled = item.requiresSalesDashboard && !canAccessSalesDashboard
+          if (item.requiresSalesDashboard && !canAccessSalesDashboard) {
+            return null; // Not for this user — see canAccessSalesDashboard above
+          }
           if (item.requiresEditCreatePermission && posDetails?.custom_allow_to_create_and_edit_customers !== 1) {
             return null; // Don't render this menu item if the user doesn't have permission
            }
-           
+
           return (
           <button
             key={index}
             onClick={() => handleNav(item)}
-            disabled={disabled}
-            title={disabled ? "Sales Dashboard — you don't have access" : item.label}
-            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-150 ${
-              disabled
-                ? "opacity-50 cursor-not-allowed text-gray-400 dark:text-gray-600"
-                : "cursor-pointer active:scale-90 " + (
+            title={item.label}
+            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-150 cursor-pointer active:scale-90 ${
               isActive(item.path)
                 ? "bg-beveren-100 dark:bg-beveren-900/20 text-beveren-600 dark:text-beveren-400"
                 : "text-beveren-600 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-            )
             }`}
           >
             <item.icon size={20} />
