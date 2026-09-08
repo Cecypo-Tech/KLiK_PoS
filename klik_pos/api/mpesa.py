@@ -282,8 +282,87 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 	return by_register
 
 
-def _allocate_receipts_before_submit(invoice):
-	raise NotImplementedError
+def _allocate_receipts_before_submit(invoice) -> dict:
+	"""Pre-submit phase: settle the draft from the receipts' Payment Entries as advances.
+
+	Each recorded receipt already has (or gets, see _ensure_receipt_payment_entries) a
+	Payment Entry for its full amount. This appends one `Sales Invoice Advance` row per
+	entry, in selection order, allocating up to what the invoice still owes; ERPNext's
+	update_against_document_in_jv reconciles them at submit and the remainder stays
+	unallocated on the same entry - the customer's credit, on the voucher that brought the
+	money in, matching the one line on the M-Pesa statement.
+
+	A zero-amount payment row per mode is kept because ERPNext refuses a POS invoice with
+	no payment rows (validate_pos_paid_amount), and because the invoice list, the detail
+	page and the thermal receipt all read the mode from that table.
+
+	Not set_missing_values(): on a draft carrying a real POS Profile it reaches
+	set_pos_fields, which rebuilds `payments` from the profile and would wipe the rows
+	appended here.
+	"""
+	empty = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
+	if invoice.docstatus != 0:
+		frappe.throw(
+			_("Cannot allocate Mpesa receipts on {0}: invoice is not a draft (docstatus={1}).").format(
+				invoice.name, invoice.docstatus
+			)
+		)
+
+	children = [
+		c
+		for c in invoice.get("custom_mpesa_reconciled_payments") or []
+		if frappe.db.get_value("Mpesa C2B Payment Register", c.mpesa_c2b_payment_register, "docstatus") == 0
+	]
+	if not children:
+		return empty
+
+	by_register = _ensure_receipt_payment_entries(invoice)
+
+	payable = flt(invoice.rounded_total) or flt(invoice.grand_total)
+	already_paid = sum(flt(p.amount) for p in invoice.get("payments") or [])
+	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
+	remaining = max(payable - already_paid - already_advanced, 0.0)
+
+	# A retry re-enters here with the advances of the last attempt still on the draft.
+	existing_refs = {a.reference_name for a in invoice.get("advances") or []}
+
+	summary = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
+	for child in children:
+		pe_name = by_register[child.mpesa_c2b_payment_register]
+		pe = frappe.get_doc("Payment Entry", pe_name)
+		available = flt(pe.unallocated_amount)
+		take = min(available, remaining) if remaining > 0 else 0.0
+		if take > 0 and pe_name not in existing_refs:
+			invoice.append(
+				"advances",
+				{
+					"reference_type": "Payment Entry",
+					"reference_name": pe_name,
+					"reference_row": None,
+					"advance_amount": available,
+					"allocated_amount": take,
+					"ref_exchange_rate": flt(pe.source_exchange_rate) or 1,
+					"remarks": pe.remarks,
+				},
+			)
+			remaining -= take
+		child.allocated_amount = take if pe_name not in existing_refs else child.allocated_amount
+		summary["received_total"] += flt(child.amount)
+		summary["allocated_total"] += flt(child.allocated_amount)
+		summary["by_register"][child.mpesa_c2b_payment_register] = {
+			"payment_entry": pe_name,
+			"allocated": flt(child.allocated_amount),
+			"excess": flt(child.amount) - flt(child.allocated_amount),
+		}
+
+	present_modes = {p.mode_of_payment for p in invoice.get("payments") or []}
+	for mode in dict.fromkeys(c.mode_of_payment for c in children):
+		if mode not in present_modes:
+			invoice.append("payments", {"mode_of_payment": mode, "amount": 0})
+
+	invoice.calculate_taxes_and_totals()
+	invoice.save(ignore_permissions=True)
+	return summary
 
 
 def _embed_mpesa_payments(invoice) -> dict:

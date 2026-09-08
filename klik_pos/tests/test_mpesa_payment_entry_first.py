@@ -129,3 +129,63 @@ class TestOnePaymentEntryPerReceipt(MpesaFirstCase):
 		again = _ensure_receipt_payment_entries(invoice)
 
 		self.assertEqual(again[receipt.name], existing)
+
+
+class TestAllocationBeforeSubmit(MpesaFirstCase):
+	def test_receipts_fill_the_payable_total_in_order_and_the_rest_stays_on_the_entry(self):
+		"""500 sale, receipts 250 then 450: 250 + 250 allocated, 200 left on the second entry."""
+		invoice = self._record(self._draft(rate=500), self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
+
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+
+		self.assertEqual(flt(summary["received_total"]), 700.0)
+		self.assertEqual(flt(summary["allocated_total"]), 500.0)
+		allocated = [(row.reference_name, flt(row.allocated_amount), flt(row.advance_amount)) for row in invoice.advances]
+		self.assertEqual([a[1] for a in allocated], [250.0, 250.0])
+		self.assertEqual([a[2] for a in allocated], [250.0, 450.0], "advance_amount is the receipt, allocated is what this invoice took")
+		self.assertEqual(flt(invoice.total_advance), 500.0)
+		self.assertEqual(flt(invoice.outstanding_amount), 0.0)
+		second = invoice.custom_mpesa_reconciled_payments[1]
+		self.assertEqual(flt(second.allocated_amount), 250.0)
+		self.assertEqual(flt(summary["by_register"][second.mpesa_c2b_payment_register]["excess"]), 200.0)
+
+	def test_an_overpaid_receipt_leaves_its_excess_unallocated_on_its_own_entry(self):
+		invoice = self._record(self._draft(rate=200), self._receipt(5000, "254700000301"))
+
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+
+		self.assertEqual(flt(invoice.advances[0].allocated_amount), 200.0)
+		self.assertEqual(flt(invoice.change_amount), 0.0, "M-Pesa never hands back change")
+		self.assertEqual(flt(summary["by_register"][invoice.custom_mpesa_reconciled_payments[0].mpesa_c2b_payment_register]["excess"]), 4800.0)
+
+	def test_a_zero_amount_payment_row_keeps_the_mode_on_the_invoice(self):
+		"""ERPNext demands at least one payment row on a POS invoice, and every reader of
+		'how was this paid' - the list, the detail page, the thermal receipt - looks at the
+		payments table. The row carries the mode and no money."""
+		invoice = self._record(self._draft(rate=100), self._receipt(100))
+
+		_allocate_receipts_before_submit(invoice)
+		invoice.reload()
+
+		rows = [(p.mode_of_payment, flt(p.amount)) for p in invoice.payments]
+		self.assertEqual(rows, [(MODE, 0.0)])
+		self.assertEqual(flt(invoice.paid_amount), 0.0)
+
+	def test_it_refuses_a_submitted_invoice(self):
+		invoice = self._record(self._draft(rate=100), self._receipt(100))
+		_allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+
+		with self.assertRaises(frappe.ValidationError):
+			_allocate_receipts_before_submit(invoice)
+
+	def test_nothing_recorded_is_a_no_op(self):
+		invoice = self._draft(rate=100)
+
+		summary = _allocate_receipts_before_submit(invoice)
+
+		self.assertEqual(summary["received_total"], 0.0)
+		self.assertEqual(invoice.get("advances"), [])
