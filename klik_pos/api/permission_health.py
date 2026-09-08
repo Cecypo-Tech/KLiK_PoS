@@ -29,6 +29,13 @@ POS_PERMISSION_REQUIREMENTS = [
 	("POS Profile", "read", CRITICAL, "The POS cannot resolve its configuration."),
 	("Sales Invoice", "create", CRITICAL, "Sales cannot be recorded."),
 	(
+		"Sales Invoice",
+		"submit",
+		CRITICAL,
+		"A sale can be started but never completed: the invoice is created, then refused at "
+		"submission, after the customer has paid.",
+	),
+	(
 		"Bin",
 		"read",
 		DEGRADED,

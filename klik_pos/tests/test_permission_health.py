@@ -52,6 +52,35 @@ class TestPermissionHealth(FrappeTestCase):
 		entries = [e for e in result["missing"] if e["doctype"] == "Item"]
 		self.assertEqual(entries[0]["severity"], CRITICAL)
 
+	def test_a_user_who_cannot_submit_is_warned_before_the_sale_not_during_it(self):
+		"""Production, 8 Sep: a cashier held create but not submit on Sales Invoice.
+
+		Every sale ran to the end - cart, payment, invoice created - and then threw
+		PermissionError at submission, after the customer had paid by paybill. Checking
+		create alone could not see that coming, because create was exactly what he had.
+		"""
+		result = self._health_with(denied={("Sales Invoice", "submit")})
+
+		self.assertTrue(result["has_critical"])
+		entries = [
+			e for e in result["missing"]
+			if e["doctype"] == "Sales Invoice" and e["permission"] == "submit"
+		]
+		self.assertEqual(len(entries), 1)
+		self.assertEqual(entries[0]["severity"], CRITICAL)
+		self.assertIn("never completed", entries[0]["consequence"])
+
+	def test_create_and_submit_are_reported_separately(self):
+		"""They are different rights and they fail at different moments."""
+		result = self._health_with(
+			denied={("Sales Invoice", "create"), ("Sales Invoice", "submit")}
+		)
+
+		reported = {
+			(e["doctype"], e["permission"]) for e in result["missing"] if e["doctype"] == "Sales Invoice"
+		}
+		self.assertEqual(reported, {("Sales Invoice", "create"), ("Sales Invoice", "submit")})
+
 	def test_it_names_roles_that_actually_grant_the_permission(self):
 		"""A guessed role name is worse than none - it sends the admin to the wrong switch."""
 		result = self._health_with(denied={("Bin", "read")})
