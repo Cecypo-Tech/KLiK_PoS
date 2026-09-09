@@ -1376,6 +1376,12 @@ def _batch_fetch_payment_methods(invoice_names):
 			{"mode_of_payment": payment.mode_of_payment, "amount": payment.amount}
 		)
 
+	from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows
+
+	advances = advance_payment_rows(invoice_names)
+	for name, rows in advances.items():
+		payment_methods_map[name] = merge_payment_rows(payment_methods_map.get(name, []), rows)
+
 	return payment_methods_map
 
 
@@ -1533,10 +1539,12 @@ def get_invoice_details(invoice_id):
 		# page and Invoice History cannot disagree about how an invoice was paid. Without this
 		# the detail page saw no payment field at all and fell back to displaying "Cash",
 		# which reads as a fact rather than an absence — an M-Pesa sale showed as Cash.
-		payments = [
-			{"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount or 0)}
-			for p in (getattr(invoice, "payments", []) or [])
-		]
+		from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows
+
+		payments = merge_payment_rows(
+			[{"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount or 0)} for p in (getattr(invoice, "payments", []) or [])],
+			advance_payment_rows([invoice.name]).get(invoice.name, []),
+		)
 		invoice_data["payment_methods"] = payments
 		# Dedupe modes (order-preserving) before joining: several rows can now share a single
 		# mode (one row per receipt), so a row count above one no longer means a genuine split
