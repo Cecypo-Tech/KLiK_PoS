@@ -23,53 +23,57 @@ app_license = "mit"
 
 
 add_to_apps_screen = [
-    {
-        "name": "klik_pos",
-        "logo": "/assets/klik_pos/klik_spa/bev_logo.jpeg",
-        "title": "KLiK PoS",
-        "route": "/klik_pos",
-    }
+	{
+		"name": "klik_pos",
+		"logo": "/assets/klik_pos/klik_spa/bev_logo.jpeg",
+		"title": "KLiK PoS",
+		"route": "/klik_pos",
+	}
 ]
 
 doc_events = {
-    "Sales Invoice": {
-        "before_submit": "klik_pos.overrides.sales_invoice.validate_sales_person_on_submit",
-        # "before_save": [
-        # 	"klik_pos.api.sales_invoice.sync_return_payments_before_save",
-        # ],
-    },
-    "POS Opening Entry": {
-        "validate": [
-            "klik_pos.api.pos_entry.validate_opening_entry",
-        ],
-    },
-    "POS Profile": {
-        "validate": "klik_pos.overrides.pos_profile.remove_duplicate_sales_persons"
-    },
-    # Owned by frappe_mpsa_payments; the handler is a no-op where that app, or the field it
-    # guards, is absent. Cancelling a consumed receipt would cancel the Payment Entry it
-    # points at and un-pay a live invoice.
-    "Mpesa C2B Payment Register": {
-        "before_cancel": "klik_pos.overrides.mpesa_register.refuse_cancel_while_invoice_live"
-    },
+	"Sales Invoice": {
+		"before_submit": "klik_pos.overrides.sales_invoice.validate_sales_person_on_submit",
+		# "before_save": [
+		# 	"klik_pos.api.sales_invoice.sync_return_payments_before_save",
+		# ],
+	},
+	"POS Opening Entry": {
+		"validate": [
+			"klik_pos.api.pos_entry.validate_opening_entry",
+		],
+	},
+	"POS Profile": {"validate": "klik_pos.overrides.pos_profile.remove_duplicate_sales_persons"},
+	# Owned by frappe_mpsa_payments; the handler is a no-op where that app, or the field it
+	# guards, is absent. Cancelling a consumed receipt would cancel the Payment Entry it
+	# points at and un-pay a live invoice.
+	"Mpesa C2B Payment Register": {
+		"before_cancel": "klik_pos.overrides.mpesa_register.refuse_cancel_while_invoice_live"
+	},
 }
 
 extend_doctype_class = {
-    "Sales Invoice": "klik_pos.api.sales_invoice.CustomSalesInvoice",
-    "POS Opening Entry": "klik_pos.overrides.pos_opening_entry.CustomPOSOpeningEntry",
+	"Sales Invoice": "klik_pos.api.sales_invoice.CustomSalesInvoice",
+	"POS Opening Entry": "klik_pos.overrides.pos_opening_entry.CustomPOSOpeningEntry",
 }
 
 # Migration hooks
 before_migrate = [
-    "klik_pos.setup.install.ensure_stock_reservation_is_enabled",
-    "klik_pos.setup.install.ensure_sales_invoice_reserve_stock_field",
-    "klik_pos.setup.pos_opening_entry_links.ensure_pos_opening_entry_links"
+	"klik_pos.setup.install.ensure_stock_reservation_is_enabled",
+	"klik_pos.setup.install.ensure_sales_invoice_reserve_stock_field",
+	"klik_pos.setup.pos_opening_entry_links.ensure_pos_opening_entry_links",
 ]
 
 fixtures = [
 	{
 		"doctype": "Property Setter",
-		"filters": [[ "module", "=", "KLiK PoS", ]],
+		"filters": [
+			[
+				"module",
+				"=",
+				"KLiK PoS",
+			]
+		],
 	},
 ]
 # Includes in <head>
@@ -95,10 +99,10 @@ fixtures = [
 
 # include js in doctype views
 doctype_js = {
-    "Sales Invoice": "public/js/sales_invoice.js",
-    "Company": "public/js/company.js",
-    "Sales Person": "public/js/sales_person.js",
-    "POS Profile": "public/js/pos_profile.js",
+	"Sales Invoice": "public/js/sales_invoice.js",
+	"Company": "public/js/company.js",
+	"Sales Person": "public/js/sales_person.js",
+	"POS Profile": "public/js/pos_profile.js",
 }
 # Add a button to Company to create random customers (client-side will call the whitelisted method)
 doctype_js.update({"Company": "public/js/company.js"})
@@ -303,6 +307,6 @@ after_migrate = "klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fi
 
 
 website_route_rules = [
-    {"from_route": "/klik_pos/<path:app_path>", "to_route": "klik_spa"},
-    {"from_route": "/klik_pos", "to_route": "klik_spa"},
+	{"from_route": "/klik_pos/<path:app_path>", "to_route": "klik_spa"},
+	{"from_route": "/klik_pos", "to_route": "klik_spa"},
 ]

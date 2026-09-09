@@ -615,7 +615,14 @@ class TestThermalReceiptNamesEveryMode(MpesaFirstCase):
 	def _payment_line(self, invoice):
 		import re
 
-		html = frappe.get_print("Sales Invoice", invoice.name, self.PRINT_FORMAT)
+		# Not frappe.get_print: that routes through the website request path, which needs
+		# a bound request object the test runner does not always have.
+		from frappe.www.printview import get_rendered_template
+
+		html = get_rendered_template(
+			frappe.get_doc("Sales Invoice", invoice.name),
+			print_format=frappe.get_doc("Print Format", self.PRINT_FORMAT),
+		)
 		match = re.search(r'Payment:</td>\s*<td class="value">(.*?)</td>', html, re.S)
 		self.assertIsNotNone(match, "the receipt has a Payment line")
 		return " ".join(match.group(1).split())

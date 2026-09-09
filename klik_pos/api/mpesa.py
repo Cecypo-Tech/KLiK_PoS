@@ -343,11 +343,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		)
 
-	children = [
-		c
-		for c in invoice.get("custom_mpesa_reconciled_payments") or []
-		if frappe.db.get_value("Mpesa C2B Payment Register", c.mpesa_c2b_payment_register, "docstatus") == 0
-	]
+	children = _pending_mpesa_rows(invoice)
 	if not children:
 		return empty
 
