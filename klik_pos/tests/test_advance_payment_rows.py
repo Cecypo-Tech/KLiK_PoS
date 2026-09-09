@@ -6,6 +6,9 @@ the money is on Sales Invoice Advance rows pointing at Payment Entries. One read
 both surfaces so they cannot disagree.
 """
 
+from unittest.mock import patch
+
+import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.mpesa import _allocate_receipts_before_submit
@@ -49,3 +52,42 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 
 	def test_an_invoice_with_no_advances_is_absent_not_empty_list(self):
 		self.assertEqual(advance_payment_rows(["SINV-DOES-NOT-EXIST"]), {})
+
+	def test_a_site_without_the_phone_column_still_gets_its_rows(self):
+		"""The phone number is a custom field of frappe_mpsa_payments' own patch.
+
+		Selecting it unguarded turns every invoice list and detail page into a 500 on a
+		site that has not got the column - the whole surface, not just the phone.
+		"""
+		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000401")])
+		real_has_column = frappe.local.db.has_column
+
+		def without_the_phone_column(doctype, column):
+			if doctype == "Payment Entry" and column == "custom_mpesa_phone_number":
+				return False
+			return real_has_column(doctype, column)
+
+		with patch.object(frappe.local.db, "has_column", side_effect=without_the_phone_column):
+			rows = advance_payment_rows([invoice.name])[invoice.name]
+
+		self.assertEqual([r["amount"] for r in rows], [100.0])
+		self.assertIsNone(rows[0]["phone_number"], "the row survives without the column")
+		self.assertTrue(rows[0]["reference_no"], "the receipt number still comes through")
+
+	def test_a_cancelled_invoice_is_not_still_reported_as_settled(self):
+		"""ERPNext leaves the advance rows on a cancelled invoice (it only deletes them
+		when a single payment is unlinked), so the reader has to exclude it itself - or
+		Invoice History shows a cancelled sale as paid by M-Pesa."""
+		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000402")])
+		self.assertIn(invoice.name, advance_payment_rows([invoice.name]))
+
+		invoice.cancel()
+
+		self.assertEqual(advance_payment_rows([invoice.name]), {})
+
+	def _submitted(self, rate, receipts):
+		invoice = self._record(self._draft(rate=rate), *receipts)
+		_allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		return invoice

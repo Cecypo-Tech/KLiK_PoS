@@ -14,19 +14,34 @@ def advance_payment_rows(invoice_names) -> dict:
 
 	Only invoices that have at least one allocated Payment Entry advance appear as keys, so
 	callers can fall back to the payments table with a plain .get().
+
+	Only submitted entries on a live invoice count. ERPNext leaves the advance rows behind
+	on a cancelled invoice - it deletes them only when a single payment is unlinked - so
+	without the docstatus filters a cancelled sale would still read as paid by M-Pesa.
 	"""
 	if not invoice_names:
 		return {}
+	# The phone number is a custom field installed by frappe_mpsa_payments' own patch.
+	# Selecting it on a site that has not got it would turn every invoice list and detail
+	# page into a 500, so the whole surface degrades to "no phone" instead.
+	phone = (
+		"pe.custom_mpesa_phone_number AS phone_number"
+		if frappe.db.has_column("Payment Entry", "custom_mpesa_phone_number")
+		else "NULL AS phone_number"
+	)
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT adv.parent, adv.reference_name AS payment_entry, adv.allocated_amount AS amount,
-			pe.mode_of_payment, pe.reference_no, pe.custom_mpesa_phone_number AS phone_number
+			pe.mode_of_payment, pe.reference_no, {phone}
 		FROM `tabSales Invoice Advance` adv
 		INNER JOIN `tabPayment Entry` pe ON pe.name = adv.reference_name
+		INNER JOIN `tabSales Invoice` si ON si.name = adv.parent
 		WHERE adv.parenttype = 'Sales Invoice'
 			AND adv.parent IN %(names)s
 			AND adv.reference_type = 'Payment Entry'
 			AND adv.allocated_amount > 0
+			AND pe.docstatus = 1
+			AND si.docstatus != 2
 		ORDER BY adv.parent, adv.idx
 		""",
 		{"names": tuple(invoice_names)},
