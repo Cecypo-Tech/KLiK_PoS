@@ -266,11 +266,15 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 	stamping and so `Mpesa C2B Payment Register.before_submit` cannot allocate the entry to
 	whatever its billref happens to match. Returns {register_row_name: payment_entry_name}
 	and sets `child.payment_entry` on the draft; the caller saves the draft.
+
+	Only receipts whose register row is still unconsumed are minted, the same filter the
+	caller allocates by: a trace row whose receipt was spent elsewhere is stale, and an
+	entry for it would be money nothing ever allocates.
 	"""
 	from frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry import create_payment_entry
 
 	by_register = {}
-	for child in invoice.get("custom_mpesa_reconciled_payments") or []:
+	for child in _pending_mpesa_rows(invoice):
 		register = child.mpesa_c2b_payment_register
 		existing = child.payment_entry or frappe.db.get_value(
 			"Mpesa C2B Payment Register", register, "payment_entry"
@@ -405,12 +409,17 @@ def _manual_reconciliation():
 	frappe_mpsa_payments' own quick-pay path sets this site global around a register
 	submit for exactly the same reason (api/payment_entry.py); the register checks it at
 	the top of on_submit. It is a global, not a request flag, so it is always released.
+
+	Released to whatever it was, not to "0": running inside a caller that had already
+	raised the guard - that quick-pay path does - would otherwise hand the register back
+	its allocation powers halfway through the outer reconciliation.
 	"""
+	previous = frappe.db.get_global("is_manual_reconciliation")
 	frappe.db.set_global("is_manual_reconciliation", "1")
 	try:
 		yield
 	finally:
-		frappe.db.set_global("is_manual_reconciliation", "0")
+		frappe.db.set_global("is_manual_reconciliation", previous if previous is not None else "0")
 
 
 def _finalize_mpesa_reconciliation(invoice, allocation_summary: dict | None = None) -> list[dict]:

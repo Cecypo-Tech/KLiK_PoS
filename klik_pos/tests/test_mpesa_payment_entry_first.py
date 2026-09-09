@@ -21,6 +21,7 @@ from klik_pos.api.mpesa import (
 	_allocate_receipts_before_submit,
 	_ensure_receipt_payment_entries,
 	_finalize_mpesa_reconciliation,
+	_manual_reconciliation,
 	process_mpesa,
 )
 from klik_pos.tests.mpesa_fixtures import make_c2b_payment
@@ -116,6 +117,20 @@ class TestOnePaymentEntryPerReceipt(MpesaFirstCase):
 
 		self.assertEqual(first, second)
 		self.assertEqual(frappe.db.count("Payment Entry", {"reference_no": invoice.custom_mpesa_reconciled_payments[0].transid, "docstatus": 1}), 1)
+
+	def test_a_receipt_whose_register_row_is_already_consumed_mints_nothing(self):
+		"""A trace row left over from an earlier attempt whose register row has since been
+		submitted is stale: minting an entry for it would invent money the receipt has
+		already been spent on, and nothing downstream would ever allocate it."""
+		receipt = self._receipt(100)
+		invoice = self._record(self._draft(), receipt)
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, "docstatus", 1, update_modified=False)
+		entries_before = frappe.db.count("Payment Entry")
+
+		by_register = _ensure_receipt_payment_entries(invoice)
+
+		self.assertEqual(by_register, {})
+		self.assertEqual(frappe.db.count("Payment Entry"), entries_before, "no stray entry was minted")
 
 	def test_a_register_row_that_already_has_an_entry_is_reused(self):
 		"""The register may already carry payment_entry (a retry that got further last time)."""
@@ -274,6 +289,19 @@ class TestFinalizeAfterSubmit(MpesaFirstCase):
 		self.assertEqual(flt(frappe.db.get_value("Payment Entry", results[0]["payment_entry"], "unallocated_amount")), 4800.0)
 		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", other.name, "outstanding_amount")), 1000.0)
 		self.assertEqual(frappe.db.get_global("is_manual_reconciliation"), "0", "the guard is released")
+
+	def test_an_outer_reconciliation_guard_is_restored_not_switched_off(self):
+		"""The guard is a site global, so the exit must put back what it found. Forcing it
+		to '0' inside a caller that had set it - frappe_mpsa_payments' own quick-pay path
+		does exactly that around its own register submit - would hand the register back its
+		allocation powers mid-flight."""
+		frappe.db.set_global("is_manual_reconciliation", "1")
+		self.addCleanup(frappe.db.set_global, "is_manual_reconciliation", "0")
+
+		with _manual_reconciliation():
+			self.assertEqual(frappe.db.get_global("is_manual_reconciliation"), "1")
+
+		self.assertEqual(frappe.db.get_global("is_manual_reconciliation"), "1")
 
 	def test_a_fully_used_receipt_reports_no_excess(self):
 		_invoice, results = self._submit_with(100, self._receipt(100))
