@@ -101,6 +101,7 @@ def get_dashboard_summary(
 
 	billed = _billed(condition, params)
 	at_sale, change_amount = _collected_at_sale(condition, params)
+	at_sale = list(at_sale) + list(_collected_at_sale_via_payment_entries(condition, params))
 	later = _collected_later(condition, params)
 	mpesa = _unmatched_mpesa(company)
 
@@ -420,7 +421,14 @@ def _collected_later(condition: str, params: dict) -> list:
 	several invoices, and counting its `paid_amount` would credit this shift with money
 	that paid last month's debt. A `Pay` entry against a return is a refund going out, not
 	collection coming in, so only `Receive` is summed.
+
+	A Payment Entry stamped with the shift it was taken in (`custom_pos_opening_entry`)
+	arrived at the counter during the sale, not weeks later, so it is excluded here and
+	picked up by `_collected_at_sale_via_payment_entries` instead.
 	"""
+	exclude_stamped = ""
+	if frappe.db.has_column("Payment Entry", "custom_pos_opening_entry"):
+		exclude_stamped = "\n\t\t\tAND (pe.custom_pos_opening_entry IS NULL OR pe.custom_pos_opening_entry = '')"
 	return frappe.db.sql(
 		f"""
 		SELECT
@@ -436,7 +444,34 @@ def _collected_later(condition: str, params: dict) -> list:
 			AND per.docstatus = 1
 			AND pe.docstatus = 1
 			AND pe.payment_type = 'Receive'
-			AND pe.mode_of_payment IS NOT NULL AND pe.mode_of_payment != ''
+			AND pe.mode_of_payment IS NOT NULL AND pe.mode_of_payment != ''{exclude_stamped}
+		GROUP BY pe.mode_of_payment
+		""",
+		params,
+		as_dict=True,
+	)
+
+
+def _collected_at_sale_via_payment_entries(condition: str, params: dict) -> list:
+	"""Receipts that settled the invoice through a Payment Entry stamped with a shift.
+
+	They arrived at the counter during the sale - that is what the stamp means - so they
+	belong beside the payment rows, not with debts collected weeks later.
+	"""
+	if not frappe.db.has_column("Payment Entry", "custom_pos_opening_entry"):
+		return []
+	return frappe.db.sql(
+		f"""
+		SELECT pe.mode_of_payment AS mode,
+			COALESCE(SUM(per.allocated_amount * COALESCE(NULLIF(pe.source_exchange_rate, 0), 1)), 0) AS amount,
+			COUNT(DISTINCT per.reference_name) AS count
+		FROM `tabPayment Entry Reference` per
+		INNER JOIN `tabPayment Entry` pe ON pe.name = per.parent
+		INNER JOIN `tabSales Invoice` si ON si.name = per.reference_name
+		WHERE {condition}
+			AND per.reference_doctype = 'Sales Invoice' AND per.docstatus = 1
+			AND pe.docstatus = 1 AND pe.payment_type = 'Receive'
+			AND pe.custom_pos_opening_entry IS NOT NULL AND pe.custom_pos_opening_entry != ''
 		GROUP BY pe.mode_of_payment
 		""",
 		params,

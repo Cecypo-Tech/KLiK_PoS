@@ -132,14 +132,16 @@ def _report(summary, invoice_names):
 		entry = frappe.db.get_value(
 			"Payment Entry",
 			reference.parent,
-			["mode_of_payment", "payment_type", "docstatus", "source_exchange_rate"],
+			["mode_of_payment", "payment_type", "docstatus", "source_exchange_rate", "custom_pos_opening_entry"],
 			as_dict=True,
 		)
 		if not entry or entry.docstatus != 1 or entry.payment_type != "Receive" or not entry.mode_of_payment:
 			continue
-		later[entry.mode_of_payment] = later.get(entry.mode_of_payment, 0.0) + flt(
-			reference.allocated_amount
-		) * (flt(entry.source_exchange_rate) or 1)
+		amount = flt(reference.allocated_amount) * (flt(entry.source_exchange_rate) or 1)
+		if entry.custom_pos_opening_entry:
+			at_sale[entry.mode_of_payment] = at_sale.get(entry.mode_of_payment, 0.0) + amount
+		else:
+			later[entry.mode_of_payment] = later.get(entry.mode_of_payment, 0.0) + amount
 
 	# Change only ever leaves the drawer as cash, the same rule the endpoint applies.
 	for mode in list(at_sale):

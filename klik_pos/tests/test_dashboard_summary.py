@@ -306,6 +306,19 @@ class TestDashboardSummary(FrappeTestCase):
 		self.assertLessEqual(len(top), 5)
 		self.assertEqual([row["amount"] for row in top], sorted((r["amount"] for r in top), reverse=True))
 
+	def test_money_taken_at_the_till_as_a_payment_entry_is_at_sale_not_later(self):
+		"""M-Pesa now settles through Payment Entries stamped with the shift; the reader
+		took that money at the counter and the hero must say so."""
+		stamped = _settle(self.settled_later, 100, "Cash")
+		frappe.db.set_value("Payment Entry", stamped.name, "custom_pos_opening_entry", "POS-OPE-STAMPED", update_modified=False)
+
+		summary = _summary()
+
+		self.assertAlmostEqual(summary["identity"]["collected_later"], 250.0, places=2)
+		cash = next(row for row in summary["collected_by_mode"] if row["mode"] == "Cash")
+		self.assertGreaterEqual(cash["amount"], 100.0)
+		self.assertEqual(summary["identity"]["unexplained"], 0.0)
+
 
 class TestDashboardSummaryScopeAndPermissions(FrappeTestCase):
 	def test_an_unknown_range_is_refused(self):
