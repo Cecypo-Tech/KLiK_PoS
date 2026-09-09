@@ -279,3 +279,21 @@ class TestFinalizeAfterSubmit(MpesaFirstCase):
 		invoice, results = self._submit_with(100, self._receipt(100))
 
 		self.assertEqual(results, [])
+
+
+class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
+	def test_an_invoice_settled_entirely_by_advances_is_not_a_partial_payment(self):
+		"""The gate compared paid_amount to the total. With M-Pesa money arriving as
+		advances, paid_amount is 0 on a fully paid sale and the till refused it."""
+		profile = frappe.db.get_value("POS Profile", {"company": COMPANY}, "name")
+		if not profile:
+			self.skipTest("no POS Profile for _Test Company on this site")
+		frappe.db.set_value("POS Profile", profile, "allow_partial_payment", 0)
+		invoice = self._record(self._draft(rate=100), self._receipt(100))
+		invoice.pos_profile = profile
+		_allocate_receipts_before_submit(invoice)
+		invoice.reload()
+
+		invoice.submit()  # must not raise PartialPaymentValidationError
+
+		self.assertEqual(invoice.docstatus, 1)

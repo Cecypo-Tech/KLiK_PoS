@@ -3964,7 +3964,9 @@ class CustomSalesInvoice(SalesInvoice):
 		if precision is None:
 			precision = self.precision("grand_total")
 		invoice_total = flt(self.rounded_total, precision) or flt(self.grand_total, precision)
-		paid_amount = flt(self.paid_amount, precision)
+		# Money that arrived as an advance from a Payment Entry - every M-Pesa receipt now -
+		# is paid, even though ERPNext keeps it out of paid_amount.
+		paid_amount = flt(flt(self.paid_amount) + flt(self.total_advance), precision)
 		if paid_amount < invoice_total and flt(getattr(self, "loyalty_amount", 0)):
 			paid_amount = flt(paid_amount + flt(self.loyalty_amount, precision), precision)
 
