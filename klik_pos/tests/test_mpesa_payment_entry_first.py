@@ -591,3 +591,56 @@ class TestCancellation(MpesaFirstCase):
 		finally:
 			frappe.db.set_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice", original)
 			frappe.clear_cache()
+
+
+class TestThermalReceiptNamesEveryMode(MpesaFirstCase):
+	"""The thermal receipt listed doc.payments alone. ERPNext deletes the zero-amount mode
+	row at submit, so a sale settled entirely by M-Pesa Payment Entries printed a blank
+	Payment line. The receipt now also names the modes of the Payment Entries allocated
+	through advances, each mode once."""
+
+	PRINT_FORMAT = "Thermal Printer PF"
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		# Render the format as it is on disk, not as the last migrate left it in the DB.
+		from frappe.modules.import_file import import_file_by_path
+
+		import_file_by_path(
+			frappe.get_app_path("klik_pos", "klik_pos", "print_format", "thermal_printer_pf", "thermal_printer_pf.json"),
+			force=True,
+		)
+
+	def _payment_line(self, invoice):
+		import re
+
+		html = frappe.get_print("Sales Invoice", invoice.name, self.PRINT_FORMAT)
+		match = re.search(r'Payment:</td>\s*<td class="value">(.*?)</td>', html, re.S)
+		self.assertIsNotNone(match, "the receipt has a Payment line")
+		return " ".join(match.group(1).split())
+
+	def _settle(self, invoice, *receipts):
+		invoice = self._record(invoice, *receipts)
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+		invoice.reload()
+		return invoice
+
+	def test_a_sale_paid_only_by_receipts_names_their_mode_once(self):
+		invoice = self._settle(
+			self._draft(rate=300), self._receipt(200, "254700000901"), self._receipt(100, "254700000902")
+		)
+
+		self.assertEqual([p for p in invoice.payments], [], "ERPNext dropped the zero-amount row")
+		self.assertEqual(self._payment_line(invoice), MODE)
+
+	def test_a_sale_paid_at_the_till_and_by_receipt_names_both(self):
+		invoice = self._draft(rate=200)
+		invoice.append("payments", {"mode_of_payment": "Cash", "amount": 100})
+		invoice.save(ignore_permissions=True)
+		invoice = self._settle(invoice, self._receipt(100, "254700000903"))
+
+		self.assertEqual(self._payment_line(invoice), f"Cash, {MODE}")
