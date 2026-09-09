@@ -472,6 +472,7 @@ def _collected_at_sale_via_payment_entries(condition: str, params: dict) -> list
 			AND per.reference_doctype = 'Sales Invoice' AND per.docstatus = 1
 			AND pe.docstatus = 1 AND pe.payment_type = 'Receive'
 			AND pe.custom_pos_opening_entry IS NOT NULL AND pe.custom_pos_opening_entry != ''
+			AND pe.mode_of_payment IS NOT NULL AND pe.mode_of_payment != ''
 		GROUP BY pe.mode_of_payment
 		""",
 		params,

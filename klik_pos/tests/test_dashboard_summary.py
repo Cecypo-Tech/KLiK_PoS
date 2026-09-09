@@ -308,15 +308,18 @@ class TestDashboardSummary(FrappeTestCase):
 
 	def test_money_taken_at_the_till_as_a_payment_entry_is_at_sale_not_later(self):
 		"""M-Pesa now settles through Payment Entries stamped with the shift; the reader
-		took that money at the counter and the hero must say so."""
+		took that money at the counter and the hero must say so - on the right mode row."""
+		before = _summary()
+		cash_before = next(row for row in before["collected_by_mode"] if row["mode"] == "Cash")["amount"]
+
 		stamped = _settle(self.settled_later, 100, "Cash")
 		frappe.db.set_value("Payment Entry", stamped.name, "custom_pos_opening_entry", "POS-OPE-STAMPED", update_modified=False)
 
 		summary = _summary()
 
-		self.assertAlmostEqual(summary["identity"]["collected_later"], 250.0, places=2)
 		cash = next(row for row in summary["collected_by_mode"] if row["mode"] == "Cash")
-		self.assertGreaterEqual(cash["amount"], 100.0)
+		self.assertAlmostEqual(cash["amount"], cash_before + 100.0, places=2)
+		self.assertAlmostEqual(summary["identity"]["collected_later"], before["identity"]["collected_later"], places=2)
 		self.assertEqual(summary["identity"]["unexplained"], 0.0)
 
 
