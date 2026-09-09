@@ -391,6 +391,8 @@ def _finalize_mpesa_reconciliation(invoice, allocation_summary: dict | None = No
 	its Payment Entry and at this invoice, so an accountant opening the register can
 	follow the money in both directions.
 
+	ERPNext skips that reconciliation for POS invoices, so this calls it here instead.
+
 	Returns one row per receipt whose entry still holds unallocated money, in the shape
 	PaymentDialog sums: excess_amount is the customer's credit from that receipt.
 	"""
@@ -400,6 +402,14 @@ def _finalize_mpesa_reconciliation(invoice, allocation_summary: dict | None = No
 				invoice.name, invoice.docstatus
 			)
 		)
+
+	# ERPNext reconciles an invoice's advance rows against their Payment Entries in
+	# on_submit - except for POS invoices (sales_invoice.py: `if cint(self.is_pos) != 1`),
+	# which it assumes carry no advances. Ours carry one per receipt, so do it here, or the
+	# entries stay fully unallocated and the invoice reverts to its full outstanding.
+	if invoice.get("advances"):
+		invoice.update_against_document_in_jv()
+		invoice.reload()
 
 	results = []
 	with _manual_reconciliation():
