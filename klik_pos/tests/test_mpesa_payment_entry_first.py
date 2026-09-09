@@ -206,3 +206,76 @@ class TestAllocationBeforeSubmit(MpesaFirstCase):
 
 		self.assertEqual(summary["received_total"], 0.0)
 		self.assertEqual(invoice.get("advances"), [])
+
+
+class TestFinalizeAfterSubmit(MpesaFirstCase):
+	def _submit_with(self, rate, *receipts):
+		invoice = self._record(self._draft(rate=rate), *receipts)
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		results = _finalize_mpesa_reconciliation(invoice, summary)
+		invoice.reload()
+		return invoice, results
+
+	def test_the_ledger_is_unchanged_one_voucher_per_receipt(self):
+		"""500 sale, 250 + 450: Mpesa account Dr 700, Debtors net Cr 200 - and the invoice
+		itself posts no bank movement at all now, only the two entries do."""
+		invoice, _ = self._submit_with(500, self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
+		pes = [c.payment_entry for c in invoice.custom_mpesa_reconciled_payments]
+
+		bank_dr = frappe.db.sql(
+			"select coalesce(sum(debit),0) from `tabGL Entry` where voucher_no in %(v)s and account=%(a)s and is_cancelled=0",
+			{"v": tuple(pes), "a": BANK_ACCOUNT},
+		)[0][0]
+		invoice_bank = frappe.db.sql(
+			"select count(*) from `tabGL Entry` where voucher_no=%s and account=%s", (invoice.name, BANK_ACCOUNT)
+		)[0][0]
+
+		self.assertEqual(flt(bank_dr), 700.0)
+		self.assertEqual(invoice_bank, 0)
+		self.assertEqual(flt(invoice.outstanding_amount), 0.0)
+		self.assertEqual(flt(frappe.db.get_value("Payment Entry", pes[1], "unallocated_amount")), 200.0)
+
+	def test_register_rows_are_consumed_and_point_at_both_documents(self):
+		receipt = self._receipt(100)
+		invoice, _ = self._submit_with(100, receipt)
+
+		row = frappe.db.get_value(
+			"Mpesa C2B Payment Register", receipt.name,
+			["docstatus", "payment_entry", "sales_invoice", "customer", "submit_payment"], as_dict=True,
+		)
+		self.assertEqual(row.docstatus, 1)
+		self.assertEqual(row.payment_entry, invoice.custom_mpesa_reconciled_payments[0].payment_entry)
+		self.assertEqual(row.sales_invoice, invoice.name)
+		self.assertEqual(row.customer, CUSTOMER)
+		self.assertEqual(row.submit_payment, 0, "the register must not mint a second entry")
+
+	def test_the_excess_is_reported_the_way_the_dialog_reads_it(self):
+		invoice, results = self._submit_with(200, self._receipt(5000, "254700000301"))
+
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]["mode_of_payment"], MODE)
+		self.assertEqual(flt(results[0]["excess_amount"]), 4800.0)
+		self.assertEqual(flt(results[0]["unallocated_amount"]), 4800.0)
+		self.assertEqual(results[0]["payment_entry"], invoice.custom_mpesa_reconciled_payments[0].payment_entry)
+		self.assertEqual(invoice.custom_mpesa_reconciled_payments[0].excess_payment_entry, results[0]["payment_entry"])
+
+	def test_auto_reconcile_cannot_grab_the_excess_on_the_way_through(self):
+		"""With auto_reconcile_c2b on, the register's on_submit FIFO-allocates any
+		unallocated funds to the customer's other outstanding invoices. The 4,800 excess
+		must still be sitting on its entry afterwards, not silently paying old debts."""
+		frappe.db.set_value("Mpesa Settings", {"business_shortcode": self.shortcode}, "auto_reconcile_c2b", 1)
+		frappe.clear_cache()
+		other = create_sales_invoice(company=COMPANY, customer=CUSTOMER, rate=1000, posting_date="2029-06-10")
+
+		invoice, results = self._submit_with(200, self._receipt(5000, "254700000301"))
+
+		self.assertEqual(flt(frappe.db.get_value("Payment Entry", results[0]["payment_entry"], "unallocated_amount")), 4800.0)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", other.name, "outstanding_amount")), 1000.0)
+		self.assertEqual(frappe.db.get_global("is_manual_reconciliation"), "0", "the guard is released")
+
+	def test_a_fully_used_receipt_reports_no_excess(self):
+		invoice, results = self._submit_with(100, self._receipt(100))
+
+		self.assertEqual(results, [])

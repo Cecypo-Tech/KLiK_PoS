@@ -2024,12 +2024,13 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 		if tax_id:
 			doc.tax_id = tax_id
 
-		# Hybrid M-Pesa: embed recorded receipts (capped at payable) before submit.
-		mpesa_embed_summary = None
+		# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and the
+		# draft takes what it owes as advances, before submit.
+		mpesa_allocation = None
 		if doc.get("custom_mpesa_reconciled_payments"):
-			from klik_pos.api.mpesa import _embed_mpesa_payments
+			from klik_pos.api.mpesa import _allocate_receipts_before_submit
 
-			mpesa_embed_summary = _embed_mpesa_payments(doc)
+			mpesa_allocation = _allocate_receipts_before_submit(doc)
 
 		_apply_klik_invoice_flags(doc, is_submitted=True)
 		_enforce_submit_permission(doc, user=requested_by or frappe.session.user)
@@ -2046,7 +2047,7 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 			from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
 
 			try:
-				_finalize_mpesa_reconciliation(doc, mpesa_embed_summary)
+				_finalize_mpesa_reconciliation(doc, mpesa_allocation)
 			except Exception:
 				frappe.log_error(
 					frappe.get_traceback(),
@@ -4761,15 +4762,14 @@ def submit_draft_invoice(invoice_id, data=None):
 				"invoice": invoice_doc,
 			}
 		else:
-			# Hybrid M-Pesa: embed the recorded receipts (capped at the payable
-			# total) BEFORE submit so POS paid-amount validation passes and the
-			# take is visible to shift reconciliation; the overpaid excess
-			# becomes an unallocated credit PE after submit.
-			mpesa_embed_summary = None
+			# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and
+			# the draft takes what it owes as advances, before submit; the remainder stays
+			# unallocated on that same entry and is surfaced after submit as excess.
+			mpesa_allocation = None
 			if invoice_doc.get("custom_mpesa_reconciled_payments"):
-				from klik_pos.api.mpesa import _embed_mpesa_payments
+				from klik_pos.api.mpesa import _allocate_receipts_before_submit
 
-				mpesa_embed_summary = _embed_mpesa_payments(invoice_doc)
+				mpesa_allocation = _allocate_receipts_before_submit(invoice_doc)
 
 			_apply_klik_invoice_flags(invoice_doc, is_submitted=True)
 			_enforce_submit_permission(invoice_doc)
@@ -4786,7 +4786,7 @@ def submit_draft_invoice(invoice_id, data=None):
 			if invoice_doc.get("custom_mpesa_reconciled_payments"):
 				from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
 
-				mpesa_reconciliation = _finalize_mpesa_reconciliation(invoice_doc, mpesa_embed_summary)
+				mpesa_reconciliation = _finalize_mpesa_reconciliation(invoice_doc, mpesa_allocation)
 
 			response = {
 				"success": True,

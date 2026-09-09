@@ -8,6 +8,8 @@ change in the owning app. This mirrors the query pattern used by
 `cecypo_powerpack.quick_pay.api.list_pending_mpesa_payments`.
 """
 
+from contextlib import contextmanager
+
 import frappe
 from frappe import _
 from frappe.utils import flt
@@ -202,7 +204,7 @@ def process_mpesa(
 	}
 
 	if auto_submit:
-		embed_summary = _embed_mpesa_payments(invoice)
+		embed_summary = _allocate_receipts_before_submit(invoice)
 		invoice.submit()
 		result["submitted"] = True
 		result["mpesa_reconciliation"] = _finalize_mpesa_reconciliation(invoice, embed_summary)
@@ -365,122 +367,33 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	return summary
 
 
-def _embed_mpesa_payments(invoice) -> dict:
-	"""Pre-submit phase of the hybrid M-Pesa flow.
+@contextmanager
+def _manual_reconciliation():
+	"""Keep the register's on_submit from allocating these entries anywhere else.
 
-	Embeds the recorded M-Pesa receipts into the *draft* invoice's own
-	`payments` child table, one row per receipt (carrying its own
-	`reference_no`/`phone_number`), capped so the embedded total never exceeds
-	the invoice's payable total. This satisfies ERPNext's POS paid-amount
-	validation, balances the invoice GL through the normal POS path, and makes
-	the M-Pesa take visible to POS shift/drawer reconciliation -- which JOINs
-	`Sales Invoice Payment`, GROUPs BY mode_of_payment and never sees Payment
-	Entries, so per-receipt rows aggregate to the same total as before.
-
-	The overpaid remainder (received - embedded) is reported in the returned
-	summary so `_finalize_mpesa_reconciliation` can turn it into an unallocated
-	Payment Entry credit after submit. M-Pesa never hands back physical change,
-	so the embedded portion is capped and `change_amount` stays 0.
-
-	Must be called on a draft invoice (docstatus=0). Returns a summary consumed
-	by the post-submit finalizer:
-	  {received_total, embedded_total, excess_by_mode, excess_registers_by_mode}
-	No-op (all-zero summary) when there are no pending recorded M-Pesa rows.
+	frappe_mpsa_payments' own quick-pay path sets this site global around a register
+	submit for exactly the same reason (api/payment_entry.py); the register checks it at
+	the top of on_submit. It is a global, not a request flag, so it is always released.
 	"""
-	empty = {"received_total": 0.0, "embedded_total": 0.0, "excess_by_mode": {}, "excess_registers_by_mode": {}}
-
-	if invoice.docstatus != 0:
-		frappe.throw(
-			_("Cannot embed Mpesa payments on {0}: invoice is not a draft (docstatus={1}).").format(
-				invoice.name, invoice.docstatus
-			)
-		)
-
-	pending = _pending_mpesa_rows(invoice)
-	if not pending:
-		return empty
-
-	received_total = sum(flt(c.amount) for c in pending)
-
-	payable = flt(invoice.rounded_total) or flt(invoice.grand_total)
-	existing_payments = sum(flt(p.amount) for p in invoice.get("payments") or [])
-	capacity = max(payable - existing_payments, 0.0)
-
-	# Fill capacity in selection (FIFO) order across the recorded rows. A row
-	# may straddle the cap: part embedded, remainder excess. Excess is still
-	# tracked per mode so each excess Payment Entry uses the correct
-	# Mode-of-Payment account.
-	remaining = capacity
-	embedded_rows: list = []
-	excess_by_mode: dict = {}
-	excess_registers_by_mode: dict = {}
-
-	for c in pending:
-		amt = flt(c.amount)
-		mode = c.mode_of_payment
-		take = min(amt, remaining) if remaining > 0 else 0.0
-		if take > 0:
-			# One row per receipt, not one per mode: the printed receipt must
-			# show every M-Pesa payment, and an overpayment must be visible as
-			# an embedded part plus an excess. Shift close is unaffected: it
-			# GROUP BYs mode_of_payment.
-			embedded_rows.append(
-				{
-					"mode_of_payment": mode,
-					"amount": take,
-					"reference_no": c.transid or None,
-					"phone_number": c.msisdn or None,
-				}
-			)
-			remaining -= take
-		leftover = amt - take
-		if leftover > 0:
-			excess_by_mode[mode] = excess_by_mode.get(mode, 0.0) + leftover
-			excess_registers_by_mode.setdefault(mode, []).append(c.mpesa_c2b_payment_register)
-
-	for row in embedded_rows:
-		invoice.append("payments", row)
-
-	# NOT set_missing_values(): when the invoice carries a real pos_profile
-	# (always true in production, unlike most fixtures in this test suite),
-	# it reaches ERPNext's set_pos_fields -> update_multi_mode_option, which
-	# unconditionally wipes and rebuilds the payments table from the POS
-	# Profile's configured modes with no amount set -- erasing the row just
-	# appended above. The invoice's accounts/taxes were already established
-	# when it was first created and saved as a draft, so this call is both
-	# unnecessary and destructive here.
-	invoice.calculate_taxes_and_totals()
-	invoice.save(ignore_permissions=True)
-
-	return {
-		"received_total": received_total,
-		"embedded_total": sum(r["amount"] for r in embedded_rows),
-		"excess_by_mode": excess_by_mode,
-		"excess_registers_by_mode": excess_registers_by_mode,
-	}
+	frappe.db.set_global("is_manual_reconciliation", "1")
+	try:
+		yield
+	finally:
+		frappe.db.set_global("is_manual_reconciliation", "0")
 
 
-def _finalize_mpesa_reconciliation(invoice, embed_summary: dict | None = None) -> list[dict]:
-	"""Post-submit phase of the hybrid M-Pesa flow.
+def _finalize_mpesa_reconciliation(invoice, allocation_summary: dict | None = None) -> list[dict]:
+	"""Post-submit phase: mark the receipts used and say where the money went.
 
-	Consumes every still-pending `Mpesa C2B Payment Register` row recorded on
-	the now-submitted invoice (marking it used, WITHOUT letting its own
-	`submit_payment` hook mint a duplicate Payment Entry -- the paid portion is
-	already embedded on the invoice), then creates a single unallocated
-	`Payment Entry` per mode for any overpaid excess. That excess is a reusable
-	customer credit surfaced via klik_pos's unallocated-payments screen, never
-	folded into the invoice as cash "change" (M-Pesa hands back no physical
-	change).
+	The invoice already took its share as advances (see _allocate_receipts_before_submit)
+	and ERPNext reconciled them at submit. What is left is bookkeeping on the register:
+	each row is submitted with submit_payment=0 (its entry already exists), pointing at
+	its Payment Entry and at this invoice, so an accountant opening the register can
+	follow the money in both directions.
 
-	`embed_summary` is the dict returned by `_embed_mpesa_payments`; the excess
-	amounts and the register rows that carried them come from it. When omitted
-	(no embed ran), only consumption happens and no excess PE is created.
-
-	Must only be called on a submitted invoice (docstatus=1): a Payment Entry
-	credit needs a submitted party context.
+	Returns one row per receipt whose entry still holds unallocated money, in the shape
+	PaymentDialog sums: excess_amount is the customer's credit from that receipt.
 	"""
-	from frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry import create_payment_entry
-
 	if invoice.docstatus != 1:
 		frappe.throw(
 			_("Cannot finalize Mpesa reconciliation for {0}: invoice is not submitted (docstatus={1}).").format(
@@ -488,75 +401,39 @@ def _finalize_mpesa_reconciliation(invoice, embed_summary: dict | None = None) -
 			)
 		)
 
-	summary = embed_summary or {}
-	excess_by_mode = summary.get("excess_by_mode") or {}
-	excess_registers_by_mode = summary.get("excess_registers_by_mode") or {}
-
-	# 1. Consume the register rows without minting a per-row Payment Entry:
-	#    submit_payment=0 makes the register `before_submit` skip
-	#    create_payment_entry, and `on_submit._reconcile_payment` early-returns
-	#    on an empty payment_entry -- so submitting is side-effect-free beyond
-	#    marking the row used.
-	pending_rows = _pending_mpesa_rows(invoice)
-	for child in pending_rows:
-		row = frappe.get_doc("Mpesa C2B Payment Register", child.mpesa_c2b_payment_register)
-		row.customer = invoice.customer
-		row.mode_of_payment = child.mode_of_payment
-		if not row.company:
-			row.company = invoice.company
-		row.submit_payment = 0
-		row.save(ignore_permissions=True)
-		row.submit()
-
-	# 2. Create one unallocated excess credit Payment Entry per mode.
 	results = []
-	for mode, excess in excess_by_mode.items():
-		excess = flt(excess)
-		if excess <= 0:
+	with _manual_reconciliation():
+		for child in _pending_mpesa_rows(invoice):
+			row = frappe.get_doc("Mpesa C2B Payment Register", child.mpesa_c2b_payment_register)
+			row.customer = invoice.customer
+			row.mode_of_payment = child.mode_of_payment
+			if not row.company:
+				row.company = invoice.company
+			row.submit_payment = 0
+			row.payment_entry = child.payment_entry
+			if row.meta.has_field("sales_invoice"):
+				row.sales_invoice = invoice.name
+			row.save(ignore_permissions=True)
+			row.submit()
+
+	for child in invoice.get("custom_mpesa_reconciled_payments") or []:
+		if not child.payment_entry:
 			continue
-
-		# Link the credit PE back onto the overflowing traceability rows, and
-		# reuse the same lookup to build the PE's reference. The Mpesa mode of
-		# payment resolves to a Bank-type account, and ERPNext's
-		# validate_transaction_reference() requires both reference_no and
-		# reference_date for Bank transactions -- use the real M-Pesa Trans ID(s)
-		# (not a generic description) so the credit is traceable back to the
-		# receipt(s) that funded it.
-		register_names = excess_registers_by_mode.get(mode, [])
-		matched_children = [
-			c
-			for c in invoice.get("custom_mpesa_reconciled_payments") or []
-			if c.mpesa_c2b_payment_register in register_names
-		]
-		transids = [c.transid for c in matched_children if c.transid]
-		reference_no = ", ".join(transids) if transids else f"Mpesa excess credit for {invoice.name}"
-
-		pe = create_payment_entry(
-			invoice.company,
-			invoice.customer,
-			excess,
-			invoice.currency,
-			mode,
-			party_type="Customer",
-			reference_no=reference_no,
-			reference_date=invoice.posting_date,
-			posting_date=invoice.posting_date,
-			submit=1,
+		unallocated = flt(frappe.db.get_value("Payment Entry", child.payment_entry, "unallocated_amount"))
+		if unallocated <= 0:
+			continue
+		# custom_mpesa_reconciled_payments is read-only on the submitted parent, so write
+		# the child column directly.
+		frappe.db.set_value(
+			"POS Mpesa Reconciled Payment", child.name, "excess_payment_entry", child.payment_entry
 		)
-
-		# custom_mpesa_reconciled_payments is read-only on the submitted parent,
-		# so write the child column directly.
-		for child in matched_children:
-			frappe.db.set_value(
-				"POS Mpesa Reconciled Payment", child.name, "excess_payment_entry", pe.name
-			)
-
 		results.append(
 			{
-				"mode_of_payment": mode,
-				"payment_entry": pe.name,
-				"excess_amount": excess,
-				"unallocated_amount": flt(pe.unallocated_amount),
+				"mode_of_payment": child.mode_of_payment,
+				"payment_entry": child.payment_entry,
+				"register": child.mpesa_c2b_payment_register,
+				"excess_amount": unallocated,
+				"unallocated_amount": unallocated,
 			}
 		)
 
