@@ -32,6 +32,7 @@ from klik_pos.api.sales_invoice import (
 	_get_refundable_cash,
 	_mark_invoice_queued,
 	create_partial_return,
+	get_customer_invoices_for_return,
 	process_queued_sales_invoice,
 	return_sales_invoice,
 )
@@ -445,6 +446,35 @@ class TestReturningAnAdvanceSettledSale(MpesaFirstCase):
 		self.assertEqual(flt(credit.paid_amount), 0.0)
 		self.assertEqual(self._bank_gl(credit.name), 0, "the return posts no M-Pesa movement")
 		self.assertEqual(flt(abs(credit.outstanding_amount)), 100.0, "the value stays as credit-note balance")
+
+	def test_the_return_picker_names_every_way_the_sale_was_paid(self):
+		"""The picker read the payments table, and only fell back to Payment Entries when
+		that table was empty - so a sale part-paid at the till and part-paid by receipt
+		showed the till money alone, and the cashier chose what to refund from half a
+		picture. It now reads the way Invoice History and the detail page do."""
+		invoice = self._draft(rate=200, posting_date=frappe.utils.nowdate())
+		invoice.append("payments", {"mode_of_payment": MODE, "amount": 100})
+		invoice.save(ignore_permissions=True)
+		invoice = self._record(invoice, self._receipt(100, "254700000801"))
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+		# The picker only offers invoices rung up on a till.
+		frappe.db.set_value(
+			"Sales Invoice", invoice.name, "custom_pos_opening_entry", "POS-OPE-TEST-RETURNS", update_modified=False
+		)
+
+		result = get_customer_invoices_for_return(CUSTOMER)
+
+		self.assertTrue(result["success"], result.get("error"))
+		row = next(r for r in result["data"] if r["name"] == invoice.name)
+		self.assertEqual(
+			sorted(flt(p["amount"]) for p in row["payment_methods"]),
+			[100.0, 100.0],
+			"the receipt's half of the sale went missing",
+		)
+		self.assertEqual({p["mode_of_payment"] for p in row["payment_methods"]}, {MODE})
 
 	def test_a_partial_return_credits_its_share_instead_of_paying_out(self):
 		invoice = self._settled(rate=50, qty=2)

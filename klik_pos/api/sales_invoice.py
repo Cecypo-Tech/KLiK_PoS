@@ -4339,40 +4339,18 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 
 			invoice_items_map[item.parent].append(item)
 
+		# Read the same way Invoice History and the detail page read it, so the three
+		# surfaces cannot disagree about how an invoice was paid. This replaces a
+		# Payment-Entry fallback that only looked for entries when the payments table was
+		# empty: M-Pesa money arrives as an advance, on an invoice whose payments table has
+		# the mode in it with no amount, so that fallback never fired for it.
+		payment_methods_map = _batch_fetch_payment_methods(invoice_names)
+
 		# Assign items to invoices
 		for invoice in invoices:
 			invoice.items = invoice_items_map.get(invoice.name, [])
 
-			# Get all payment methods from payment child table
-			invoice_doc = frappe.get_doc("Sales Invoice", invoice.name)
-			payment_methods = []
-			if invoice_doc.payments:
-				for payment in invoice_doc.payments:
-					payment_methods.append(
-						{"mode_of_payment": payment.mode_of_payment, "amount": payment.amount}
-					)
-			elif invoice_doc.status == "Draft":
-				payment_methods = []
-			else:
-				# Check Payment Entry if invoice payments table is empty but invoice is paid
-				if invoice_doc.status in ["Paid", "Partly Paid"] and not invoice_doc.payments:
-					payment_entries = frappe.get_all(
-						"Payment Entry Reference",
-						filters={"reference_name": invoice_doc.name, "reference_doctype": "Sales Invoice"},
-						fields=["parent", "allocated_amount"],
-						parent_doctype="Payment Entry",
-					)
-
-					for pe_ref in payment_entries:
-						payment_entry = frappe.get_doc("Payment Entry", pe_ref.parent)
-						if payment_entry.docstatus == 1:
-							payment_methods.append(
-								{
-									"mode_of_payment": payment_entry.mode_of_payment,
-									"amount": pe_ref.allocated_amount,
-								}
-							)
-
+			payment_methods = payment_methods_map.get(invoice.name, [])
 			invoice.payment_methods = payment_methods
 			# Keep backward compatibility - show first payment method or combined display.
 			# Dedupe modes (order-preserving): one row per receipt means several rows can
