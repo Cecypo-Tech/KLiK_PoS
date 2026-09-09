@@ -337,6 +337,57 @@ class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
 		self.assertEqual(invoice.docstatus, 1)
 
 
+class TestCancellingAConsumedReceipt(MpesaFirstCase):
+	"""The receipt may not un-pay a sale that is still standing.
+
+	Klik points the consumed register row at the Payment Entry it minted, which finally
+	gives frappe_mpsa_payments' own on_cancel something to cancel. Cancelling the row
+	therefore cancels an entry allocated to a live invoice, and ERPNext deletes that
+	invoice's advance rows on the way out: the sale silently reverts to unpaid with no
+	trace of what happened.
+	"""
+
+	def _settled(self, rate=100):
+		receipt = self._receipt(rate, "254700000701")
+		invoice = self._record(self._draft(rate=rate), receipt)
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+		invoice.reload()
+		return invoice, frappe.get_doc("Mpesa C2B Payment Register", receipt.name)
+
+	def test_a_receipt_allocated_to_a_live_sale_refuses_to_be_cancelled(self):
+		invoice, row = self._settled()
+		entry = invoice.custom_mpesa_reconciled_payments[0].payment_entry
+
+		with self.assertRaises(frappe.ValidationError):
+			row.cancel()
+
+		self.assertEqual(frappe.db.get_value("Payment Entry", entry, "docstatus"), 1)
+		self.assertEqual(
+			flt(
+				frappe.db.get_value(
+					"Payment Entry Reference",
+					{"parent": entry, "reference_name": invoice.name},
+					"allocated_amount",
+				)
+			),
+			100.0,
+			"the entry is still paying the invoice",
+		)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", invoice.name, "outstanding_amount")), 0.0)
+
+	def test_the_receipt_cancels_once_the_sale_it_paid_is_cancelled(self):
+		invoice, row = self._settled()
+
+		invoice.cancel()
+		row.reload()
+		row.cancel()
+
+		self.assertEqual(row.docstatus, 2)
+
+
 class TestReturningAnAdvanceSettledSale(MpesaFirstCase):
 	"""Refundable cash is money that came through the payments table, and no more.
 

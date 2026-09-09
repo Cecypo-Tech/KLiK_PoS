@@ -46,6 +46,12 @@ doc_events = {
     "POS Profile": {
         "validate": "klik_pos.overrides.pos_profile.remove_duplicate_sales_persons"
     },
+    # Owned by frappe_mpsa_payments; the handler is a no-op where that app, or the field it
+    # guards, is absent. Cancelling a consumed receipt would cancel the Payment Entry it
+    # points at and un-pay a live invoice.
+    "Mpesa C2B Payment Register": {
+        "before_cancel": "klik_pos.overrides.mpesa_register.refuse_cancel_while_invoice_live"
+    },
 }
 
 extend_doctype_class = {
