@@ -50,7 +50,7 @@ def _sell(label, total, registers):
 		"advances": [(a.reference_name, flt(a.allocated_amount), flt(a.advance_amount)) for a in si.advances],
 		"entries": [(e, flt(frappe.db.get_value("Payment Entry", e, "unallocated_amount"))) for e in entries],
 		"registers": [frappe.db.get_value("Mpesa C2B Payment Register", r, ["name", "docstatus", "payment_entry", "sales_invoice"], as_dict=True) for r in registers],
-		"mpesa_gl": frappe.db.sql("select voucher_no, debit, credit from `tabGL Entry` where voucher_no in %(v)s and account like 'Mpesa%%' and is_cancelled=0", {"v": tuple(entries + [si.name])}, as_dict=True),
+		"mpesa_gl": frappe.db.sql("select voucher_no, debit, credit from `tabGL Entry` where voucher_no in %(v)s and account like 'Mpesa%%' and is_cancelled=0", {"v": tuple([*entries, si.name])}, as_dict=True),
 	}
 
 

@@ -3919,6 +3919,8 @@ class CustomSalesInvoice(SalesInvoice):
 		# which made an M-Pesa-settled sale impossible to cancel at all. Exempt that
 		# doctype the way ERPNext exempts its own ledgers just above; the Payment Entry
 		# is released by ERPNext's unlink and the money stays on the books as credit.
+		# The exemption is doctype-wide, not field-wide: today the only field on that
+		# doctype pointing at a Sales Invoice is `sales_invoice`, which is exactly this link.
 		self.ignore_linked_doctypes = (
 			*(self.ignore_linked_doctypes or ()),
 			"Mpesa C2B Payment Register",

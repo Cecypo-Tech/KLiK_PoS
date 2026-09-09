@@ -97,20 +97,6 @@ class TestProcessMpesa(FrappeTestCase):
 			company=self.company, shortcode=self.shortcode, amount=amount, msisdn=msisdn
 		)
 
-	def _ensure_bank_mode_of_payment(self, mode_of_payment="Cheque", account="_Test Bank - _TC"):
-		# Real M-Pesa modes of payment resolve to a Bank-type account (unlike
-		# this file's other fixtures, which all use "Cash" and so never
-		# exercise Payment Entry's Bank-transaction validation). "Cheque" is a
-		# stock Mode of Payment already typed "Bank"; give it a default
-		# account for _Test Company if one isn't already configured.
-		if not frappe.db.get_value(
-			"Mode of Payment Account", {"company": self.company, "parent": mode_of_payment}
-		):
-			mop = frappe.get_doc("Mode of Payment", mode_of_payment)
-			mop.append("accounts", {"company": self.company, "default_account": account})
-			mop.save()
-		return mode_of_payment
-
 	def test_records_traceability_without_touching_payments(self):
 		invoice = self._draft_invoice()
 		invoice.insert(ignore_permissions=True)
