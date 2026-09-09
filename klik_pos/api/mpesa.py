@@ -284,6 +284,20 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 	return by_register
 
 
+def _assert_cancellation_releases_payments():
+	"""Refuse to tie money to an invoice on a site that could not untie it.
+
+	ERPNext only unlinks a Payment Entry when the invoice it settled is cancelled if
+	Accounts Settings says so; otherwise the cancel is refused outright and the cashier
+	is stuck with a wrong invoice they cannot undo. Better to fail here, once, at setup.
+	"""
+	if not frappe.db.get_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice"):
+		frappe.throw(
+			_("Accounts Settings > 'Unlink Payment on Cancellation of Invoice' must be enabled for M-Pesa receipts to be reconciled from the POS."),
+			frappe.ValidationError,
+		)
+
+
 def _allocate_receipts_before_submit(invoice) -> dict:
 	"""Pre-submit phase: settle the draft from the receipts' Payment Entries as advances.
 
@@ -317,6 +331,8 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	]
 	if not children:
 		return empty
+
+	_assert_cancellation_releases_payments()
 
 	by_register = _ensure_receipt_payment_entries(invoice)
 

@@ -297,3 +297,34 @@ class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
 		invoice.submit()  # must not raise PartialPaymentValidationError
 
 		self.assertEqual(invoice.docstatus, 1)
+
+
+class TestCancellation(MpesaFirstCase):
+	def test_cancelling_the_invoice_returns_the_money_to_the_entry(self):
+		"""Under the old flow the invoice's bank GL reversed and the register still said
+		'used'; 500 real shillings were on nobody's books. Now the entry simply becomes
+		unallocated again - the customer's credit, still tied to the receipt."""
+		invoice = self._record(self._draft(rate=500), self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+		invoice.reload()
+		pes = [c.payment_entry for c in invoice.custom_mpesa_reconciled_payments]
+
+		invoice.cancel()
+
+		self.assertEqual([flt(frappe.db.get_value("Payment Entry", p, "unallocated_amount")) for p in pes], [250.0, 450.0])
+		self.assertEqual([frappe.db.get_value("Payment Entry", p, "docstatus") for p in pes], [1, 1], "the money stays on the books")
+
+	def test_the_flow_refuses_to_start_on_a_site_that_would_strand_money_on_cancel(self):
+		original = frappe.db.get_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice")
+		frappe.db.set_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice", 0)
+		frappe.clear_cache()
+		try:
+			invoice = self._record(self._draft(rate=100), self._receipt(100))
+			with self.assertRaises(frappe.ValidationError):
+				_allocate_receipts_before_submit(invoice)
+		finally:
+			frappe.db.set_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice", original)
+			frappe.clear_cache()
