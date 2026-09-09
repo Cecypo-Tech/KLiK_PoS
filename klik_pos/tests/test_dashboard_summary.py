@@ -126,6 +126,11 @@ def _settle(invoice, amount, mode):
 	return pe
 
 
+def _mode_count(mode):
+	"""How many sales the mode row claims, right now."""
+	return next((row["count"] for row in _summary()["collected_by_mode"] if row["mode"] == mode), 0)
+
+
 def _summary(**kwargs):
 	params = {
 		"company": COMPANY,
@@ -234,6 +239,51 @@ class TestDashboardSummary(FrappeTestCase):
 			sum(row["amount"] for row in rows), identity["collected_at_sale"], places=2
 		)
 		self.assertAlmostEqual(sum(row["later"] for row in rows), identity["collected_later"], places=2)
+
+	def test_a_sale_settled_by_a_payment_entry_is_counted_once_for_its_mode(self):
+		"""M-Pesa carries its mode on a zero-amount payment row and its money on a Payment
+		Entry stamped with the shift. Both queries then land on the same mode row, and
+		counting the placeholder as a sale of its own turns one sale into two.
+
+		The placeholder is planted here because ERPNext's on_submit deletes zero-amount rows
+		today: how many sales a mode row claims must be a property of this reader, not of
+		what some other app's on_submit happens to tidy up.
+		"""
+		# The sale is settled after it is rung up, exactly as the M-Pesa flow settles one;
+		# the flag only says the till may ring it up that way.
+		partial = frappe.db.get_value("POS Profile", PROFILE, "allow_partial_payment")
+		frappe.db.set_value("POS Profile", PROFILE, "allow_partial_payment", 1)
+		self.addCleanup(frappe.db.set_value, "POS Profile", PROFILE, "allow_partial_payment", partial)
+		mode = frappe.get_doc("POS Profile", PROFILE).payments[0].mode_of_payment
+		before = _summary()
+		before_row = next(r for r in before["collected_by_mode"] if r["mode"] == mode)
+
+		settled_by_entry = _invoice(DAY_TWO, [(1, 40)])  # every payment row zero
+		payable = _payable(settled_by_entry)
+		stamped = _settle(settled_by_entry, payable, mode)
+		frappe.db.set_value(
+			"Payment Entry", stamped.name, "custom_pos_opening_entry", "POS-OPE-ADVANCE", update_modified=False
+		)
+		frappe.get_doc(
+			{
+				"doctype": "Sales Invoice Payment",
+				"parent": settled_by_entry.name,
+				"parenttype": "Sales Invoice",
+				"parentfield": "payments",
+				"idx": 1,
+				"docstatus": 1,
+				"mode_of_payment": mode,
+				"amount": 0,
+				"base_amount": 0,
+			}
+		).db_insert()
+
+		summary = _summary()
+
+		row = next(r for r in summary["collected_by_mode"] if r["mode"] == mode)
+		self.assertEqual(row["count"], before_row["count"] + 1, "the placeholder counted the sale twice")
+		self.assertAlmostEqual(row["amount"], before_row["amount"] + payable, places=2)
+		self.assertEqual(summary["identity"]["unexplained"], 0.0)
 
 	def test_a_split_payment_lands_on_every_mode_it_used(self):
 		"""Two modes on one invoice must appear as two rows, each carrying its own share."""

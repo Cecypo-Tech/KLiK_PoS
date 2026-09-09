@@ -392,13 +392,17 @@ def _collected_at_sale(condition: str, params: dict) -> tuple[list, float]:
 	Change is a parent-level field, so it cannot be summed in the same query as the payment
 	rows without being multiplied by the number of modes on the invoice. It is fetched
 	separately and taken off the cash row by the caller.
+
+	A zero-amount row is a mode with no money behind it - an M-Pesa sale keeps one to carry
+	the mode while the money arrives as a Payment Entry - so it is not a sale of this mode
+	and must not be counted as one, or the entry query counts the same sale a second time.
 	"""
 	rows = frappe.db.sql(
 		f"""
 		SELECT
 			sip.mode_of_payment AS mode,
 			COALESCE(SUM(sip.base_amount), 0) AS amount,
-			COUNT(DISTINCT sip.parent) AS count
+			COUNT(DISTINCT CASE WHEN sip.amount != 0 THEN sip.parent END) AS count
 		FROM `tabSales Invoice Payment` sip
 		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
 		WHERE {condition} AND sip.mode_of_payment IS NOT NULL AND sip.mode_of_payment != ''
