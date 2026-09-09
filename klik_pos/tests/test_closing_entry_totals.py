@@ -147,3 +147,43 @@ class TestClosingExpectsPaymentEntries(FrappeTestCase):
 		cash = next(r for r in rows if r["mode_of_payment"] == "Cash")
 		self.assertEqual(flt(cash["expected_amount"]), 300.0)
 		self.assertEqual(flt(cash["difference"]), 0.0)
+
+	def test_an_invoice_payment_row_and_a_payment_entry_in_the_same_mode_add_up(self):
+		"""Replacement would pass the first test; only a sum passes this one."""
+		from klik_pos.api.pos_entry import _calculate_payment_reconciliation
+
+		opening = frappe.new_doc("POS Opening Entry")
+		opening.update({"pos_profile": "_Test POS Profile", "company": "Dev Co", "user": frappe.session.user,
+			"period_start_date": frappe.utils.add_to_date(None, hours=-1), "posting_date": frappe.utils.nowdate()})
+		opening.append("balance_details", {"mode_of_payment": "Cash", "opening_amount": 0})
+		opening.flags.ignore_validate = True
+		opening.insert(ignore_permissions=True, ignore_mandatory=True)
+		frappe.db.set_value("POS Opening Entry", opening.name, {"docstatus": 1, "status": "Open"}, update_modified=False)
+		opening.reload()
+
+		# A sale paid at the till: 100 on the profile's Cash row.
+		si = frappe.new_doc("Sales Invoice")
+		si.update({"customer": "Walk In", "company": "Dev Co", "is_pos": 1, "pos_profile": "_Test POS Profile"})
+		si.append("items", {"item_code": "Consulting", "qty": 1, "rate": 100})
+		si.set_missing_values()
+		si.calculate_taxes_and_totals()
+		for row in si.payments:
+			row.amount = 0
+		si.payments[0].amount = flt(si.rounded_total) or flt(si.grand_total)
+		cash_mode = si.payments[0].mode_of_payment
+		si.insert(ignore_permissions=True)
+		si.submit()
+		frappe.db.set_value("Sales Invoice", si.name, "custom_pos_opening_entry", opening.name, update_modified=False)
+
+		receivable, bank = frappe.db.get_value("Company", "Dev Co", ["default_receivable_account", "default_cash_account"])
+		pe = frappe.get_doc({"doctype": "Payment Entry", "payment_type": "Receive", "party_type": "Customer", "party": "Walk In",
+			"company": "Dev Co", "posting_date": frappe.utils.nowdate(), "mode_of_payment": cash_mode, "paid_from": receivable,
+			"paid_to": bank, "paid_amount": 300, "received_amount": 300, "source_exchange_rate": 1, "target_exchange_rate": 1,
+			"paid_from_account_currency": "KES", "paid_to_account_currency": "KES", "custom_pos_opening_entry": opening.name})
+		pe.insert(ignore_permissions=True)
+		pe.submit()
+
+		rows = _calculate_payment_reconciliation(opening, {"closing_balance": {cash_mode: 0}})
+
+		mode_row = next(r for r in rows if r["mode_of_payment"] == cash_mode)
+		self.assertEqual(flt(mode_row["expected_amount"]), flt(si.payments[0].amount) + 300.0)
