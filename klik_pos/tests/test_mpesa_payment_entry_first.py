@@ -15,6 +15,7 @@ site's company-scoped fiscal year does not reject them.
 from unittest.mock import patch
 
 import frappe
+from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
@@ -322,15 +323,26 @@ class TestFinalizeAfterSubmit(MpesaFirstCase):
 class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
 	def test_an_invoice_settled_entirely_by_advances_is_not_a_partial_payment(self):
 		"""The gate compared paid_amount to the total. With M-Pesa money arriving as
-		advances, paid_amount is 0 on a fully paid sale and the till refused it."""
-		profile = frappe.db.get_value("POS Profile", {"company": COMPANY}, "name")
-		if not profile:
-			self.skipTest("no POS Profile for _Test Company on this site")
-		frappe.db.set_value("POS Profile", profile, "allow_partial_payment", 0)
+		advances, paid_amount is 0 on a fully paid sale and the till refused it.
+
+		Run against a real POS Profile rather than a bare draft, because that is what makes
+		the gate fire at all - and because saving a draft that names one reaches ERPNext's
+		set_pos_fields, which rebuilds `payments` from the profile and would take the
+		zero-amount mode row with it.
+		"""
+		# make_pos_profile clears the POS Profile table before inserting; the test
+		# transaction puts the site's own profiles back.
+		profile = make_pos_profile(company=COMPANY)
+		frappe.db.set_value("POS Profile", profile.name, "allow_partial_payment", 0)
 		invoice = self._record(self._draft(rate=100), self._receipt(100))
-		invoice.pos_profile = profile
+		invoice.pos_profile = profile.name
+
 		_allocate_receipts_before_submit(invoice)
 		invoice.reload()
+
+		self.assertEqual(flt(invoice.total_advance), 100.0)
+		self.assertEqual(flt(invoice.paid_amount), 0.0, "the gate has nothing but the advance to go on")
+		self.assertIn((MODE, 0.0), [(p.mode_of_payment, flt(p.amount)) for p in invoice.payments])
 
 		invoice.submit()  # must not raise PartialPaymentValidationError
 
