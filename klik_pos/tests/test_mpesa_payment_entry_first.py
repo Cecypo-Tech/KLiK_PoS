@@ -28,8 +28,11 @@ from klik_pos.api.mpesa import (
 )
 from klik_pos.api.sales_invoice import (
 	QUEUE_STATUSES,
+	_get_refundable_cash,
 	_mark_invoice_queued,
+	create_partial_return,
 	process_queued_sales_invoice,
+	return_sales_invoice,
 )
 from klik_pos.tests.mpesa_fixtures import make_c2b_payment
 
@@ -62,10 +65,10 @@ class MpesaFirstCase(FrappeTestCase):
 		settings.db_insert()
 		_ensure_bank_mode()
 
-	def _draft(self, rate=100):
+	def _draft(self, rate=100, qty=1, posting_date="2029-06-15"):
 		invoice = create_sales_invoice(
-			company=COMPANY, customer=CUSTOMER, is_pos=1, rate=rate,
-			posting_date="2029-06-15", do_not_save=True,
+			company=COMPANY, customer=CUSTOMER, is_pos=1, rate=rate, qty=qty,
+			posting_date=posting_date, do_not_save=True,
 		)
 		invoice.set_posting_time = 1
 		invoice.posting_time = "10:00:00"
@@ -332,6 +335,67 @@ class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
 		invoice.submit()  # must not raise PartialPaymentValidationError
 
 		self.assertEqual(invoice.docstatus, 1)
+
+
+class TestReturningAnAdvanceSettledSale(MpesaFirstCase):
+	"""Refundable cash is money that came through the payments table, and no more.
+
+	An M-Pesa sale holds none: the money is on a Payment Entry, and the mode row on the
+	invoice carries 0. Reading the refund ceiling as grand_total - outstanding made every
+	such sale look like a till full of cash, so a return handed the customer money the
+	drawer never took and posted a second M-Pesa movement to pay for it.
+	"""
+
+	def _settled(self, rate=100, qty=1, receipt=None):
+		# Today, not the module's 2029: a return posts on nowdate() and ERPNext refuses one
+		# that predates the invoice it returns.
+		draft = self._draft(rate=rate, qty=qty, posting_date=frappe.utils.nowdate())
+		invoice = self._record(draft, receipt or self._receipt(rate * qty, "254700000601"))
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+		invoice.reload()
+		return invoice
+
+	def _bank_gl(self, voucher):
+		return frappe.db.sql(
+			"select count(*) from `tabGL Entry` where voucher_no=%s and account=%s and is_cancelled=0",
+			(voucher, BANK_ACCOUNT),
+		)[0][0]
+
+	def test_an_advance_settled_sale_holds_no_refundable_cash(self):
+		invoice = self._settled()
+
+		self.assertEqual(flt(invoice.total_advance), 100.0)
+		self.assertEqual(flt(invoice.outstanding_amount), 0.0)
+		self.assertEqual(flt(_get_refundable_cash(invoice, invoice)), 0.0)
+
+	def test_a_full_return_credits_the_note_instead_of_paying_out(self):
+		invoice = self._settled()
+
+		result = return_sales_invoice(invoice.name)
+
+		self.assertTrue(result.get("success"), result.get("message"))
+		credit = frappe.get_doc("Sales Invoice", result["return_invoice"])
+		self.assertEqual([flt(p.amount) for p in credit.payments if flt(p.amount)], [], "no cash went back")
+		self.assertEqual(flt(credit.paid_amount), 0.0)
+		self.assertEqual(self._bank_gl(credit.name), 0, "the return posts no M-Pesa movement")
+		self.assertEqual(flt(abs(credit.outstanding_amount)), 100.0, "the value stays as credit-note balance")
+
+	def test_a_partial_return_credits_its_share_instead_of_paying_out(self):
+		invoice = self._settled(rate=50, qty=2)
+		item = invoice.items[0].item_code
+
+		result = create_partial_return(invoice.name, [{"item_code": item, "return_qty": 1}], payment_method=MODE)
+
+		self.assertTrue(result.get("success"), result.get("message"))
+		self.assertEqual(flt(result["refunded_amount"]), 0.0)
+		self.assertEqual(flt(result["credited_amount"]), 50.0)
+		self.assertIsNone(result["payment_method"], "nothing was paid out, so no mode paid it")
+		credit = frappe.get_doc("Sales Invoice", result["return_invoice"])
+		self.assertEqual([flt(p.amount) for p in credit.payments if flt(p.amount)], [])
+		self.assertEqual(self._bank_gl(credit.name), 0)
 
 
 class TestQueuedCheckoutSurvivesNothing(MpesaFirstCase):

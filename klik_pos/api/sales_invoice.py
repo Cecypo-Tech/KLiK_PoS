@@ -529,17 +529,23 @@ def _get_refundable_cash(original_invoice, return_doc=None):
 	``payments`` on a non-POS return, so a payment row there would be silently dropped and we
 	would report a refund that never happened. Refunding a non-POS credit note is a separate
 	Payment Entry against the credit note.
+
+	Money that settled the invoice as an advance is not cash either. An M-Pesa sale is
+	settled entirely that way - the drawer took nothing - so ``total_advance`` comes off the
+	ceiling; what goes back to that customer is the credit note, or a refund against the
+	Payment Entry that brought the money in.
 	"""
 	if return_doc is not None and not cint(return_doc.is_pos):
 		return 0.0
 
 	credit_already_applied, cash_already_refunded = _get_prior_return_adjustments(original_invoice.name)
-	return _compute_net_cash_held(
+	held = _compute_net_cash_held(
 		original_invoice.grand_total,
 		original_invoice.outstanding_amount,
 		credit_already_applied,
 		cash_already_refunded,
 	)
+	return max(0.0, held - flt(getattr(original_invoice, "total_advance", 0)))
 
 
 def _allocate_return_against_original(return_doc, original_invoice, refunded_cash):
@@ -3833,6 +3839,13 @@ def return_sales_invoice(invoice_name):
 		return_doc.posting_date = frappe.utils.nowdate()
 		_apply_klik_invoice_flags(return_doc, is_held=False, is_submitted=True)
 
+		# The mapper copies the advances table row for row, but Sales Invoice Advance marks
+		# its reference fields no_copy: an invoice settled by advances hands the credit note
+		# a row pointing at nothing, which ERPNext refuses to save. The money stays on the
+		# original's Payment Entry - the credit note inherits none of it.
+		return_doc.set("advances", [])
+		return_doc.total_advance = 0
+
 		for item in return_doc.items:
 			item.qty = -abs(item.qty)
 
@@ -4421,6 +4434,14 @@ def create_partial_return(
 		return_doc.posting_date = frappe.utils.nowdate()
 		return_doc.custom_delivery_date = frappe.utils.nowdate()
 		_apply_klik_invoice_flags(return_doc, is_held=False, is_submitted=True)
+
+		# The mapper copies the advances table row for row, but Sales Invoice Advance marks
+		# its reference fields no_copy: an invoice settled by advances hands the credit note
+		# a row pointing at nothing, which ERPNext refuses to save. The money stays on the
+		# original's Payment Entry - the credit note inherits none of it.
+		return_doc.set("advances", [])
+		return_doc.total_advance = 0
+
 
 		# Set the current POS opening entry
 		current_opening_entry = get_current_pos_opening_entry()

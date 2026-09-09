@@ -80,6 +80,20 @@ class TestAllocateReturnAgainstOriginal(FrappeTestCase):
 		_allocate_return_against_original(return_doc, SimpleNamespace(outstanding_amount=50), 0)
 		self.assertEqual(return_doc.update_outstanding_for_self, 1)
 
+	def test_an_advance_settled_sale_holds_no_refundable_cash(self):
+		# M-Pesa: the money is on a Payment Entry, so grand_total - outstanding reads 300 as
+		# cash in a drawer that never took any.
+		original = SimpleNamespace(
+			name="INV-ADV-0001", grand_total=300, outstanding_amount=0, total_advance=300
+		)
+		self.assertEqual(_get_refundable_cash(original, SimpleNamespace(is_pos=1)), 0)
+
+	def test_a_part_cash_part_advance_sale_refunds_only_the_cash(self):
+		original = SimpleNamespace(
+			name="INV-ADV-0002", grand_total=300, outstanding_amount=0, total_advance=200
+		)
+		self.assertEqual(_get_refundable_cash(original, SimpleNamespace(is_pos=1)), 100)
+
 	def test_non_pos_return_never_refunds_cash(self):
 		# ERPNext's set_paid_amount clears `payments` on any non-POS return, so a payment row
 		# there would be silently dropped and we would report a refund that never happened.
