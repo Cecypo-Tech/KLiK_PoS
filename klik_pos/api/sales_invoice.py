@@ -3900,6 +3900,19 @@ class CustomSalesInvoice(SalesInvoice):
 		self.validate_reserved_stock_availability()
 		self.validate_full_payment()
 
+	def on_cancel(self):
+		super().on_cancel()
+		# A consumed Mpesa C2B Payment Register row points at this invoice through a Link
+		# field and stays submitted: it is the record that the receipt was applied here.
+		# Frappe refuses to cancel a document that another submitted document links to,
+		# which made an M-Pesa-settled sale impossible to cancel at all. Exempt that
+		# doctype the way ERPNext exempts its own ledgers just above; the Payment Entry
+		# is released by ERPNext's unlink and the money stays on the books as credit.
+		self.ignore_linked_doctypes = (
+			*(self.ignore_linked_doctypes or ()),
+			"Mpesa C2B Payment Register",
+		)
+
 	def validate_reserved_stock_availability(self):
 		if not _should_reserve_stock(self):
 			return

@@ -317,6 +317,11 @@ class TestCancellation(MpesaFirstCase):
 		self.assertEqual([flt(frappe.db.get_value("Payment Entry", p, "unallocated_amount")) for p in pes], [250.0, 450.0])
 		self.assertEqual([frappe.db.get_value("Payment Entry", p, "docstatus") for p in pes], [1, 1], "the money stays on the books")
 
+		for child in invoice.custom_mpesa_reconciled_payments:
+			row = frappe.db.get_value("Mpesa C2B Payment Register", child.mpesa_c2b_payment_register, ["docstatus", "sales_invoice"], as_dict=True)
+			self.assertEqual(row.docstatus, 1, "the receipt's record of where it was applied is kept")
+			self.assertEqual(row.sales_invoice, invoice.name)
+
 	def test_the_flow_refuses_to_start_on_a_site_that_would_strand_money_on_cancel(self):
 		original = frappe.db.get_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice")
 		frappe.db.set_single_value("Accounts Settings", "unlink_payment_on_cancellation_of_invoice", 0)
