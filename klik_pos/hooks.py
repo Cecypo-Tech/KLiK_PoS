@@ -237,9 +237,11 @@ after_migrate = "klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fi
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "klik_pos.event.get_events"
-# }
+override_whitelisted_methods = {
+	# The desk's closing form sums payment rows only, so a shift's M-Pesa - which lives on
+	# Payment Entries now - showed as 0. The wrapper adds those entries back.
+	"erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry.get_invoices": "klik_pos.overrides.pos_closing_entry.get_invoices"
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

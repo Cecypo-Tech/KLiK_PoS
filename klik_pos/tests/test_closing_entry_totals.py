@@ -187,3 +187,132 @@ class TestClosingExpectsPaymentEntries(FrappeTestCase):
 
 		mode_row = next(r for r in rows if r["mode_of_payment"] == cash_mode)
 		self.assertEqual(flt(mode_row["expected_amount"]), flt(si.payments[0].amount) + 300.0)
+
+
+class TestDeskClosingFormSeesPaymentEntries(FrappeTestCase):
+	"""The standard POS Closing Entry form asked ERPNext for the shift's payments, and
+	ERPNext sums `Sales Invoice Payment` alone - so M-Pesa, which reaches the till as a
+	Payment Entry and leaves no payment row behind, came back as 0 and the cashier was
+	shown a shortfall the size of the day's takings. Klik's own closing page always
+	merged those entries; `klik_pos.overrides.pos_closing_entry.get_invoices` is what
+	puts the same figure in front of the desk.
+
+	Every figure here is measured as a change across one call, because the window a
+	closing covers is `_Test POS Profile` for the current user and the rest of the suite
+	leaves its own shifts inside it. What the override adds is the assertion; what the
+	site already held is not.
+	"""
+
+	PROFILE = "_Test POS Profile"
+
+	def _shift(self, hours_ago=1, closed_hours_ago=None):
+		opening = frappe.new_doc("POS Opening Entry")
+		opening.update(
+			{
+				"pos_profile": self.PROFILE,
+				"company": COMPANY,
+				"user": frappe.session.user,
+				"period_start_date": frappe.utils.add_to_date(None, hours=-hours_ago),
+				"posting_date": frappe.utils.nowdate(),
+			}
+		)
+		opening.append("balance_details", {"mode_of_payment": "Cash", "opening_amount": 0})
+		opening.flags.ignore_validate = True
+		opening.insert(ignore_permissions=True, ignore_mandatory=True)
+		values = {"docstatus": 1, "status": "Open"}
+		if closed_hours_ago is not None:
+			values["period_end_date"] = frappe.utils.add_to_date(None, hours=-closed_hours_ago)
+			values["status"] = "Closed"
+		frappe.db.set_value("POS Opening Entry", opening.name, values, update_modified=False)
+		opening.reload()
+		return opening
+
+	def _receive(self, shift, amount, mode="Cash"):
+		receivable, bank = frappe.db.get_value(
+			"Company", COMPANY, ["default_receivable_account", "default_cash_account"]
+		)
+		pe = frappe.get_doc(
+			{
+				"doctype": "Payment Entry", "payment_type": "Receive", "party_type": "Customer",
+				"party": "Walk In", "company": COMPANY, "posting_date": frappe.utils.nowdate(),
+				"mode_of_payment": mode, "paid_from": receivable, "paid_to": bank,
+				"paid_amount": amount, "received_amount": amount, "source_exchange_rate": 1,
+				"target_exchange_rate": 1, "paid_from_account_currency": "KES",
+				"paid_to_account_currency": "KES", "custom_pos_opening_entry": shift.name,
+			}
+		)
+		pe.insert(ignore_permissions=True)
+		pe.submit()
+		return pe
+
+	def _desk_total(self, shift, mode):
+		"""What the form would show for `mode` when closing `shift`."""
+		from klik_pos.overrides.pos_closing_entry import get_invoices
+
+		payments = get_invoices(
+			start=shift.period_start_date,
+			end=frappe.utils.now_datetime(),
+			pos_profile=self.PROFILE,
+			user=frappe.session.user,
+		)["payments"]
+		self.assertLessEqual(
+			len([p for p in payments if p.get("mode_of_payment") == mode]), 1, "one row per mode"
+		)
+		return sum(flt(p.get("amount")) for p in payments if p.get("mode_of_payment") == mode)
+
+	def test_a_shift_stamped_payment_entry_reaches_the_form(self):
+		shift = self._shift()
+		before = self._desk_total(shift, "Cash")
+
+		self._receive(shift, 300)
+
+		self.assertEqual(self._desk_total(shift, "Cash") - before, 300.0)
+
+	def test_it_adds_to_the_till_row_rather_than_replacing_it(self):
+		"""Replacement would pass the test above; only a sum passes this one."""
+		shift = self._shift()
+
+		si = frappe.new_doc("Sales Invoice")
+		si.update({"customer": "Walk In", "company": COMPANY, "is_pos": 1, "pos_profile": self.PROFILE})
+		si.append("items", {"item_code": ITEM, "qty": 1, "rate": 100})
+		si.set_missing_values()
+		si.calculate_taxes_and_totals()
+		for row in si.payments:
+			row.amount = 0
+		si.payments[0].amount = flt(si.rounded_total) or flt(si.grand_total)
+		mode = si.payments[0].mode_of_payment
+		before = self._desk_total(shift, mode)
+		si.insert(ignore_permissions=True)
+		si.submit()
+		# The flag the desk form filters on, written directly the way this module writes
+		# custom_pos_opening_entry: setting it before insert asks the site's POS Settings
+		# for permission, and what is under test is the query, not that validation.
+		frappe.db.set_value("Sales Invoice", si.name, "is_created_using_pos", 1, update_modified=False)
+
+		till_only = self._desk_total(shift, mode)
+		self.assertEqual(till_only - before, flt(si.payments[0].amount), "ERPNext still counts the till")
+
+		self._receive(shift, 300, mode=mode)
+
+		self.assertEqual(self._desk_total(shift, mode) - till_only, 300.0, "and the entry is added to it")
+
+	def test_a_previous_shift_on_the_same_till_is_left_out(self):
+		"""Its money was reconciled when it closed. The boundary is exclusive, so a shift
+		that ended exactly as this one began stays with its own closing entry."""
+		current = self._shift(hours_ago=1)
+		before = self._desk_total(current, "Cash")
+		earlier = self._shift(hours_ago=6, closed_hours_ago=3)
+
+		self._receive(earlier, 500)
+
+		self.assertEqual(self._desk_total(current, "Cash"), before, "the closed shift stays out")
+
+	def test_the_desk_form_is_actually_wired_to_this_wrapper(self):
+		"""The fix is a hook. Without the entry the form calls ERPNext directly and none
+		of the tests above describe what a cashier sees."""
+		overrides = frappe.get_hooks("override_whitelisted_methods", {})
+
+		self.assertIn(
+			"klik_pos.overrides.pos_closing_entry.get_invoices",
+			overrides.get("erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry.get_invoices", []),
+		)
