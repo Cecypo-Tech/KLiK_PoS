@@ -269,14 +269,14 @@ class TestFinalizeAfterSubmit(MpesaFirstCase):
 		frappe.clear_cache()
 		other = create_sales_invoice(company=COMPANY, customer=CUSTOMER, rate=1000, posting_date="2029-06-10")
 
-		invoice, results = self._submit_with(200, self._receipt(5000, "254700000301"))
+		_invoice, results = self._submit_with(200, self._receipt(5000, "254700000301"))
 
 		self.assertEqual(flt(frappe.db.get_value("Payment Entry", results[0]["payment_entry"], "unallocated_amount")), 4800.0)
 		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", other.name, "outstanding_amount")), 1000.0)
 		self.assertEqual(frappe.db.get_global("is_manual_reconciliation"), "0", "the guard is released")
 
 	def test_a_fully_used_receipt_reports_no_excess(self):
-		invoice, results = self._submit_with(100, self._receipt(100))
+		_invoice, results = self._submit_with(100, self._receipt(100))
 
 		self.assertEqual(results, [])
 

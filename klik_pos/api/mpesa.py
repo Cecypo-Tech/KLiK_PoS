@@ -1,11 +1,26 @@
-"""Read-only search endpoint backing the POS checkout's "M-Pesa Payment
-Options" reconciliation modal.
+"""M-Pesa reconciliation for the POS checkout: a read-only search endpoint plus
+the Payment-Entry-first flow that turns selected `Mpesa C2B Payment Register`
+rows into money on a Sales Invoice.
 
-Queries the `Mpesa C2B Payment Register` doctype (owned by the
+`get_mpesa_payments` is a read-only search backing the checkout's "M-Pesa
+Payment Options" modal; it queries the register doctype (owned by the
 `frappe_mpsa_payments` app) directly via `frappe.get_all`/`frappe.db.count` —
 normal, unprivileged, same-site cross-app data access that requires no code
-change in the owning app. This mirrors the query pattern used by
+change in the owning app, mirroring the query pattern used by
 `cecypo_powerpack.quick_pay.api.list_pending_mpesa_payments`.
+
+Reconciliation itself runs in three phases: `process_mpesa` records the
+register rows the cashier selected as trace child rows on the draft invoice;
+`_allocate_receipts_before_submit` mints one submitted Payment Entry per
+receipt (idempotently) and appends `Sales Invoice Advance` rows FIFO up to
+the invoice's payable total, plus a zero-amount payment row per mode, then
+saves the draft; after submit, `_finalize_mpesa_reconciliation` reconciles
+the advances (ERPNext skips this itself for POS invoices), consumes the
+register rows under the `is_manual_reconciliation` guard with `payment_entry`
+and `sales_invoice` set, and reports any receipt whose entry still holds
+unallocated money. The invariant throughout: one receipt, one Payment Entry,
+one bank line — any overpaid remainder simply stays unallocated on that same
+entry rather than becoming a separate credit voucher.
 """
 
 from contextlib import contextmanager
