@@ -491,7 +491,7 @@ class TestReturningAnAdvanceSettledSale(MpesaFirstCase):
 		self.assertEqual(self._bank_gl(credit.name), 0)
 
 
-class TestQueuedCheckoutSurvivesNothing(MpesaFirstCase):
+class TestQueuedCheckoutThatCannotFinish(MpesaFirstCase):
 	"""A background checkout that cannot finish must not report success.
 
 	The failure this pins had the worst possible shape: the advances had already zeroed

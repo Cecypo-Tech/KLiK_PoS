@@ -4422,7 +4422,6 @@ def create_partial_return(
 		return_doc.set("advances", [])
 		return_doc.total_advance = 0
 
-
 		# Set the current POS opening entry
 		current_opening_entry = get_current_pos_opening_entry()
 		if current_opening_entry:

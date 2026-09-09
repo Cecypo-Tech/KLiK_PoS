@@ -126,11 +126,6 @@ def _settle(invoice, amount, mode):
 	return pe
 
 
-def _mode_count(mode):
-	"""How many sales the mode row claims, right now."""
-	return next((row["count"] for row in _summary()["collected_by_mode"] if row["mode"] == mode), 0)
-
-
 def _summary(**kwargs):
 	params = {
 		"company": COMPANY,
