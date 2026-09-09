@@ -433,6 +433,11 @@ def _finalize_mpesa_reconciliation(invoice, allocation_summary: dict | None = No
 
 	ERPNext skips that reconciliation for POS invoices, so this calls it here instead.
 
+	`update_against_document_in_jv` is not idempotent - it appends a reference row to the
+	entry on every call - so finalize must not be re-run on an invoice whose advances are
+	already reconciled; a failure here rolls the whole submission back rather than leaving
+	an invoice to be finalized a second time.
+
 	Returns one row per receipt whose entry still holds unallocated money, in the shape
 	PaymentDialog sums: excess_amount is the customer's credit from that receipt.
 	"""

@@ -12,6 +12,8 @@ its on_update commit cannot escape the test transaction, and invoices pinned to 
 site's company-scoped fiscal year does not reject them.
 """
 
+from unittest.mock import patch
+
 import frappe
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from frappe.tests.utils import FrappeTestCase
@@ -23,6 +25,11 @@ from klik_pos.api.mpesa import (
 	_finalize_mpesa_reconciliation,
 	_manual_reconciliation,
 	process_mpesa,
+)
+from klik_pos.api.sales_invoice import (
+	QUEUE_STATUSES,
+	_mark_invoice_queued,
+	process_queued_sales_invoice,
 )
 from klik_pos.tests.mpesa_fixtures import make_c2b_payment
 
@@ -325,6 +332,72 @@ class TestPartialPaymentGateCountsAdvances(MpesaFirstCase):
 		invoice.submit()  # must not raise PartialPaymentValidationError
 
 		self.assertEqual(invoice.docstatus, 1)
+
+
+class TestQueuedCheckoutSurvivesNothing(MpesaFirstCase):
+	"""A background checkout that cannot finish must not report success.
+
+	The failure this pins had the worst possible shape: the advances had already zeroed
+	the outstanding, so the invoice read Paid while its Payment Entries sat unreconciled
+	and the receipts stayed pending. The cashier saw a sale; the books did not have one.
+	"""
+
+	def test_a_finalize_failure_fails_the_request_rather_than_posting_a_half_done_sale(self):
+		invoice = self._record(self._draft(rate=100), self._receipt(100, "254700000501"))
+		_mark_invoice_queued(invoice, frappe.session.user)
+		invoice.save(ignore_permissions=True)
+		# The worker runs against a draft an earlier request committed, and its failure path
+		# rolls back; without a commit here that rollback would take this fixture with it and
+		# the test would be measuring its own transaction instead of the handler.
+		registers = [c.mpesa_c2b_payment_register for c in invoice.custom_mpesa_reconciled_payments]
+		frappe.db.commit()
+		self.addCleanup(self._remove_committed, invoice.name, registers)
+
+		with (
+			patch(
+				"klik_pos.api.mpesa._finalize_mpesa_reconciliation",
+				side_effect=Exception("reconciliation exploded"),
+			),
+			patch("klik_pos.api.sales_invoice._notify_queue_failure"),
+		):
+			result = process_queued_sales_invoice(invoice.name)
+
+		self.assertFalse(result["success"], "the queue reported a sale it had not posted")
+		row = frappe.db.get_value(
+			"Sales Invoice", invoice.name, ["queue_status", "docstatus"], as_dict=True
+		)
+		self.assertEqual(row.queue_status, QUEUE_STATUSES["failed"])
+		self.assertEqual(row.docstatus, 0, "no submitted invoice may survive a failed finalize")
+		self.assertEqual(
+			frappe.db.get_value("Mpesa C2B Payment Register", registers[0], "docstatus"),
+			0,
+			"the receipt is still there to be sold again",
+		)
+
+	def _remove_committed(self, invoice_name, registers):
+		"""This test commits, so the class-level rollback can no longer clean up after it."""
+		if frappe.db.exists("Sales Invoice", invoice_name):
+			invoice = frappe.get_doc("Sales Invoice", invoice_name)
+			entries = [c.payment_entry for c in invoice.custom_mpesa_reconciled_payments if c.payment_entry]
+			if invoice.docstatus == 1:
+				invoice.flags.ignore_permissions = True
+				invoice.cancel()
+			frappe.delete_doc("Sales Invoice", invoice_name, force=True, ignore_permissions=True)
+			for entry in entries:
+				if frappe.db.exists("Payment Entry", entry):
+					pe = frappe.get_doc("Payment Entry", entry)
+					if pe.docstatus == 1:
+						pe.flags.ignore_permissions = True
+						pe.cancel()
+					frappe.delete_doc("Payment Entry", entry, force=True, ignore_permissions=True)
+		for register in registers:
+			if frappe.db.exists("Mpesa C2B Payment Register", register):
+				frappe.delete_doc(
+					"Mpesa C2B Payment Register", register, force=True, ignore_permissions=True
+				)
+		# Inserted at DB level in setUpClass, so removed the same way.
+		frappe.db.delete("Mpesa Settings", {"business_shortcode": self.shortcode})
+		frappe.db.commit()
 
 
 class TestCancellation(MpesaFirstCase):

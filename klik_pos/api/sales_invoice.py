@@ -2054,13 +2054,11 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 		if doc.get("custom_mpesa_reconciled_payments"):
 			from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
 
-			try:
-				_finalize_mpesa_reconciliation(doc, mpesa_allocation)
-			except Exception:
-				frappe.log_error(
-					frappe.get_traceback(),
-					f"Failed to finalize Mpesa reconciliation for {doc.name}",
-				)
+			# Deliberately unguarded: a finalize that fails leaves the invoice reading Paid
+			# (the advances already zeroed its outstanding) with its entries unreconciled and
+			# its receipts unconsumed. Let it reach the handler below, which rolls the whole
+			# submission back and tells the cashier.
+			_finalize_mpesa_reconciliation(doc, mpesa_allocation)
 		_update_queue_fields(doc, QUEUE_STATUSES["submitted"], attempts=attempts)
 		if hasattr(doc, "queue_error"):
 			doc.queue_error = ""
