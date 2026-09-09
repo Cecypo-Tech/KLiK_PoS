@@ -3,7 +3,7 @@ import traceback
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, today
+from frappe.utils import flt, now_datetime, today
 
 # Import for clearing cache and clearing draft invoices on close
 from klik_pos.api.cache import clear_backend_cache
@@ -233,6 +233,13 @@ def _calculate_payment_reconciliation(opening_entry, data):
 		as_dict=True,
 	)
 	sales_map = {row.mode_of_payment: row.total_amount for row in sales_data}
+
+	# Money that reached the till as a Payment Entry stamped with this shift - every M-Pesa
+	# receipt now - belongs in the expected amount exactly as a payment row would.
+	from klik_pos.api.payment import _fetch_opening_payment_entry_data
+
+	for row in _fetch_opening_payment_entry_data(opening_entry_name):
+		sales_map[row.mode_of_payment] = flt(sales_map.get(row.mode_of_payment, 0)) + flt(row.total_amount)
 
 	# Build reconciliation entries
 	closing_balance = data.get("closing_balance", {})

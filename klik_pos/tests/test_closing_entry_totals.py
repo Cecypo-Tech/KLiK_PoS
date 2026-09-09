@@ -117,3 +117,33 @@ class TestClosingEntryTotals(FrappeTestCase):
 		totals = _calculate_closing_entry_totals(f"TEST-OPE-EMPTY-{frappe.generate_hash(length=6)}")
 
 		self.assertEqual(totals, {"total_quantity": 0.0, "net_total": 0.0, "grand_total": 0.0})
+
+
+class TestClosingExpectsPaymentEntries(FrappeTestCase):
+	def test_a_shift_stamped_payment_entry_counts_toward_expected(self):
+		"""M-Pesa money is on Payment Entries now, and the closing entry compared the
+		drawer against payment rows alone - which would have said the till took none."""
+		from klik_pos.api.pos_entry import _calculate_payment_reconciliation
+
+		opening = frappe.new_doc("POS Opening Entry")
+		opening.update({"pos_profile": "_Test POS Profile", "company": "Dev Co", "user": frappe.session.user,
+			"period_start_date": frappe.utils.add_to_date(None, hours=-1), "posting_date": frappe.utils.nowdate()})
+		opening.append("balance_details", {"mode_of_payment": "Cash", "opening_amount": 0})
+		opening.flags.ignore_validate = True
+		opening.insert(ignore_permissions=True, ignore_mandatory=True)
+		frappe.db.set_value("POS Opening Entry", opening.name, {"docstatus": 1, "status": "Open"}, update_modified=False)
+		opening.reload()
+
+		receivable, bank = frappe.db.get_value("Company", "Dev Co", ["default_receivable_account", "default_cash_account"])
+		pe = frappe.get_doc({"doctype": "Payment Entry", "payment_type": "Receive", "party_type": "Customer", "party": "Walk In",
+			"company": "Dev Co", "posting_date": frappe.utils.nowdate(), "mode_of_payment": "Cash", "paid_from": receivable,
+			"paid_to": bank, "paid_amount": 300, "received_amount": 300, "source_exchange_rate": 1, "target_exchange_rate": 1,
+			"paid_from_account_currency": "KES", "paid_to_account_currency": "KES", "custom_pos_opening_entry": opening.name})
+		pe.insert(ignore_permissions=True)
+		pe.submit()
+
+		rows = _calculate_payment_reconciliation(opening, {"closing_balance": {"Cash": 300}})
+
+		cash = next(r for r in rows if r["mode_of_payment"] == "Cash")
+		self.assertEqual(flt(cash["expected_amount"]), 300.0)
+		self.assertEqual(flt(cash["difference"]), 0.0)
