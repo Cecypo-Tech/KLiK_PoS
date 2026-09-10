@@ -87,13 +87,16 @@ def create_opening_entry():
 		doc.period_start_date = now_datetime()
 
 		for row in balance_details:
-			doc.append(
-				"balance_details",
-				{
-					"mode_of_payment": row.get("mode_of_payment"),
-					"opening_amount": row.get("opening_amount"),
-				},
-			)
+			detail = {
+				"mode_of_payment": row.get("mode_of_payment"),
+				"opening_amount": row.get("opening_amount"),
+			}
+			# Carried through to the row the amount sits on; validate_opening_entry decides
+			# whether it was needed.
+			reason = (row.get("variance_reason") or "").strip()
+			if reason and frappe.db.has_column("POS Opening Entry Detail", "custom_variance_reason"):
+				detail["custom_variance_reason"] = reason
+			doc.append("balance_details", detail)
 
 		doc.insert()
 		doc.submit()
@@ -123,6 +126,12 @@ def create_opening_entry():
 
 
 def validate_opening_entry(doc, method):
+	from klik_pos.api.opening_balances import enforce
+
+	# Continuity with the last closing, and no float on a mode that never holds one.
+	# On the document, so a desk-created opening is held to the same rules as the till's.
+	enforce(doc)
+
 	exists = frappe.db.exists(
 		"POS Opening Entry",
 		{

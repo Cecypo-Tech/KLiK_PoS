@@ -693,7 +693,16 @@ class TestRestrictedSalesUser(FrappeTestCase):
 			entry.company = cls.company
 			entry.pos_profile = profile.name
 			entry.user = CASHIER
-			entry.append("balance_details", {"mode_of_payment": cls.payment_mode, "opening_amount": 0})
+			entry.append(
+				"balance_details",
+				{
+					"mode_of_payment": cls.payment_mode,
+					"opening_amount": 0,
+					# The till asks why an opening differs from the last closing on this
+					# profile, and a fixture that opens empty has to answer like anyone else.
+					"custom_variance_reason": "test fixture: shift opened with an empty drawer",
+				},
+			)
 			entry.insert(ignore_permissions=True)
 			entry.submit()
 			cls.opening_entry = entry.name

@@ -350,6 +350,45 @@ def ensure_pos_closing_entry_invoice_table():
         )
 
 
+def install_opening_entry_variance_fields():
+    """Two columns on the opening's balance rows: what the till last closed at, and why
+    today's figure differs. Both are read by klik_pos.api.opening_balances, which refuses
+    an unexplained change; the guard degrades to silence if these are ever absent."""
+    fields = [
+        {
+            "fieldname": "custom_previous_closing_amount",
+            "label": "Counted At Last Closing",
+            "fieldtype": "Currency",
+            "read_only": 1,
+            "insert_after": "opening_amount",
+            "description": "What this mode was counted at when this till last closed. Zero for a mode that holds no float.",
+            "module": "KLiK PoS",
+        },
+        {
+            "fieldname": "custom_variance_reason",
+            "label": "Reason For Difference",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_previous_closing_amount",
+            "description": "Required when the opening amount differs from what this till last closed at.",
+            "module": "KLiK PoS",
+        },
+    ]
+    missing = [
+        f for f in fields if not frappe.db.has_column("POS Opening Entry Detail", f["fieldname"])
+    ]
+    if missing:
+        create_custom_fields({"POS Opening Entry Detail": missing}, update=True)
+    return [f["fieldname"] for f in missing]
+
+
+def ensure_opening_entry_variance_fields():
+    """Hook entrypoint. Never abort a migrate over a reporting column."""
+    try:
+        install_opening_entry_variance_fields()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "klik_pos: opening variance field install failed")
+
+
 def ensure_pos_profile_feature_fields():
     """Hook entrypoint for after_migrate / after_install. Never abort on failure."""
     try:
@@ -359,3 +398,4 @@ def ensure_pos_profile_feature_fields():
     ensure_pos_extra_fields_child()
     ensure_mpesa_reconciled_payment_child()
     ensure_pos_closing_entry_invoice_table()
+    ensure_opening_entry_variance_fields()

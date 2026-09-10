@@ -99,7 +99,16 @@ def _open_shift():
 			"period_start_date": frappe.utils.now_datetime(),
 		}
 	)
-	doc.append("balance_details", {"mode_of_payment": CASH, "opening_amount": OPENING_CASH})
+	# The till insists on an explanation when the float does not match the last closing,
+	# which for a script that re-runs on the same profile is every time after the first.
+	doc.append(
+		"balance_details",
+		{
+			"mode_of_payment": CASH,
+			"opening_amount": OPENING_CASH,
+			"custom_variance_reason": "QA scenario run: float reset to a known figure",
+		},
+	)
 	doc.append("balance_details", {"mode_of_payment": MPESA, "opening_amount": 0})
 	doc.insert(ignore_permissions=True)
 	doc.submit()

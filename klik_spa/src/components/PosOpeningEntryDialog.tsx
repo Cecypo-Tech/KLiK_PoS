@@ -1,7 +1,19 @@
 import { AlertCircle, Banknote, CheckCircle2, CreditCard, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { usePaymentModes } from "../hooks/usePaymentModes";
-import { useCreatePOSOpeningEntry } from '../services/opeiningEntry';
+import { fetchOpeningSuggestion, useCreatePOSOpeningEntry } from '../services/opeiningEntry';
+import {
+  buildOpeningRows,
+  canOpen,
+  needsReason,
+  setAmount,
+  setReason,
+  toPayload,
+  totalFloat,
+  variance,
+  type OpeningRow,
+  type OpeningSuggestion,
+} from '../utils/openingBalances';
 import { clearAllCache } from '../utils/clearCache';
 import { formatCurrencyWithSymbol } from '../utils/currency';
 import { usePOSProfileStore } from '../stores/posProfileStore';
@@ -39,7 +51,8 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
 }) => {
   const [step, setStep] = useState<'form' | 'creating' | 'success'>('form');
   const [selectedProfile, setSelectedProfile] = useState<string>('');
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<OpeningRow[]>([]);
+  const [suggestion, setSuggestion] = useState<OpeningSuggestion | null>(null);
   const [error, setError] = useState<string>('');
 
   const { createOpeningEntry, isCreating, error: createError, success } = useCreatePOSOpeningEntry();
@@ -102,6 +115,18 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   };
 
   useEffect(() => {
+    let current = true;
+    setSuggestion(null);
+    if (!profileForPaymentModes) return;
+    fetchOpeningSuggestion(profileForPaymentModes).then((data) => {
+      if (current) setSuggestion(data);
+    });
+    return () => {
+      current = false;
+    };
+  }, [profileForPaymentModes]);
+
+  useEffect(() => {
     if (selectedProfile && paymentModesLoading) {
       setPaymentMethods([]);
     }
@@ -113,15 +138,9 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
         return 0;
       });
 
-      const methods = sortedPaymentModes.map((payment: any) => ({
-        mode_of_payment: payment.mode_of_payment,
-        opening_amount: 0,
-        type: payment.type || 'General',
-        account: payment.default_account || payment.account
-      }));
-      setPaymentMethods(methods);
+      setPaymentMethods(buildOpeningRows(sortedPaymentModes, suggestion));
     }
-  }, [paymentModes, paymentModesLoading, selectedProfile]);
+  }, [paymentModes, paymentModesLoading, selectedProfile, suggestion]);
 
   useEffect(() => {
     if (paymentModesError) {
@@ -130,14 +149,11 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   }, [paymentModesError]);
 
   const updatePaymentAmount = (index: number, amount: number) => {
-    if (index < 0 || index >= paymentMethods.length) return;
-    setPaymentMethods(prev => {
-      const next = [...prev];
-      if (next[index]) {
-        next[index] = { ...next[index], opening_amount: amount };
-      }
-      return next;
-    });
+    setPaymentMethods(prev => setAmount(prev, index, amount));
+  };
+
+  const updateVarianceReason = (index: number, reason: string) => {
+    setPaymentMethods(prev => setReason(prev, index, reason));
   };
 
   const handleCreateOpeningEntry = async () => {
@@ -145,10 +161,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
       setStep('creating');
       setError('');
 
-      const openingBalance = paymentMethods.map(method => ({
-        mode_of_payment: method.mode_of_payment,
-        opening_amount: method.opening_amount || 0
-      }));
+      const openingBalance = toPayload(paymentMethods);
       
       await createOpeningEntry(openingBalance, selectedProfile || undefined);
 
@@ -177,7 +190,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
     }
   };
 
-  const totalAmount = paymentMethods.reduce((sum, method) => sum + (method.opening_amount || 0), 0);
+  const totalAmount = totalFloat(paymentMethods);
 
   useEffect(() => {
     if (success && step === 'creating') {
@@ -201,6 +214,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
       setError('');
       setSelectedProfile('');
       setPaymentMethods([]);
+      setSuggestion(null);
     }
   }, [isOpen]);
 
@@ -271,29 +285,66 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                     Opening Balances
                   </label>
                   <div className="space-y-3 max-h-60 overflow-y-auto">
-                    {paymentMethods.map((method, index) => (
-                      <div key={method.mode_of_payment} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                        {getPaymentIcon(method.type)}
-                        <div className="flex-1">
-                          <div className="font-medium text-sm text-gray-900">
-                            {method.mode_of_payment}
+                    {paymentMethods.map((method, index) => {
+                      const drift = variance(method);
+                      const wantsReason = needsReason(method);
+                      return (
+                      <div key={method.mode_of_payment} className="p-3 bg-gray-50 rounded-lg space-y-2">
+                        <div className="flex items-center space-x-3">
+                          {getPaymentIcon(method.type)}
+                          <div className="flex-1">
+                            <div className="font-medium text-sm text-gray-900">
+                              {method.mode_of_payment}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {method.carriesFloat
+                                ? method.hasHistory
+                                  ? `${method.type} \u00b7 last closed at ${formatCurrencyWithSymbol(method.previousClosing, posDetails?.currency || 'USD')}`
+                                  : `${method.type} \u00b7 no previous closing`
+                                : `${method.type} \u00b7 goes to its account, no float`}
+                            </div>
                           </div>
-                          <div className="text-xs text-gray-500">
-                            {method.type}
-                          </div>
+                          {method.carriesFloat ? (
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={method.amount || ''}
+                              onChange={(e) => updatePaymentAmount(index, parseFloat(e.target.value) || 0)}
+                              className="w-24 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-600"
+                              placeholder="0.00"
+                              disabled={profilesLoading}
+                            />
+                          ) : (
+                            <span className="w-24 px-2 py-1 text-right text-gray-400" title="Only cash is counted into the drawer">
+                              0.00
+                            </span>
+                          )}
                         </div>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={method.opening_amount || ''}
-                          onChange={(e) => updatePaymentAmount(index, parseFloat(e.target.value) || 0)}
-                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-600"
-                          placeholder="0.00"
-                          disabled={profilesLoading}
-                        />
+
+                        {drift !== 0 && (
+                          <div className="text-xs text-amber-700">
+                            {drift > 0 ? 'Over' : 'Short'} by{' '}
+                            {formatCurrencyWithSymbol(Math.abs(drift), posDetails?.currency || 'USD')} against the last closing.
+                          </div>
+                        )}
+
+                        {drift !== 0 && (
+                          <textarea
+                            value={method.reason}
+                            onChange={(e) => updateVarianceReason(index, e.target.value)}
+                            rows={2}
+                            placeholder="Why is it different? e.g. 500 banked overnight, slip 4471"
+                            className={`w-full px-2 py-1 text-sm border rounded text-gray-700 focus:outline-none focus:ring-1 ${
+                              wantsReason
+                                ? 'border-amber-400 focus:ring-amber-500'
+                                : 'border-gray-300 focus:ring-blue-500'
+                            }`}
+                          />
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-gray-200">
@@ -329,7 +380,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                     isCreating ||
                     isLoadingPaymentModes ||
                     !selectedProfile ||
-                    paymentMethods.length === 0
+                    !canOpen(paymentMethods)
                   }
                   className="flex-1 px-4 py-2 bg-beveren-700 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
