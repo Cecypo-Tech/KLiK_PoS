@@ -205,7 +205,7 @@ class TestDeskClosingFormSeesPaymentEntries(FrappeTestCase):
 
 	PROFILE = "_Test POS Profile"
 
-	def _shift(self, hours_ago=1, closed_hours_ago=None):
+	def _shift(self, hours_ago=1, closing_entry=None):
 		opening = frappe.new_doc("POS Opening Entry")
 		opening.update(
 			{
@@ -220,9 +220,11 @@ class TestDeskClosingFormSeesPaymentEntries(FrappeTestCase):
 		opening.flags.ignore_validate = True
 		opening.insert(ignore_permissions=True, ignore_mandatory=True)
 		values = {"docstatus": 1, "status": "Open"}
-		if closed_hours_ago is not None:
-			values["period_end_date"] = frappe.utils.add_to_date(None, hours=-closed_hours_ago)
+		if closing_entry:
+			# What closing actually leaves behind: a status and a link. period_end_date
+			# stays empty, which is why nothing here may read it.
 			values["status"] = "Closed"
+			values["pos_closing_entry"] = closing_entry
 		frappe.db.set_value("POS Opening Entry", opening.name, values, update_modified=False)
 		opening.reload()
 		return opening
@@ -296,16 +298,27 @@ class TestDeskClosingFormSeesPaymentEntries(FrappeTestCase):
 
 		self.assertEqual(self._desk_total(shift, mode) - till_only, 300.0, "and the entry is added to it")
 
-	def test_a_previous_shift_on_the_same_till_is_left_out(self):
-		"""Its money was reconciled when it closed. The boundary is exclusive, so a shift
-		that ended exactly as this one began stays with its own closing entry."""
+	def test_a_shift_that_began_before_this_one_is_left_out(self):
+		"""Money banked under an earlier shift belongs to that shift's closing. Nothing
+		may test this by asking when the earlier shift ended: closing leaves
+		period_end_date empty, so every past shift looks open."""
 		current = self._shift(hours_ago=1)
 		before = self._desk_total(current, "Cash")
-		earlier = self._shift(hours_ago=6, closed_hours_ago=3)
+		earlier = self._shift(hours_ago=6)
 
 		self._receive(earlier, 500)
 
-		self.assertEqual(self._desk_total(current, "Cash"), before, "the closed shift stays out")
+		self.assertEqual(self._desk_total(current, "Cash"), before, "the earlier shift stays out")
+
+	def test_a_shift_already_reconciled_is_left_out(self):
+		"""Counting a shift that has a closing entry would bank its receipts twice."""
+		current = self._shift(hours_ago=1)
+		before = self._desk_total(current, "Cash")
+		reconciled = self._shift(hours_ago=1, closing_entry="POS-CLO-TEST-DESK")
+
+		self._receive(reconciled, 700)
+
+		self.assertEqual(self._desk_total(current, "Cash"), before, "the filed shift stays out")
 
 	def test_the_desk_form_is_actually_wired_to_this_wrapper(self):
 		"""The fix is a hook. Without the entry the form calls ERPNext directly and none

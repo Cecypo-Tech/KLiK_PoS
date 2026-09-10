@@ -31,10 +31,17 @@ def get_invoices(start, end, pos_profile, user):
 
 
 def _shifts_in_period(start, end, pos_profile, user):
-	"""Shifts on this till, for this cashier, whose period overlaps the one being closed.
+	"""Shifts on this till, for this cashier, that began inside the period being closed.
 
-	`period_end_date > start` rather than `>=`: a shift closed at the exact moment the
-	next one opened is the previous shift, and its money was reconciled with it.
+	Matched on `period_start_date`, not on any notion of when a shift ended: closing a
+	shift sets its status and its `pos_closing_entry`, and leaves `period_end_date` empty
+	(`POSClosingEntry.update_opening_entry`), so "still running" cannot be read off that
+	field. A shift already tied to a closing entry has been reconciled once and is left
+	out, or its receipts would be counted a second time here.
+
+	The window's own shift is the one whose `period_start_date` is `start`: that is where
+	the form gets `start` from. The desk truncates it to whole seconds on the way in,
+	which only widens the window and still matches.
 	"""
 	return frappe.db.sql_list(
 		"""
@@ -42,8 +49,9 @@ def _shifts_in_period(start, end, pos_profile, user):
 		WHERE pos_profile = %(pos_profile)s
 		  AND user = %(user)s
 		  AND docstatus = 1
+		  AND IFNULL(pos_closing_entry, '') = ''
+		  AND period_start_date >= %(start)s
 		  AND period_start_date <= %(end)s
-		  AND (period_end_date IS NULL OR period_end_date > %(start)s)
 		""",
 		{"pos_profile": pos_profile, "user": user, "start": start, "end": end},
 	)
