@@ -18,58 +18,70 @@ from klik_pos.api.sales_invoice import (
 # ---------------------------------------------------------------------------
 
 def _assert_held_order_access(so):
-    """Ensure the SO is a KLiK held order the current user/session may act on.
+    """Ensure the SO is a KLiK held order the current user may act on.
 
-    In order: it must be a held order at all; System Managers bypass the rest. Then it
-    must belong to the caller's active shift, or be stranded on their own till with no live
-    shift behind it, or - when the caller has no shift open - simply be theirs. Anyone
-    else's work is allowed only on a till whose POS Profile permits it, which is the same
-    rule the Draft tab lists by.
+    The rule is _may_act_on_held_order, the same one get_held_orders lists by, so a cashier
+    is never shown an order they are then refused when they tap it.
     """
     if not so.custom_is_klik_held:
         frappe.throw(_("Order {0} is not a KLiK held order.").format(so.name))
 
-    if "System Manager" in frappe.get_roles():
-        return
-
-    opening_entry = get_current_pos_opening_entry()
-    if opening_entry:
-        if so.custom_pos_opening_entry == opening_entry:
-            return
-        if _is_orphaned_on_this_till(so) and _may_act_on_others_work(so):
-            # Stranded on this counter by an earlier session. Refusing it left the order
-            # unusable by anyone but a System Manager while still sitting in the Draft tab,
-            # so the cashier who found it could neither serve it nor clear it.
-            return
-        frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
-    elif not _may_act_on_others_work(so):
+    if not _may_act_on_held_order(so):
         frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
 
 
-def _may_act_on_others_work(so):
-    """Your own order always; someone else's only where the till allows it.
-
-    The same rule the Draft tab lists by, so a cashier is never shown an order they are then
-    refused when they tap it.
-    """
-    return so.owner == frappe.session.user or _till_allows_other_cashiers()
+def _is_manager():
+    roles = frappe.get_roles()
+    return "System Manager" in roles or "Administrator" in roles
 
 
-def _is_orphaned_on_this_till(so):
-    """Whether this held order belongs to the caller's till but to no live shift."""
+def _active_till():
+    """The POS Profile the caller is standing at, or None when none can be resolved."""
     try:
         pos_doc = _get_active_pos_profile()
     except Exception:
-        return False
+        return None
+    return pos_doc if getattr(pos_doc, "name", None) else None
 
-    profile = getattr(pos_doc, "name", None)
-    if not profile or so.custom_pos_profile != profile:
-        return False
 
-    if not so.custom_pos_opening_entry:
+def _may_act_on_held_order(so):
+    """Whether the caller may see, open, check out or delete this held order.
+
+    Managers always. Anyone else: the order must be on the till they are standing at - or
+    carry no till at all, which nothing would otherwise ever reach - and be their own, unless
+    that till lets its users act on each other's work. With no till resolvable, only their own.
+
+    Which shift held the order is deliberately not part of it. Access used to demand the
+    caller's current shift while the Held tab listed by owner alone, so an order another
+    cashier held on a shift still open was listed and then refused (SO-00037 in production),
+    and so was the caller's own order from another till. Handing an order from one cashier to
+    another is what custom_allow_viewing_other_cashiers is for.
+    """
+    from klik_pos.api.sales_invoice import _profile_allows_other_cashiers
+
+    if _is_manager():
         return True
-    status = frappe.db.get_value("POS Opening Entry", so.custom_pos_opening_entry, "status")
-    return status != "Open"
+
+    mine = so.owner == frappe.session.user
+    till = _active_till()
+    if not till:
+        return mine
+    if so.custom_pos_profile and so.custom_pos_profile != till.name:
+        return False
+    return mine or _profile_allows_other_cashiers(till)
+
+
+def _lock_held_order(order_id):
+    """Hold the order's row until this request ends, so only one checkout can invoice it.
+
+    Two cashiers may open the same order. Checkout commits nothing before it deletes the
+    order, so the second one waits on this lock and then finds the order gone, rather than
+    both reading it and each raising an invoice.
+    """
+    if not frappe.db.get_value("Sales Order", order_id, "name", for_update=True):
+        raise frappe.DoesNotExistError(
+            _("Held order {0} has already been checked out or deleted.").format(order_id)
+        )
 
 
 def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
@@ -194,6 +206,11 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     so.customer = customer
     so.delivery_date = nowdate()
     so.taxes_and_charges = sales_and_tax_charges or getattr(pos_profile, "taxes_and_charges", "") or ""
+    # Whoever holds it now owns where it lives. A cashier may take over an order held on
+    # another shift; left stamped with that shift, its close would delete the order from
+    # under them.
+    so.custom_pos_profile = pos_profile.name
+    so.custom_pos_opening_entry = get_current_pos_opening_entry() or ""
     so.set("items", [])
 
     _apply_order_discount(so, pos_profile, order_discount_amount)
@@ -268,6 +285,9 @@ def create_held_order(data):
 
         if target_order_id:
             so = frappe.get_doc("Sales Order", target_order_id)
+            # The id comes from the client and the save below ignores permissions, so without
+            # this any Sales Order - held or not, any till - could be rewritten by id.
+            _assert_held_order_access(so)
             if so.docstatus != 0:
                 frappe.throw(_("Cannot update held order {0}: it is no longer a draft.").format(target_order_id))
             _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
@@ -415,14 +435,15 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
 
     By default lists held orders for the current POS session (used by the
     Closing Shift page). When ``skip_opening_entry_filter`` is true (used by the
-    Invoice History page), the opening-entry restriction is dropped and results are
-    scoped the same way ``get_sales_invoices`` scopes its history surface: an
-    Administrator or System Manager sees all, and so does everyone on a till whose
-    POS Profile sets ``custom_allow_viewing_other_cashiers``; otherwise you see your own.
+    Invoice History page), the opening-entry restriction is dropped and results follow
+    _may_act_on_held_order, the rule opening one is checked against: an Administrator or
+    System Manager sees all; anyone else sees orders on their till (or carrying no till),
+    their own only unless the till's POS Profile sets ``custom_allow_viewing_other_cashiers``.
 
     That flag used to be read for invoices and ignored here, so a shop that had
-    deliberately opened its till up still found the Draft tab showing one cashier's
-    held orders and nobody else's.
+    deliberately opened its till up still found the Held tab showing one cashier's
+    held orders and nobody else's. And this listing once ignored the till while opening
+    checked it, so orders were shown that could not then be opened.
 
     Each row carries ``cashier_name`` - the owner's full name, which is the identity
     Invoice History filters on. Returning only the email made every held order fail the
@@ -435,18 +456,30 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
 
         limit = int(limit) if limit else 50
         start = int(start) if start else 0
-        is_admin_user = "System Manager" in frappe.get_roles() or "Administrator" in frappe.get_roles()
-        may_see_other_cashiers = is_admin_user or _till_allows_other_cashiers()
+        is_admin_user = _is_manager()
 
         filters = {"custom_is_klik_held": 1, "docstatus": 0}
+        or_filters = None
         if skip_opening_entry_filter:
-            if not may_see_other_cashiers:
-                filters["owner"] = frappe.session.user
+            # _may_act_on_held_order, expressed as filters. Keep the two in step.
+            if not is_admin_user:
+                from klik_pos.api.sales_invoice import _profile_allows_other_cashiers
+
+                till = _active_till()
+                if not till:
+                    filters["owner"] = frappe.session.user
+                else:
+                    or_filters = [
+                        ["custom_pos_profile", "=", till.name],
+                        ["custom_pos_profile", "is", "not set"],
+                    ]
+                    if not _profile_allows_other_cashiers(till):
+                        filters["owner"] = frappe.session.user
         else:
             opening_entry = get_current_pos_opening_entry()
             if opening_entry:
                 filters["custom_pos_opening_entry"] = opening_entry
-            elif not may_see_other_cashiers:
+            elif not (is_admin_user or _till_allows_other_cashiers()):
                 # No active session — only show the caller's own held orders, unless the
                 # till is one that lets its users see each other's.
                 filters["owner"] = frappe.session.user
@@ -454,6 +487,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
         orders = frappe.get_all(
             "Sales Order",
             filters=filters,
+            or_filters=or_filters,
             fields=[
                 "name", "customer", "customer_name", "transaction_date",
                 "grand_total", "currency", "owner", "modified",
@@ -539,6 +573,7 @@ def checkout_held_order(order_id, data=None):
         if existing_checkout:
             return _checkout_request_response(existing_checkout)
 
+        _lock_held_order(order_id)
         so = frappe.get_doc("Sales Order", order_id)
         _assert_held_order_access(so)
         if so.docstatus != 0:

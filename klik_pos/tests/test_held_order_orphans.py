@@ -192,9 +192,10 @@ class TestCashierMayActOnAnOrphan(FrappeTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._check(elsewhere, self.profile, "POS-OPE-CURRENT")
 
-	def test_an_order_belonging_to_another_live_shift_is_still_refused(self):
+	def test_another_cashier_s_order_on_a_live_shift_is_refused_on_a_closed_till(self):
+		"""The shift no longer decides this, the till does - see test_held_order_access_rule."""
 		live = _opening_entry(hours_ago=1)
-		other_session = _held_order(opening_entry=live.name)
+		theirs = _held_order(opening_entry=live.name, owner="somebody-else@example.com")
 
 		with self.assertRaises(frappe.ValidationError):
-			self._check(other_session, self.profile, "POS-OPE-CURRENT")
+			self._check(theirs, self.profile, "POS-OPE-CURRENT")
