@@ -87,6 +87,8 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
     return {
       ...DEFAULT_INVOICE_HISTORY_FILTERS,
       ...parsed,
+      // The Held tab used to be called Draft; a tab remembered from then should still open it.
+      activeTab: parsed.activeTab === "Draft" ? "Held" : (parsed.activeTab || DEFAULT_INVOICE_HISTORY_FILTERS.activeTab),
       customerFilter: parsed.customerFilter === "all" ? "" : (parsed.customerFilter || ""),
     };
   } catch {
@@ -105,7 +107,8 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
 const URL_TAB_ALIASES: Record<string, string> = {
   queue_failed: "queue_failed",
   queued: "queued",
-  draft: "Draft",
+  draft: "Held",
+  held: "Held",
 };
 
 const getUrlTab = (search: string): string | null => {
@@ -163,7 +166,7 @@ export default function InvoiceHistoryPage() {
   // Pass cashier filter to API so it filters on server side (more efficient)
   const { invoices, isLoading, isLoadingMore, error, hasMore, totalLoaded, totalCount, loadMore, refetch } = useSalesInvoices(searchTerm, true, cashierFilter, false, "history");
 
-  // Held draft Sales Orders (custom_is_klik_held=1) — surfaced under the Draft tab.
+  // Held draft Sales Orders (custom_is_klik_held=1) — surfaced under the Held tab.
   // Mapped to the SalesInvoice shape with `isHeldOrder` so the row + action handlers
   // can route through the Sales Order flow instead of the (now empty) draft-SI flow.
   const [heldOrders, setHeldOrders] = useState<(SalesInvoice & { isHeldOrder?: boolean })[]>([]);
@@ -181,7 +184,7 @@ export default function InvoiceHistoryPage() {
         date: o.transaction_date || new Date().toISOString().split("T")[0],
         time: "",
         // Full name, not the email: the cashier filter compares against full names, so an
-        // email here made every held order fail it and the Draft tab came up empty.
+        // email here made every held order fail it and the Held tab came up empty.
         cashier: o.cashier_name || o.cashier || o.owner || "",
         cashierId: o.owner || "",
         customer: o.customer_name || o.customer || "",
@@ -196,7 +199,7 @@ export default function InvoiceHistoryPage() {
         payment_methods: [],
         amountPaid: 0,
         changeGiven: 0,
-        status: "Draft",
+        status: "Held",
         refundAmount: 0,
         currency: o.currency || "USD",
         notes: "",
@@ -313,7 +316,7 @@ export default function InvoiceHistoryPage() {
     { id: "all", name: "All Invoices", icon: FileText, color: "text-gray-600" },
     { id: "queue_failed", name: "Failed Queue", icon: AlertTriangle, color: "text-rose-600" },
     { id: "queued", name: "Queued", icon: Clock, color: "text-amber-600" },
-    { id: "Draft", name: "Draft", icon: FilePlus, color: "text-gray-500" },
+    { id: "Held", name: "Held", icon: FilePlus, color: "text-gray-500" },
     { id: "Unpaid", name: "Unpaid", icon: Clock, color: "text-yellow-600" },
     { id: "Partly Paid", name: "Partly Paid", icon: AlertTriangle, color: "text-orange-600" },
     { id: "Paid", name: "Paid", icon: CheckCircle, color: "text-green-600" },
@@ -371,6 +374,7 @@ const getStatusBadge = (status: string) => {
     case "overdue":
       return `${baseClasses} bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400`;
     case "draft":
+    case "held":
       return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400`;
     case "return":
       return `${baseClasses} bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400`;
@@ -400,8 +404,8 @@ const getStatusBadge = (status: string) => {
     if (isLoading) return [];
     if (error) return [];
 
-    // The Draft tab is sourced from held Sales Orders, not draft Sales Invoices.
-    const source = activeTab === "Draft" ? heldOrders : invoices;
+    // The Held tab is sourced from held Sales Orders, not draft Sales Invoices.
+    const source = activeTab === "Held" ? heldOrders : invoices;
 
     const filtered = source.filter((invoice) => {
       // Server-side search is handled by the API, so we only apply client-side filters
@@ -472,8 +476,8 @@ const getStatusBadge = (status: string) => {
   // Get count for each status - filtered by cashier, date, and payment (but not status)
   // This ensures tab counts reflect the current filter selections
   const getStatusCount = (status: string) => {
-    // The Draft tab counts held Sales Orders, not draft Sales Invoices.
-    const countSource = status === "Draft" ? heldOrders : invoices;
+    // The Held tab counts held Sales Orders, not draft Sales Invoices.
+    const countSource = status === "Held" ? heldOrders : invoices;
 
     // First apply all filters except status
     const invoicesFilteredByOtherFilters = countSource.filter((invoice) => {
@@ -725,7 +729,7 @@ const getStatusBadge = (status: string) => {
                         <Eye className="w-4 h-4" />
                         <span>View</span>
                       </button>
-                      {invoice.status === "Draft" && (
+                      {(invoice.status === "Draft" || (invoice as SalesInvoice & { isHeldOrder?: boolean }).isHeldOrder) && (
                         <>
                           <button
                             onClick={() => void handleGoToCart(invoice)}
@@ -812,7 +816,7 @@ const getStatusBadge = (status: string) => {
                 >
                   View
                 </button>
-                {invoice.status === "Draft" && (
+                {(invoice.status === "Draft" || (invoice as SalesInvoice & { isHeldOrder?: boolean }).isHeldOrder) && (
                   <>
                     <button
                       onClick={() => void handleGoToCart(invoice)}

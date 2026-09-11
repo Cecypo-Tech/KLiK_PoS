@@ -221,3 +221,14 @@ class TestCheckoutLocksTheOrder(FrappeTestCase):
 
 		with self.assertRaises(frappe.DoesNotExistError):
 			_lock_held_order("SO-KLIK-ALREADY-CHECKED-OUT")
+
+
+class TestHeldOrdersAreLabelledHeld(FrappeTestCase):
+	def test_each_listed_row_says_held_not_draft(self):
+		"""Draft means an unsubmitted Sales Invoice everywhere else in the app."""
+		mine = _order(opening_entry=MY_SHIFT)
+
+		with _as_cashier(_till(0)):
+			rows = get_held_orders(skip_opening_entry_filter=True, limit=5000)["data"]
+
+		self.assertEqual(next(r for r in rows if r["name"] == mine.name)["status"], "Held")

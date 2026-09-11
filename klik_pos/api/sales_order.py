@@ -535,7 +535,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 cashier_map[row.name] = row.full_name
 
         for order in orders:
-            order["status"] = "Draft"
+            order["status"] = "Held"
             order["items"] = items_map.get(order.name, [])
             order["cashier"] = cashier_map.get(order.owner) or order.owner
 
