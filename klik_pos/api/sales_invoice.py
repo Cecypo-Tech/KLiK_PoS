@@ -2392,6 +2392,7 @@ def parse_invoice_data(data):
 			"id": item_code,
 			"quantity": item.get("quantity"),
 			"price": item.get("price"),
+			"price_list_rate": flt(item.get("price_list_rate") or item.get("original_price") or 0),
 			"bundle_entries": bundle_entries,
 			"uom": item.get("uom"),
 			"item_tax_template": item.get("item_tax_template") or "",
@@ -2572,6 +2573,12 @@ def build_sales_invoice_doc(
 	"""Main function to build a sales invoice document."""
 	doc = frappe.new_doc("Sales Invoice")
 	_apply_klik_invoice_flags(doc, is_held=False, is_submitted=False)
+	# The cart already priced every line through klik_pos.api.item.pricing.get_cart_pricing,
+	# which applies Pricing Rules against the same customer and qty. ERPNext applying them
+	# again here lets calculate_item_rate take the `has_pricing_rules` branch and overwrite
+	# the rate the cashier quoted. Setting the flag now is not enough on its own - see
+	# _reassert_pos_line_prices, which sets it again once set_pos_fields has had its say.
+	doc.ignore_pricing_rule = 1
 	doc.customer = customer
 	doc.due_date = due_date or frappe.utils.nowdate()
 	doc.custom_delivery_date = frappe.utils.nowdate()
@@ -2631,6 +2638,9 @@ def build_sales_invoice_doc(
 
 	# Add items to invoice
 	_populate_invoice_items(doc, items, pos_profile)
+	pos_line_prices = [
+		(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items
+	]
 
 	# Populate tax details from template (if any)
 	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
@@ -2641,6 +2651,7 @@ def build_sales_invoice_doc(
 
 	doc.set_taxes()
 	doc.set_missing_values()
+	_reassert_pos_line_prices(doc, pos_line_prices)
 	doc.calculate_taxes_and_totals()
 	apply_loyalty_redemption(doc, loyalty_redemption)
 	if loyalty_redemption:
@@ -3437,6 +3448,38 @@ def _resolve_item_tax_details_for_line(doc, item, pos_profile):
 	return item_tax_template, item_tax_rate
 
 
+def _reassert_pos_line_prices(doc, pos_line_prices):
+	"""Put the till's price back on every line, and stop ERPNext reaching for it again.
+
+	`doc.ignore_pricing_rule` cannot just be set once at the top: SalesInvoice.set_pos_fields
+	copies the POS Profile's own value over it on the first (for_validate=False) pass, so
+	set_missing_values re-applies Pricing Rules whatever we set beforehand, and
+	apply_pricing_rule_on_items rewrites `rate` from the Item Price. Undo that here and set
+	the flag again - every later pass runs with for_validate=True, which leaves the flag
+	alone, so this is the last chance ERPNext gets to reprice a POS line.
+	"""
+	doc.ignore_pricing_rule = 1
+
+	for idx, (item_code, rate, price_list_rate) in enumerate(pos_line_prices):
+		if idx >= len(doc.items):
+			break
+
+		row = doc.items[idx]
+		if row.item_code != item_code:
+			continue
+
+		row.pricing_rules = ""
+		row.margin_type = None
+		row.margin_rate_or_amount = 0.0
+		row.rate_with_margin = 0.0
+		# Left in place, a rule's discount is re-subtracted from the rate we just restored.
+		# calculate_item_rate recomputes the discount from price_list_rate and rate anyway.
+		row.discount_percentage = 0.0
+		row.discount_amount = 0.0
+		row.price_list_rate = price_list_rate
+		row.rate = rate
+
+
 def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	"""Prepare item data dictionary for invoice line."""
 	item_code = item.get("id")
@@ -3446,11 +3489,20 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	expense_account = get_expense_accounts(item_code)
 	_validate_item_accounts(item_code, income_account, expense_account)
 
+	# Pin price_list_rate as well as rate. Left unset, set_missing_values fetches the
+	# Item Price and ERPNext reconstructs the line from it - recording a discount the
+	# cashier never gave, or (with a Pricing Rule in play) replacing the rate outright.
+	rate = flt(item.get("price") or 0)
+	price_list_rate = flt(item.get("price_list_rate") or 0)
+	if price_list_rate < rate:
+		price_list_rate = rate
+
 	# Build base item data
 	item_data = {
 		"item_code": item_code,
 		"qty": item.get("quantity"),
-		"rate": item.get("price"),
+		"rate": rate,
+		"price_list_rate": price_list_rate,
 		"income_account": income_account,
 		"expense_account": expense_account,
 		"warehouse": pos_profile.warehouse,
