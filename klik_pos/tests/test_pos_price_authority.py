@@ -194,3 +194,144 @@ class TestPosPriceAuthority(FrappeTestCase):
 		_reassert_pos_line_prices(doc, pos_line_prices)
 
 		self.assertEqual(flt(doc.items[0].rate), TILL_RATE)
+
+
+class TestCustomerPriceListDivergence(FrappeTestCase):
+	"""The reported failure only happened once a customer account was selected.
+
+	ERPNext's SalesInvoice.set_pos_fields (sales_invoice.py:1009-1023) switches
+	`selling_price_list` to the CUSTOMER's default price list - or their customer
+	group's - whenever a customer is set, falling back to the POS Profile's list only
+	for Walk In. So the cart can price an item from one list while the server re-derives
+	it from another, and only a named customer ever sees the difference.
+	"""
+
+	ITEM = "TEST-CUST-PRICELIST-ITEM"
+	GROUP = "TEST-CUST-PRICELIST-GROUP"
+	CONTRACT_LIST = "TEST-CUST-CONTRACT-LIST"
+	CUSTOMER = "TEST-CUST-PRICELIST-CUSTOMER"
+
+	TILL_RATE = 2000.0
+	CONTRACT_RATE = 2205.0
+	QTY = 20
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.pos_profile = _get_active_pos_profile()
+
+		if not frappe.db.exists("Item Group", cls.GROUP):
+			frappe.get_doc({
+				"doctype": "Item Group", "item_group_name": cls.GROUP,
+				"parent_item_group": "All Item Groups", "is_group": 0,
+			}).insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Item", cls.ITEM):
+			item = frappe.new_doc("Item")
+			item.item_code = cls.ITEM
+			item.item_name = cls.ITEM
+			item.item_group = cls.GROUP
+			item.stock_uom = "Nos"
+			item.is_stock_item = 0
+			item.is_sales_item = 1
+			item.insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Price List", cls.CONTRACT_LIST):
+			frappe.get_doc({
+				"doctype": "Price List", "price_list_name": cls.CONTRACT_LIST,
+				"selling": 1, "enabled": 1,
+				"currency": frappe.get_cached_value("Company", cls.pos_profile.company, "default_currency"),
+			}).insert(ignore_permissions=True)
+
+		# The till's list says 2,000. The customer's contract list says 2,205.
+		for price_list, rate in (
+			(cls.pos_profile.selling_price_list, cls.TILL_RATE),
+			(cls.CONTRACT_LIST, cls.CONTRACT_RATE),
+		):
+			existing = frappe.db.exists("Item Price", {"item_code": cls.ITEM, "price_list": price_list})
+			if existing:
+				frappe.db.set_value("Item Price", existing, "price_list_rate", rate)
+			else:
+				frappe.get_doc({
+					"doctype": "Item Price", "item_code": cls.ITEM, "price_list": price_list,
+					"selling": 1, "price_list_rate": rate,
+				}).insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Customer", cls.CUSTOMER):
+			frappe.get_doc({
+				"doctype": "Customer", "customer_name": cls.CUSTOMER,
+				"customer_type": "Company", "default_price_list": cls.CONTRACT_LIST,
+			}).insert(ignore_permissions=True)
+		else:
+			frappe.db.set_value("Customer", cls.CUSTOMER, "default_price_list", cls.CONTRACT_LIST)
+
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		for dt, name in (("Customer", cls.CUSTOMER), ("Item", cls.ITEM), ("Item Group", cls.GROUP)):
+			if frappe.db.exists(dt, name):
+				frappe.delete_doc(dt, name, force=True, ignore_permissions=True)
+		for name in frappe.get_all("Item Price", filters={"item_code": cls.ITEM}, pluck="name"):
+			frappe.delete_doc("Item Price", name, force=True, ignore_permissions=True)
+		if frappe.db.exists("Price List", cls.CONTRACT_LIST):
+			frappe.delete_doc("Price List", cls.CONTRACT_LIST, force=True, ignore_permissions=True)
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def _build(self, customer):
+		doc = build_sales_invoice_doc(
+			customer,
+			[{"id": self.ITEM, "quantity": self.QTY, "price": self.TILL_RATE, "uom": "Nos"}],
+			0, None, None, "B2C", include_payments=False,
+		)
+		doc.set_missing_values(for_validate=True)
+		doc.calculate_taxes_and_totals()
+		return doc
+
+	def test_the_server_does_switch_to_the_customers_price_list(self):
+		# Not the bug - just pinning the mechanism, so a future ERPNext change that
+		# removes this override does not leave the test below passing for a stale reason.
+		doc = self._build(self.CUSTOMER)
+		self.assertEqual(doc.selling_price_list, self.CONTRACT_LIST)
+
+	def test_a_customers_price_list_does_not_overrule_the_till(self):
+		row = self._build(self.CUSTOMER).items[0]
+		self.assertEqual(flt(row.rate), self.TILL_RATE)
+		self.assertEqual(flt(row.amount), self.TILL_RATE * self.QTY)
+
+	def test_a_customer_scoped_pricing_rule_does_not_overrule_the_till(self):
+		"""The production shape: a rule that matches the account but not Walk In.
+
+		A Pricing Rule with applicable_for="Customer" is why this was reported as
+		"only when we select a customer account". Walk In never matches the rule, so
+		calculate_item_rate leaves the till's rate alone and the sale is correct; the
+		named customer matches it, `has_pricing_rules` goes true, and the rate is
+		rebuilt from the price list behind the cashier.
+		"""
+		rule = frappe.new_doc("Pricing Rule")
+		rule.title = "TEST-CUST-SCOPED-RULE"
+		rule.apply_on = "Item Code"
+		rule.append("items", {"item_code": self.ITEM})
+		rule.selling = 1
+		rule.applicable_for = "Customer"
+		rule.customer = self.CUSTOMER
+		rule.company = self.pos_profile.company
+		rule.currency = frappe.get_cached_value("Company", self.pos_profile.company, "default_currency")
+		rule.price_or_product_discount = "Price"
+		rule.rate_or_discount = "Discount Percentage"
+		rule.discount_percentage = 0
+		rule.min_qty = self.QTY
+		rule.priority = "1"
+		rule.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(
+			lambda: (
+				frappe.delete_doc("Pricing Rule", rule.name, force=True, ignore_permissions=True),
+				frappe.db.commit(),
+			)
+		)
+
+		row = self._build(self.CUSTOMER).items[0]
+		self.assertEqual(flt(row.rate), self.TILL_RATE)
+		self.assertEqual(flt(row.amount), self.TILL_RATE * self.QTY)
