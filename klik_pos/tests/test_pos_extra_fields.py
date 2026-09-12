@@ -185,3 +185,67 @@ class TestSearchExtraFieldLink(FrappeTestCase):
             {"value": "CONT-001", "label": "CONT-001"},
             {"value": "CONT-002", "label": "CONT-002"},
         ])
+
+
+class TestExtraFieldPicker(FrappeTestCase):
+    """The POS Profile row picker has to offer something to pick.
+
+    `so_si_commonfield` shipped as a Select with no `options`, so adding a row to
+    POS Extra Fields rendered an empty dropdown: nothing to choose, nothing typeable,
+    and the field is required. The candidates were already computed by
+    _eligible_common_fields and already exposed by get_pos_extra_field_candidates -
+    nothing ever wired them to the desk form.
+    """
+
+    FIELD = "so_si_commonfield"
+
+    def _docfield(self):
+        import frappe
+
+        return frappe.db.get_value(
+            "DocField",
+            {"parent": "POS Extra Field", "fieldname": self.FIELD},
+            ["fieldtype", "options"],
+            as_dict=True,
+        )
+
+    def test_the_picker_is_an_autocomplete_after_ensure_runs(self):
+        import frappe
+        from klik_pos.setup.pos_profile_fields import install_pos_extra_fields_child
+
+        # Put it back the way it shipped, then prove the ensure path upgrades it.
+        doc = frappe.get_doc("DocType", "POS Extra Field")
+        for row in doc.fields:
+            if row.fieldname == self.FIELD:
+                row.fieldtype = "Select"
+                row.options = None
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        self.assertEqual(self._docfield().fieldtype, "Select")
+
+        install_pos_extra_fields_child()
+        frappe.db.commit()
+
+        self.assertEqual(self._docfield().fieldtype, "Autocomplete")
+
+    def test_ensure_is_idempotent(self):
+        import frappe
+        from klik_pos.setup.pos_profile_fields import install_pos_extra_fields_child
+
+        install_pos_extra_fields_child()
+        frappe.db.commit()
+        first = self._docfield()
+        install_pos_extra_fields_child()
+        frappe.db.commit()
+        self.assertEqual(self._docfield(), first)
+
+    def test_every_candidate_carries_what_the_picker_needs_to_render(self):
+        # The control shows `label`, stores `value`, and the server intersects on
+        # fieldname - so label and fieldname both have to be present on every row.
+        from klik_pos.api.pos_profile import get_pos_extra_field_candidates
+
+        candidates = get_pos_extra_field_candidates()
+        self.assertTrue(candidates, "no eligible SO/SI common fields on this site")
+        for c in candidates:
+            self.assertTrue(c["fieldname"])
+            self.assertTrue(c["label"])

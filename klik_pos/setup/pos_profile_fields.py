@@ -105,7 +105,13 @@ def install_pos_extra_fields_child():
                 {
                     "fieldname": "so_si_commonfield",
                     "label": "SO/SI Common Field",
-                    "fieldtype": "Select",
+                    # Autocomplete, not Select: the candidates are whatever Sales Order and
+                    # Sales Invoice have in common ON THIS SITE, so they cannot be baked into
+                    # a static options list. public/js/pos_profile.js fills them in from
+                    # get_pos_extra_field_candidates, as {label, value} pairs - the control
+                    # shows the label and stores the fieldname, which is what the server
+                    # intersects on in get_configured_extra_fieldnames.
+                    "fieldtype": "Autocomplete",
                     "description": "Common field in Sales Order / Sales Invoice",
                     "in_list_view": 1,
                     "reqd": 1,
@@ -121,6 +127,8 @@ def install_pos_extra_fields_child():
             "permissions": [],
         })
         child.insert(ignore_permissions=True)
+
+    _ensure_extra_field_picker()
 
     # Column break so the extra-fields table sits in its own column (more width),
     # within the same section as the price-list / warehouse toggles.
@@ -147,6 +155,34 @@ def install_pos_extra_fields_child():
                 "module": "KLiK PoS",
             }]
         }, update=True)
+
+
+def _ensure_extra_field_picker():
+    """Upgrade `so_si_commonfield` from the Select it shipped as to an Autocomplete.
+
+    install_pos_extra_fields_child() only creates the child doctype when it is missing,
+    so every site that already had it kept the original Select - which carried no
+    `options` and so rendered an empty, unpickable, required dropdown. Runs on every
+    migrate and writes only when something actually differs.
+    """
+    if not frappe.db.exists("DocType", "POS Extra Field"):
+        return
+
+    doc = frappe.get_doc("DocType", "POS Extra Field")
+    changed = False
+    for row in doc.fields:
+        if row.fieldname != "so_si_commonfield":
+            continue
+        if row.fieldtype != "Autocomplete":
+            row.fieldtype = "Autocomplete"
+            changed = True
+        # A leftover Select options blob would be offered verbatim as candidates.
+        if row.options:
+            row.options = None
+            changed = True
+
+    if changed:
+        doc.save(ignore_permissions=True)
 
 
 def ensure_pos_extra_fields_child():
