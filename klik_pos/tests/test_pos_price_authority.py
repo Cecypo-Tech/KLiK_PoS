@@ -335,3 +335,124 @@ class TestCustomerPriceListDivergence(FrappeTestCase):
 		row = self._build(self.CUSTOMER).items[0]
 		self.assertEqual(flt(row.rate), self.TILL_RATE)
 		self.assertEqual(flt(row.amount), self.TILL_RATE * self.QTY)
+
+
+class TestPricingRuleDiscountSurvives(FrappeTestCase):
+	"""The production shape, from the client's own screenshots.
+
+	Cart: BINDING WIRE 15KGS, list 2,100/unit struck through to 2,000, "Discount
+	-Sh 2,000.00", Checkout Sh 40,000.00. Order Summary for the same cart: the line
+	still reads 20 x Sh 2,000.00 = Sh 40,000.00, but Total reads Sh 42,000.00 -
+	20 x 2,100, the undiscounted list rate. The rule's discount was dropped.
+
+	Why: apply_pricing_rule_on_items recomputes
+	`rate = price_list_rate * (1 - discount_percentage/100)`, and _prepare_item_data
+	never sent discount_percentage or discount_amount on the line, so the server
+	computed 2,100 * (1 - 0) = 2,100 and billed the customer the pre-discount price.
+	"""
+
+	ITEM = "TEST-RULE-DISCOUNT-ITEM"
+	GROUP = "TEST-RULE-DISCOUNT-GROUP"
+	CUSTOMER = "TEST-RULE-DISCOUNT-CUSTOMER"
+
+	LIST_RATE = 2100.0
+	DISCOUNT_PER_UNIT = 100.0
+	CART_RATE = 2000.0
+	QTY = 20
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.pos_profile = _get_active_pos_profile()
+
+		if not frappe.db.exists("Item Group", cls.GROUP):
+			frappe.get_doc({
+				"doctype": "Item Group", "item_group_name": cls.GROUP,
+				"parent_item_group": "All Item Groups", "is_group": 0,
+			}).insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Item", cls.ITEM):
+			item = frappe.new_doc("Item")
+			item.item_code = cls.ITEM
+			item.item_name = cls.ITEM
+			item.item_group = cls.GROUP
+			item.stock_uom = "Nos"
+			item.is_stock_item = 0
+			item.is_sales_item = 1
+			item.insert(ignore_permissions=True)
+
+		existing = frappe.db.exists(
+			"Item Price", {"item_code": cls.ITEM, "price_list": cls.pos_profile.selling_price_list}
+		)
+		if existing:
+			frappe.db.set_value("Item Price", existing, "price_list_rate", cls.LIST_RATE)
+		else:
+			frappe.get_doc({
+				"doctype": "Item Price", "item_code": cls.ITEM,
+				"price_list": cls.pos_profile.selling_price_list,
+				"selling": 1, "price_list_rate": cls.LIST_RATE, "uom": "Nos",
+			}).insert(ignore_permissions=True)
+
+		if not frappe.db.exists("Customer", cls.CUSTOMER):
+			frappe.get_doc({
+				"doctype": "Customer", "customer_name": cls.CUSTOMER, "customer_type": "Company",
+			}).insert(ignore_permissions=True)
+
+		rule = frappe.new_doc("Pricing Rule")
+		rule.title = "TEST-RULE-DISCOUNT-RULE"
+		rule.apply_on = "Item Code"
+		rule.append("items", {"item_code": cls.ITEM})
+		rule.selling = 1
+		rule.applicable_for = "Customer"
+		rule.customer = cls.CUSTOMER
+		rule.company = cls.pos_profile.company
+		rule.currency = frappe.get_cached_value("Company", cls.pos_profile.company, "default_currency")
+		rule.price_or_product_discount = "Price"
+		rule.rate_or_discount = "Discount Amount"
+		rule.discount_amount = cls.DISCOUNT_PER_UNIT
+		rule.min_qty = cls.QTY
+		rule.priority = "1"
+		rule.insert(ignore_permissions=True)
+		cls.rule = rule.name
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		if frappe.db.exists("Pricing Rule", cls.rule):
+			frappe.delete_doc("Pricing Rule", cls.rule, force=True, ignore_permissions=True)
+		for name in frappe.get_all("Item Price", filters={"item_code": cls.ITEM}, pluck="name"):
+			frappe.delete_doc("Item Price", name, force=True, ignore_permissions=True)
+		for dt, name in (("Customer", cls.CUSTOMER), ("Item", cls.ITEM), ("Item Group", cls.GROUP)):
+			if frappe.db.exists(dt, name):
+				frappe.delete_doc(dt, name, force=True, ignore_permissions=True)
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def _build(self):
+		# What the cart sends: the rule-discounted rate it displayed, and the pre-discount
+		# list rate it struck through.
+		doc = build_sales_invoice_doc(
+			self.CUSTOMER,
+			[{
+				"id": self.ITEM, "quantity": self.QTY, "price": self.CART_RATE,
+				"price_list_rate": self.LIST_RATE, "uom": "Nos",
+			}],
+			0, None, None, "B2C", include_payments=False,
+		)
+		doc.set_missing_values(for_validate=True)
+		doc.calculate_taxes_and_totals()
+		return doc
+
+	def test_the_customer_is_billed_the_discounted_rate(self):
+		row = self._build().items[0]
+		self.assertEqual(flt(row.rate), self.CART_RATE)
+		self.assertEqual(flt(row.amount), self.CART_RATE * self.QTY)
+
+	def test_the_invoice_records_the_discount_rather_than_hiding_it(self):
+		row = self._build().items[0]
+		self.assertEqual(flt(row.price_list_rate), self.LIST_RATE)
+		self.assertEqual(flt(row.discount_amount), self.DISCOUNT_PER_UNIT)
+
+	def test_the_totals_match_the_line(self):
+		doc = self._build()
+		self.assertEqual(flt(doc.net_total), self.CART_RATE * self.QTY)
