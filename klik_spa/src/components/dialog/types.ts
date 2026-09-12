@@ -58,8 +58,17 @@ export interface BackendTaxBreakdownLine {
   included_in_print_rate?: number;
 }
 
+export interface BackendTaxPreviewLine {
+  item_code: string;
+  qty: number;
+  rate: number;
+  amount: number;
+}
+
 export interface BackendTaxPreview {
   tax_breakdown: BackendTaxBreakdownLine[];
+  /** The lines the preview invoice actually priced. Absent on an older backend. */
+  items?: BackendTaxPreviewLine[];
   net_total: number;
   total_taxes_and_charges: number;
   grand_total: number;

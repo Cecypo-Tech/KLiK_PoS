@@ -26,6 +26,8 @@ interface InvoicePreviewProps {
   itemDiscounts?: DiscountMapLike;
   /** POS Profile is_tax_included_in_basic_rate — decides whether a rate carries tax. */
   isTaxIncludedInBasicRate?: boolean;
+  /** Lines the server added that the cart never had, e.g. a delivery charge. */
+  extraCharges?: Array<{ item_code: string; amount: number }>;
 }
 
 export default function InvoicePreview({
@@ -47,6 +49,7 @@ export default function InvoicePreview({
   currentDate,
   itemDiscounts = {},
   isTaxIncludedInBasicRate = false,
+  extraCharges = [],
 }: InvoicePreviewProps) {
   if (invoiceSubmitted && invoiceData) {
     return (
@@ -124,6 +127,19 @@ export default function InvoicePreview({
             </div>
           </div>
         )}
+
+        {/* A charge the server adds - a delivery item, say - lands in the Total below.
+            Without a line of its own the printed lines do not add up to the printed total. */}
+        {extraCharges.map((charge) => (
+          <div key={charge.item_code} className="flex justify-between text-sm">
+            <div className="flex-1">
+              <p className="font-medium text-gray-900 dark:text-white">{charge.item_code}</p>
+            </div>
+            <p className="font-medium text-gray-900 dark:text-white">
+              {formatCurrencyWithSymbol(charge.amount, displayCurrencySymbol)}
+            </p>
+          </div>
+        ))}
       </div>
 
       <div className="border-t border-gray-200 dark:border-gray-600 pt-2 space-y-1 text-sm">

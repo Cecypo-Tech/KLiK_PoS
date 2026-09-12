@@ -35,6 +35,7 @@ import SharingInterface from "./SharingInterface";
 import DeliveryPersonnelModal from "./DeliveryPersonnelModal";
 import MpesaOptionsModal from "./MpesaOptionsModal";
 import type { PaymentDialogProps, PaymentAmount, Calculations, BackendTaxPreview } from "./types";
+import { reconcileCheckout } from "../../utils/checkoutReconciliation";
 import DisplayPrintPreview from "../../utils/invoicePrint";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { handlePrintInvoice } from "../../utils/printHandler";
@@ -420,6 +421,22 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const displayTaxTotal = hasBackendTaxPreview
     ? backendTaxPreview?.total_taxes_and_charges || 0
     : calculations.taxAmount > 0 ? calculations.taxAmount : Math.max(0, localTaxTotal);
+
+  // The receipt's lines come from this cart; its Subtotal, Tax and Total come from the
+  // server preview. If the server priced a line differently, the printed lines will not
+  // add up to the printed total and the customer pays the server's number. Stop instead.
+  const reconciliation = useMemo(() => {
+    const previewLines = backendTaxPreview?.items;
+    if (!previewLines || previewLines.length === 0) {
+      return { ok: true, message: null as string | null, extraCharges: [] };
+    }
+    const cartLines = cartItems.map((item) => ({
+      item_code: item.item_code || item.id,
+      qty: Number(item.quantity || 0),
+      rate: Number(getEffectiveItemRate(item as TemplateAwareCartItem) || 0),
+    }));
+    return reconcileCheckout(cartLines, previewLines);
+  }, [backendTaxPreview, cartItems, getEffectiveItemRate]);
   
   const previousCheckoutGrandTotalRef = useRef(checkoutPayableTotal);
 
@@ -1564,11 +1581,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const isMpesaButtonDisabled = () => {
     if (!hasActiveMpesaPayment) return true;
     if (invoiceSubmitted || isProcessingPayment) return true;
+    if (!reconciliation.ok) return true;
     return false;
   };
 
   const isActionButtonDisabled = () => {
     if (invoiceSubmitted || isProcessingPayment) return true;
+    if (!reconciliation.ok) return true;
     if (isCreditSale && !dueDate) return true;
     if (isB2C && !isCreditSale) return outstandingAmount > 0;
     return false;
@@ -2237,6 +2256,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       </div>
                     </label>
                   </div>
+                  {!reconciliation.ok && (
+                    <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+                      <p className="font-semibold">This sale is on hold</p>
+                      <p className="mt-1">{reconciliation.message}</p>
+                    </div>
+                  )}
                   <button id="pos-payment-submit-btn" onClick={handleCompletePayment} disabled={isActionButtonDisabled()} className={`w-full py-4 rounded-lg font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2 ${isB2B ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-green-600 hover:bg-green-700 text-white"}`}>
                     {isProcessingPayment ? (
                       <>
@@ -2538,6 +2563,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               isB2B={isB2B}
               isB2C={isB2C}
               currentDate={currentDate}
+              extraCharges={reconciliation.extraCharges}
             />
           </div>
         </div>
