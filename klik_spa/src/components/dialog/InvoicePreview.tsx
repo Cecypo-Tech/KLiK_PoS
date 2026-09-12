@@ -1,6 +1,7 @@
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveItemRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
+import { getItemDiscountTotal, getLineDiscount } from "../../utils/receiptDiscounts";
 import type { Calculations, PaymentAmount } from "./types";
 import type { CartItem } from "../../../types";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -28,6 +29,18 @@ interface InvoicePreviewProps {
   isTaxIncludedInBasicRate?: boolean;
   /** Lines the server added that the cart never had, e.g. a delivery charge. */
   extraCharges?: Array<{ item_code: string; amount: number }>;
+}
+
+/** The rate before any rule or per-item discount.
+ *
+ * `get_cart_pricing` returns the discounted rate as `price` and keeps the pre-discount
+ * rate in `original_price`, so `price` on its own can never tell you a discount was
+ * applied. Fall back to `price` when there is no `original_price` - then list and sell
+ * agree and nothing is reported as discounted.
+ */
+function getListRate(item: CartItem) {
+  const original = Number((item as CartItem & { original_price?: number }).original_price || 0);
+  return original > 0 ? original : Number(item.price || 0);
 }
 
 export default function InvoicePreview({
@@ -62,6 +75,19 @@ export default function InvoicePreview({
     );
   }
 
+  // Per-item and rule discounts are already inside the Subtotal, exactly as they are in
+  // the cart footer; the row exists so the customer can see what they were given.
+  const itemDiscountTotal = getItemDiscountTotal(
+    cartItems.map((item) => ({
+      quantity: item.quantity,
+      listRate: getListRate(item),
+      sellRate: getEffectiveItemRate(item, { itemDiscounts, isTaxIncludedInBasicRate }),
+    })),
+  );
+  const totalDiscount = roundCurrency(
+    itemDiscountTotal + (calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0),
+  );
+
   return (
     <>
       <div className="text-center mb-4">
@@ -87,6 +113,10 @@ export default function InvoicePreview({
             // no price list rendered "0.00" here while the Subtotal below it — which
             // does go through this util — was correct.
             const lineRate = getEffectiveItemRate(item, { itemDiscounts, isTaxIncludedInBasicRate });
+            // The cart strikes the list amount through and shows what is charged beneath
+            // it; the receipt now agrees.
+            const listRate = getListRate(item);
+            const discounted = getLineDiscount({ quantity: item.quantity, listRate, sellRate: lineRate }) > 0;
             return (
             <div key={index} className="flex justify-between text-sm">
               <div className="flex-1">
@@ -95,9 +125,16 @@ export default function InvoicePreview({
                   {item.quantity} x {formatCurrencyWithSymbol(lineRate, displayCurrencySymbol)}
                 </p>
               </div>
-              <p className="font-medium text-gray-900 dark:text-white">
-                {formatCurrencyWithSymbol(roundCurrency(item.quantity * lineRate), displayCurrencySymbol)}
-              </p>
+              <div className="text-right">
+                {discounted && (
+                  <p className="text-xs text-gray-400 line-through">
+                    {formatCurrencyWithSymbol(roundCurrency(item.quantity * listRate), displayCurrencySymbol)}
+                  </p>
+                )}
+                <p className="font-medium text-gray-900 dark:text-white">
+                  {formatCurrencyWithSymbol(roundCurrency(item.quantity * lineRate), displayCurrencySymbol)}
+                </p>
+              </div>
             </div>
             );
           })
@@ -147,15 +184,10 @@ export default function InvoicePreview({
           <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
           <span className="text-gray-900 dark:text-white">{formatCurrencyWithSymbol(displaySubtotal, displayCurrencySymbol)}</span>
         </div>
-        {(calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0) > 0 && (
+        {totalDiscount > 0 && (
           <div className="flex justify-between text-green-600 dark:text-green-400">
             <span>Discount</span>
-            <span>
-              -{formatCurrencyWithSymbol(
-                (calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0),
-                displayCurrencySymbol
-              )}
-            </span>
+            <span>-{formatCurrencyWithSymbol(totalDiscount, displayCurrencySymbol)}</span>
           </div>
         )}
         <div className="flex justify-between">
