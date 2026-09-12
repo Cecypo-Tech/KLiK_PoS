@@ -29,6 +29,7 @@ import { OrderSummaryFooter } from "./OrderSummaryFooter";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
+import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
 import { roundCurrency } from "../../utils/currencyMath";
 
 interface OrderSummaryProps {
@@ -74,19 +75,23 @@ export default function OrderSummary({
       const persistedDiscountPercentage = Number((item as CartItem & { discount_percentage?: number }).discount_percentage) || 0;
       const persistedCustomRate = (item as CartItem & { custom_rate?: number }).custom_rate;
       const serialBatchBundle = (item as CartItem & { serial_batch_bundle?: unknown }).serial_batch_bundle;
+      // A rule discount is already inside item.price; restoring it here subtracts it twice.
+      const restorable = shouldRestorePersistedDiscount(item as CartItem & { original_price?: number });
+      const discountAmount = restorable ? persistedDiscountAmount : 0;
+      const discountPercentage = restorable ? persistedDiscountPercentage : 0;
       if (serialBatchBundle || item.bundle_entries) {
         saved[item.id] = {
-          discountPercentage: persistedDiscountPercentage,
-          discountAmount: persistedDiscountAmount,
+          discountPercentage,
+          discountAmount,
           customRate: persistedCustomRate,
           customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
           serial_batch_bundle: serialBatchBundle,
           bundle_entries: item.bundle_entries,
         };
-      } else if (persistedDiscountAmount > 0 || persistedDiscountPercentage > 0 || persistedCustomRate !== undefined && persistedCustomRate !== null) {
+      } else if (discountAmount > 0 || discountPercentage > 0 || persistedCustomRate !== undefined && persistedCustomRate !== null) {
         saved[item.id] = {
-          discountPercentage: persistedDiscountPercentage,
-          discountAmount: persistedDiscountAmount,
+          discountPercentage,
+          discountAmount,
           customRate: persistedCustomRate,
           customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
         };
@@ -196,16 +201,21 @@ export default function OrderSummary({
           return;
         }
 
+        // Same rule as the initialiser: never restore a discount already inside the price.
+        const restorable = shouldRestorePersistedDiscount(item as CartItem & { original_price?: number });
+        const discountAmount = restorable ? persistedDiscountAmount : 0;
+        const discountPercentage = restorable ? persistedDiscountPercentage : 0;
+
         if (
-          persistedDiscountAmount > 0
-          || persistedDiscountPercentage > 0
+          discountAmount > 0
+          || discountPercentage > 0
           || (persistedCustomRate !== undefined && persistedCustomRate !== null)
           || serialBatchBundle
           || bundleEntries
         ) {
           next[item.id] = {
-            discountPercentage: persistedDiscountPercentage,
-            discountAmount: persistedDiscountAmount,
+            discountPercentage,
+            discountAmount,
             customRate: persistedCustomRate,
             customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
             serial_batch_bundle: serialBatchBundle,

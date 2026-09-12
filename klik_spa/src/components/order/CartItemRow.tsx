@@ -384,7 +384,11 @@ export const CartItemRow = ({
   const hasExclusiveTax = exclusiveTaxRate > 0;
   const totalTaxRate = hasExclusiveTax ? exclusiveTaxRate : Number(item.total_tax_rate || 0);
   const taxAmountPerUnit = roundCurrency(Math.max(0, displayRateInclTax - discountedPrice));
-  const originalTotal = roundCurrency(item.price * item.quantity);
+  // original_price is the rate before any rule discount; price is what it costs now.
+  // Reading item.price here showed no strike-through at all once rule discounts stopped
+  // being replayed through itemDiscounts.
+  const listRate = Number((item as CartItem & { original_price?: number }).original_price || 0) || item.price;
+  const originalTotal = roundCurrency(Math.max(listRate, discountedPrice) * item.quantity);
   // ERPNext convention: line displays the price-list (net) rate; tax shows in totals.
   const discountedTotal = roundCurrency(discountedPrice * item.quantity);
   const amount = discountedTotal;
