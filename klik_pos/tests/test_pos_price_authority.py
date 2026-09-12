@@ -165,3 +165,32 @@ class TestPosPriceAuthority(FrappeTestCase):
 		self.assertEqual(flt(lines[0]["qty"]), float(QTY))
 		self.assertEqual(flt(lines[0]["rate"]), TILL_RATE)
 		self.assertEqual(flt(lines[0]["amount"]), TILL_RATE * QTY)
+
+	def test_reasserting_prices_leaves_the_delivery_row_alone(self):
+		from klik_pos.api.sales_invoice import _reassert_pos_line_prices
+
+		doc = self._build()
+		pos_line_prices = [
+			(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items
+		]
+		# _upsert_delivery_charge_service_item writes the keyed charge onto an existing cart
+		# row when the delivery item is already in the cart. Restoring the till price by index
+		# would put the cart rate back and lose the charge.
+		doc.items[0].rate = 350.0
+
+		_reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=ITEM_CODE)
+
+		self.assertEqual(flt(doc.items[0].rate), 350.0)
+
+	def test_reasserting_prices_restores_every_other_row(self):
+		from klik_pos.api.sales_invoice import _reassert_pos_line_prices
+
+		doc = self._build()
+		pos_line_prices = [
+			(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items
+		]
+		doc.items[0].rate = LIST_RATE
+
+		_reassert_pos_line_prices(doc, pos_line_prices)
+
+		self.assertEqual(flt(doc.items[0].rate), TILL_RATE)

@@ -2663,7 +2663,7 @@ def build_sales_invoice_doc(
 
 	doc.set_taxes()
 	doc.set_missing_values()
-	_reassert_pos_line_prices(doc, pos_line_prices)
+	_reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=delivery_item_code)
 	doc.calculate_taxes_and_totals()
 	apply_loyalty_redemption(doc, loyalty_redemption)
 	if loyalty_redemption:
@@ -3497,7 +3497,7 @@ def _assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=None):
 		)
 
 
-def _reassert_pos_line_prices(doc, pos_line_prices):
+def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None):
 	"""Put the till's price back on every line, and stop ERPNext reaching for it again.
 
 	`doc.ignore_pricing_rule` cannot just be set once at the top: SalesInvoice.set_pos_fields
@@ -3506,6 +3506,10 @@ def _reassert_pos_line_prices(doc, pos_line_prices):
 	apply_pricing_rule_on_items rewrites `rate` from the Item Price. Undo that here and set
 	the flag again - every later pass runs with for_validate=True, which leaves the flag
 	alone, so this is the last chance ERPNext gets to reprice a POS line.
+
+	`skip_item_code` is the delivery charge item. When it is already in the cart,
+	_upsert_delivery_charge_service_item writes the keyed charge onto that same row, so
+	restoring the cart price by index here would silently drop the delivery charge.
 	"""
 	doc.ignore_pricing_rule = 1
 
@@ -3515,6 +3519,8 @@ def _reassert_pos_line_prices(doc, pos_line_prices):
 
 		row = doc.items[idx]
 		if row.item_code != item_code:
+			continue
+		if skip_item_code and row.item_code == skip_item_code:
 			continue
 
 		row.pricing_rules = ""
