@@ -1,6 +1,7 @@
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { subtractCurrency } from "../../utils/currencyMath";
 import type { BackendTaxPreview, Calculations } from "./types";
+import { formatTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
 
 interface TotalsSectionProps {
   calculations: Calculations;
@@ -29,6 +30,7 @@ export default function TotalsSection({
   outstandingAmount,
   displayCurrencySymbol,
   isB2B,
+  backendTaxPreview,
 }: TotalsSectionProps) {
   const amountDue = checkoutPayableTotal ?? checkoutGrandTotal;
   const changeDue = totalPaidAmount > amountDue ? subtractCurrency(totalPaidAmount, amountDue) : 0;
@@ -56,9 +58,10 @@ export default function TotalsSection({
             )}
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">
-                {calculations.selectedTax
-                  ? `Tax (${calculations.selectedTax.rate}% ${displayTaxIsIncluded ? "Incl." : "Excl."})`
-                  : `Tax ${displayTaxIsIncluded ? "(Incl.)" : ""}`}
+                {formatTaxLabel(
+                  getTaxRateForDisplay(backendTaxPreview?.tax_breakdown, calculations.selectedTax?.rate),
+                  displayTaxIsIncluded,
+                )}
               </span>
               <span className={`font-medium ${displayTaxIsIncluded ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
                 {displayTaxIsIncluded

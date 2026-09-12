@@ -2564,6 +2564,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               isB2C={isB2C}
               currentDate={currentDate}
               extraCharges={reconciliation.extraCharges}
+              taxBreakdown={backendTaxLines}
             />
           </div>
         </div>

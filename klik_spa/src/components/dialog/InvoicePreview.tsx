@@ -2,6 +2,7 @@ import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveItemRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { getItemDiscountTotal, getLineDiscount } from "../../utils/receiptDiscounts";
+import { formatTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
 import type { Calculations, PaymentAmount } from "./types";
 import type { CartItem } from "../../../types";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -29,6 +30,8 @@ interface InvoicePreviewProps {
   isTaxIncludedInBasicRate?: boolean;
   /** Lines the server added that the cart never had, e.g. a delivery charge. */
   extraCharges?: Array<{ item_code: string; amount: number }>;
+  /** The server preview's tax rows, which know the rate even with no template picked. */
+  taxBreakdown?: Array<{ rate?: number; charge_type?: string }>;
 }
 
 /** The rate before any rule or per-item discount.
@@ -63,6 +66,7 @@ export default function InvoicePreview({
   itemDiscounts = {},
   isTaxIncludedInBasicRate = false,
   extraCharges = [],
+  taxBreakdown = [],
 }: InvoicePreviewProps) {
   if (invoiceSubmitted && invoiceData) {
     return (
@@ -86,6 +90,12 @@ export default function InvoicePreview({
   );
   const totalDiscount = roundCurrency(
     itemDiscountTotal + (calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0),
+  );
+  // selectedTax only exists when a template is picked in the POS; with the company
+  // default template the receipt used to print "Tax (% Excl.)" at the customer.
+  const taxLabel = formatTaxLabel(
+    getTaxRateForDisplay(taxBreakdown, calculations.selectedTax?.rate),
+    displayTaxIsIncluded,
   );
 
   return (
@@ -191,7 +201,7 @@ export default function InvoicePreview({
           </div>
         )}
         <div className="flex justify-between">
-          <span className="text-gray-600 dark:text-gray-400">Tax ({calculations.selectedTax?.rate}% {displayTaxIsIncluded ? "Incl." : "Excl."})</span>
+          <span className="text-gray-600 dark:text-gray-400">{taxLabel}</span>
           <span className={`${displayTaxIsIncluded ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
             {displayTaxIsIncluded
               ? `(${formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)})`
