@@ -1664,6 +1664,18 @@ def validate_checkout_invoice(data):
 			"message": "Checkout validation passed",
 			"tax_preview": {
 				"tax_breakdown": tax_breakdown,
+				# The receipt renders lines from the cart and totals from this document.
+				# Hand the frontend the lines this document actually priced so it can tell
+				# when the two disagree instead of printing a receipt that does not add up.
+				"items": [
+					{
+						"item_code": row.item_code,
+						"qty": flt(row.qty or 0),
+						"rate": flt(row.rate or 0),
+						"amount": flt(row.amount or 0),
+					}
+					for row in preview_doc.get("items") or []
+				],
 				"net_total": flt(preview_doc.net_total or 0),
 				"total_taxes_and_charges": flt(preview_doc.total_taxes_and_charges or 0),
 				"grand_total": flt(preview_doc.grand_total or 0),

@@ -146,3 +146,22 @@ class TestPosPriceAuthority(FrappeTestCase):
 		doc.items[0].rate = LIST_RATE
 
 		_assert_pos_rates_survived(doc, expected, skip_item_code=ITEM_CODE)
+
+	def test_the_checkout_preview_returns_its_own_lines(self):
+		from klik_pos.api.sales_invoice import validate_checkout_invoice
+
+		result = validate_checkout_invoice(
+			{
+				"customer": {"id": self.customer},
+				"items": [{"id": ITEM_CODE, "quantity": QTY, "price": TILL_RATE, "uom": "Nos"}],
+				"status": "held",
+			}
+		)
+
+		self.assertTrue(result["success"], result.get("message"))
+		lines = result["tax_preview"]["items"]
+		self.assertEqual(len(lines), 1)
+		self.assertEqual(lines[0]["item_code"], ITEM_CODE)
+		self.assertEqual(flt(lines[0]["qty"]), float(QTY))
+		self.assertEqual(flt(lines[0]["rate"]), TILL_RATE)
+		self.assertEqual(flt(lines[0]["amount"]), TILL_RATE * QTY)
