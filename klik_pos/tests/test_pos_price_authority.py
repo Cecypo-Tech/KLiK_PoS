@@ -119,3 +119,30 @@ class TestPosPriceAuthority(FrappeTestCase):
 		self.assertEqual(flt(row.price_list_rate), TILL_RATE)
 		self.assertEqual(flt(row.discount_amount), 0.0)
 
+	def test_the_guard_throws_when_a_line_was_repriced(self):
+		from klik_pos.api.sales_invoice import _assert_pos_rates_survived
+
+		doc = self._build()
+		expected = [(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items]
+		doc.items[0].rate = LIST_RATE
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			_assert_pos_rates_survived(doc, expected)
+
+		self.assertIn(ITEM_CODE, str(caught.exception))
+
+	def test_the_guard_is_quiet_when_every_rate_held(self):
+		from klik_pos.api.sales_invoice import _assert_pos_rates_survived
+
+		doc = self._build()
+		expected = [(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items]
+		_assert_pos_rates_survived(doc, expected)
+
+	def test_the_guard_skips_the_server_added_delivery_row(self):
+		from klik_pos.api.sales_invoice import _assert_pos_rates_survived
+
+		doc = self._build()
+		expected = [(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items]
+		doc.items[0].rate = LIST_RATE
+
+		_assert_pos_rates_survived(doc, expected, skip_item_code=ITEM_CODE)

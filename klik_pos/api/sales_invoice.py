@@ -7,7 +7,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.stock.get_item_details import get_item_details
 from frappe import _
 from frappe.exceptions import ValidationError
-from frappe.utils import cint, flt, nowdate, strip_html_tags
+from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
@@ -2647,7 +2647,7 @@ def build_sales_invoice_doc(
 
 	# Build per-item taxes from item_tax_rate fields
 	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
-	_upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge)
+	delivery_item_code = _upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge)
 
 	doc.set_taxes()
 	doc.set_missing_values()
@@ -2673,6 +2673,8 @@ def build_sales_invoice_doc(
 		doc.is_pos = _is_pos_for_credit_sale(pos_profile)
 		if due_date:
 			doc.due_date = due_date
+
+	_assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=delivery_item_code)
 
 	return doc
 
@@ -3301,7 +3303,7 @@ def _upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge):
 		delivery_row.amount = charge
 		delivery_row.base_rate = charge
 		delivery_row.base_amount = charge
-		return
+		return delivery_item_code
 
 	item_data_map = _batch_fetch_item_data([delivery_item_code])
 	_precache_item_accounts([delivery_item_code], pos_profile.company)
@@ -3316,6 +3318,8 @@ def _upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge):
 		"discountAmount": 0,
 	}
 	doc.append("items", _prepare_item_data(doc, delivery_item_payload, item_data_map, pos_profile))
+
+	return delivery_item_code
 
 
 def _is_pos_profile_tax_included_in_basic_rate(pos_profile):
@@ -3446,6 +3450,39 @@ def _resolve_item_tax_details_for_line(doc, item, pos_profile):
 		pass
 
 	return item_tax_template, item_tax_rate
+
+
+def _assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=None):
+	"""Stop the sale if the server priced a line differently from the till.
+
+	_reassert_pos_line_prices removes the path we found, but a Pricing Rule is not the
+	only way ERPNext can rewrite a rate, and a silently repriced line means the customer
+	pays something other than the number they were shown. Fail the checkout instead.
+	"""
+	for idx, entry in enumerate(pos_line_prices):
+		if idx >= len(doc.items):
+			break
+
+		item_code, expected_rate = entry[0], entry[1]
+		row = doc.items[idx]
+		if skip_item_code and row.item_code == skip_item_code:
+			continue
+
+		if abs(flt(row.rate) - flt(expected_rate)) <= 0.005:
+			continue
+
+		frappe.throw(
+			_(
+				"Price changed for {0} during checkout. The till sent {1} and the server "
+				"priced it at {2}. Check for a Pricing Rule or Item Price that disagrees "
+				"with the POS price before selling this item."
+			).format(
+				frappe.bold(item_code),
+				frappe.bold(fmt_money(flt(expected_rate), currency=doc.currency)),
+				frappe.bold(fmt_money(flt(row.rate), currency=doc.currency)),
+			),
+			title=_("POS price overridden"),
+		)
 
 
 def _reassert_pos_line_prices(doc, pos_line_prices):
