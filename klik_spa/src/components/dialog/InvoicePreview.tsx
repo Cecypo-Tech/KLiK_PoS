@@ -32,6 +32,8 @@ interface InvoicePreviewProps {
   extraCharges?: Array<{ item_code: string; amount: number }>;
   /** The server preview's tax rows, which know the rate even with no template picked. */
   taxBreakdown?: Array<{ rate?: number; charge_type?: string }>;
+  /** The Shipping Rule's charge; it is in the Total, so it needs its own line. */
+  shippingAmount?: number;
 }
 
 /** The rate before any rule or per-item discount.
@@ -67,6 +69,7 @@ export default function InvoicePreview({
   isTaxIncludedInBasicRate = false,
   extraCharges = [],
   taxBreakdown = [],
+  shippingAmount = 0,
 }: InvoicePreviewProps) {
   if (invoiceSubmitted && invoiceData) {
     return (
@@ -208,6 +211,12 @@ export default function InvoicePreview({
               : formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}
           </span>
         </div>
+        {shippingAmount > 0 && (
+          <div className="flex justify-between">
+            <span className="text-gray-600 dark:text-gray-400">Shipping</span>
+            <span className="text-gray-900 dark:text-white">{formatCurrencyWithSymbol(shippingAmount, displayCurrencySymbol)}</span>
+          </div>
+        )}
         <div className="border-t border-gray-200 dark:border-gray-600 pt-1">
           <div className="flex justify-between font-bold">
             <span className="text-gray-900 dark:text-white">Total</span>

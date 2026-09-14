@@ -35,6 +35,11 @@ export interface CartItem {
   item_tax_rate?: Record<string, number>
   total_tax_rate?: number
   tax_templates?: TaxTemplate[]
+  /** Line description sent to the invoice; the cashier can rewrite it from the cart. */
+  description?: string
+  /** Per stock UOM, from the Item. */
+  weight_per_unit?: number
+  weight_uom?: string
 }
 
 export interface TaxTemplate {

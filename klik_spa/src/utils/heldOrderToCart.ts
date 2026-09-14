@@ -32,6 +32,7 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
     custom_rate_includes_tax: item.customRateIncludesTax ?? undefined,
     item_tax_template: item.item_tax_template || '',
     item_tax_rate: item.item_tax_rate || {},
+    description: item.description || '',
   } as unknown as CartItem));
 
   // Resolve customer object — must be a full Customer (with `id`) so checkout can
@@ -72,6 +73,7 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
   });
 
   useCartStore.getState().setExtraFields(od.extra_fields || od.cart_meta?.extra_fields || {});
+  useCartStore.getState().setShippingRule(od.shipping_rule || od.cart_meta?.shipping_rule || null);
 
   return loadCachedItemsToCart();
 }

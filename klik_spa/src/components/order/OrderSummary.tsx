@@ -31,6 +31,8 @@ import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
 import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
 import { roundCurrency } from "../../utils/currencyMath";
+import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
+import { CART_ROW_GRID } from "./cartTableLayout";
 
 interface OrderSummaryProps {
   onClearCart?: () => void;
@@ -52,6 +54,7 @@ export default function OrderSummary({
     updateQuantity,
     removeItem,
     clearCart,
+    updateItemDescription,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -361,6 +364,7 @@ export default function OrderSummary({
   }, 0);
   const couponDiscount = 0;
   const total = roundCurrency(Math.max(0, grandTotal - couponDiscount));
+  const cartWeight = getCartNetWeight(cartItems);
 
   const handleUpdateQuantity = (id: string, quantity: number) => {
     if (quantity <= 0) {
@@ -374,8 +378,8 @@ export default function OrderSummary({
     removeItem(id);
   };
 
-  const handleUOMChange = useCallback((itemId: string, uom: string, price: number) => {
-    updateUOM(itemId, uom, price);
+  const handleUOMChange = useCallback((itemId: string, uom: string, price: number, conversionFactor?: number) => {
+    updateUOM(itemId, uom, price, conversionFactor);
   }, [updateUOM]);
 
   const updateItemDiscount = (itemId: string, field: string, value: number | string) => {
@@ -596,11 +600,22 @@ export default function OrderSummary({
       <div
         className={`${
           isMobile
-            ? "flex-1 overflow-y-auto custom-scrollbar p-4"
-            : "flex-1 overflow-y-auto p-6 cart-scroll"
+            ? "flex-1 overflow-y-auto custom-scrollbar"
+            : "flex-1 overflow-y-auto cart-scroll"
         }`}
       >
-        <div className="space-y-4">
+        {/* A table like the product list: one header, rows split by a rule, no cards. */}
+        {cartItems.length > 0 && (
+          <div
+            className={`${CART_ROW_GRID} sticky top-0 z-10 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400`}
+          >
+            <span>Item</span>
+            <span className="text-center">Qty</span>
+            <span className="text-right">Rate</span>
+            <span className="text-right">Total</span>
+          </div>
+        )}
+        <div className="divide-y divide-gray-200 dark:divide-gray-700">
           {cartItems.length === 0 ? (
             <div className="text-center py-8">
               <div className="text-6xl mb-4">🛒</div>
@@ -636,6 +651,7 @@ export default function OrderSummary({
                   onCustomRateChange={handleCustomRateChange}
                   onDuplicateItem={handleDuplicateItem}
                   onBundleUpdate={handleBundleUpdate}
+                  onDescriptionChange={updateItemDescription}
                   selectedCustomer={selectedCustomer}
                   posDetails={posDetails}
                   itemBatches={itemBatches[item.item_code || item.id] || []}
@@ -668,6 +684,7 @@ export default function OrderSummary({
           currency_symbol={currency_symbol}
           allow_holding_invoices={posDetails?.allow_holding_invoices === 1}
           taxExclusive={!isTaxIncludedInBasicRate}
+          netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
         />
       )}
 

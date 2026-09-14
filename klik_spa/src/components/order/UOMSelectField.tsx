@@ -5,7 +5,7 @@ import type { CartItem } from "../../../types";
 
 interface UOMSelectFieldProps {
   item: CartItem;
-  onUOMChange: (itemId: string, selectedUOM: string, newPrice: number) => void;
+  onUOMChange: (itemId: string, selectedUOM: string, newPrice: number, conversionFactor?: number) => void;
   isMobile?: boolean;
   selectedCustomer?: { id: string } | null;
 }
@@ -172,7 +172,7 @@ export const UOMSelectField = ({
     setSelectedUOM(newUOM);
     setIsDropdownOpen(false);
     setSearchQuery("");
-    onUOMChange(item.id, newUOM, Number(newPrice.toFixed(6)));
+    onUOMChange(item.id, newUOM, Number(newPrice.toFixed(6)), targetFactor);
   };
 
   return (

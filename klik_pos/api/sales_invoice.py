@@ -1639,14 +1639,29 @@ def validate_checkout_invoice(data):
 			walkin_phone=data.get("walkin_phone"),
 			extra_fields=_parse_extra_fields(data),
 			order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+			shipping_rule=data.get("shipping_rule") or None,
 		)
 
 		validate_required_salesperson(preview_doc)
 
 		_validate_reserved_stock_for_items(preview_doc)
 
+		shipping_account = (
+			frappe.db.get_value("Shipping Rule", preview_doc.shipping_rule, "account")
+			if preview_doc.get("shipping_rule")
+			else None
+		)
 		tax_breakdown = []
+		shipping_amount = 0.0
 		for tax in preview_doc.get("taxes") or []:
+			# The till shows a shipping charge on its own line, not folded into "Tax".
+			is_shipping = bool(
+				shipping_account
+				and tax.charge_type == "Actual"
+				and tax.account_head == shipping_account
+			)
+			if is_shipping:
+				shipping_amount += flt(tax.tax_amount or 0)
 			tax_breakdown.append(
 				{
 					"description": tax.description,
@@ -1656,6 +1671,7 @@ def validate_checkout_invoice(data):
 					"tax_amount": flt(tax.tax_amount or 0),
 					"total": flt(tax.total or 0),
 					"included_in_print_rate": int(tax.included_in_print_rate or 0),
+					"is_shipping": int(is_shipping),
 				}
 			)
 
@@ -1681,6 +1697,8 @@ def validate_checkout_invoice(data):
 				"grand_total": flt(preview_doc.grand_total or 0),
 				"rounded_total": flt(preview_doc.rounded_total or 0),
 				"disable_rounded_total": int(preview_doc.disable_rounded_total or 0),
+				"shipping_amount": flt(shipping_amount),
+				"total_net_weight": flt(preview_doc.get("total_net_weight") or 0),
 			},
 		}
 
@@ -1893,6 +1911,7 @@ def queue_sales_invoice(data):
 			walkin_phone=data.get("walkin_phone"),
 			extra_fields=_parse_extra_fields(data),
 			order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+			shipping_rule=data.get("shipping_rule") or None,
 		)
 
 		validate_required_salesperson(doc)
@@ -2266,6 +2285,7 @@ def create_draft_invoice(data):
 				walkin_phone=walkin_phone,
 				extra_fields=extra_fields,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+				shipping_rule=data.get("shipping_rule") or None,
 			)
 		else:
 			doc = build_sales_invoice_doc(
@@ -2290,6 +2310,7 @@ def create_draft_invoice(data):
 				walkin_phone=walkin_phone,
 				extra_fields=extra_fields,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+				shipping_rule=data.get("shipping_rule") or None,
 			)
 
 			validate_required_salesperson(doc)
@@ -2411,6 +2432,8 @@ def parse_invoice_data(data):
 			"item_tax_rate": item_tax_rate,
 			"discountPercentage": discount_percentage,
 			"discountAmount": discount_amount,
+			# The cashier's own wording for this line, from the cart's pen dialog.
+			"description": (item.get("description") or "").strip(),
 		})
 
 		price = flt(item.get("price") or 0)
@@ -2581,8 +2604,13 @@ def build_sales_invoice_doc(
 	walkin_phone=None,
 	extra_fields=None,
 	order_discount_amount=0.0,
+	shipping_rule=None,
 ):
 	"""Main function to build a sales invoice document."""
+	if shipping_rule and flt(delivery_charge) > 0:
+		frappe.throw(
+			_("Choose a Shipping Rule or a Delivery Charge, not both - the customer would pay for delivery twice.")
+		)
 	doc = frappe.new_doc("Sales Invoice")
 	_apply_klik_invoice_flags(doc, is_held=False, is_submitted=False)
 	# The cart already priced every line through klik_pos.api.item.pricing.get_cart_pricing,
@@ -2665,6 +2693,8 @@ def build_sales_invoice_doc(
 	doc.set_missing_values()
 	_reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=delivery_item_code)
 	doc.calculate_taxes_and_totals()
+	_set_total_net_weight(doc)
+	_apply_pos_shipping_rule(doc, shipping_rule)
 	apply_loyalty_redemption(doc, loyalty_redemption)
 	if loyalty_redemption:
 		doc.calculate_taxes_and_totals()
@@ -2713,6 +2743,7 @@ def _update_existing_draft_invoice(
 	walkin_phone=None,
 	extra_fields=None,
 	order_discount_amount=0.0,
+	shipping_rule=None,
 ):
 	rebuilt_doc = build_sales_invoice_doc(
 		customer,
@@ -2737,6 +2768,7 @@ def _update_existing_draft_invoice(
 		walkin_phone=walkin_phone,
 		extra_fields=extra_fields,
 		order_discount_amount=order_discount_amount,
+		shipping_rule=shipping_rule,
 	)
 
 	invoice_doc.customer = rebuilt_doc.customer
@@ -2772,6 +2804,7 @@ def _update_existing_draft_invoice(
 	invoice_doc.taxes_and_charges = rebuilt_doc.taxes_and_charges
 	invoice_doc.apply_discount_on = rebuilt_doc.apply_discount_on
 	invoice_doc.discount_amount = rebuilt_doc.discount_amount
+	invoice_doc.shipping_rule = rebuilt_doc.get("shipping_rule")
 	invoice_doc.set("items", [])
 	for item_row in rebuilt_doc.get("items", []):
 		invoice_doc.append("items", item_row.as_dict())
@@ -3497,6 +3530,48 @@ def _assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=None):
 		)
 
 
+def _set_total_net_weight(doc):
+	"""Fill each line's total_weight and the invoice's total_net_weight from item weights.
+
+	ERPNext only does this in calculate_net_weight, which klik_pos never reaches while
+	building a POS invoice. A "Net Weight" Shipping Rule reads total_net_weight, and the
+	till shows it at checkout, so it has to be right before either looks.
+	"""
+	total = 0.0
+	for row in doc.items:
+		weight_per_unit = flt(row.get("weight_per_unit"))
+		if not weight_per_unit:
+			weight_per_unit = flt(frappe.get_cached_value("Item", row.item_code, "weight_per_unit"))
+			row.weight_per_unit = weight_per_unit
+		stock_qty = flt(row.get("stock_qty")) or flt(row.qty) * (flt(row.get("conversion_factor")) or 1)
+		row.total_weight = flt(stock_qty * weight_per_unit)
+		total += row.total_weight
+	doc.total_net_weight = flt(total)
+
+
+def _apply_pos_shipping_rule(doc, shipping_rule):
+	"""Add the chosen Shipping Rule's charge row to a POS invoice.
+
+	ERPNext's calculate_shipping_charges returns early for is_pos documents, so a rule set on
+	a POS invoice never charges anything by itself. Apply it here once the lines are priced;
+	the charge is an "Actual" tax row, which later totals passes keep as it is.
+	"""
+	if not shipping_rule:
+		return
+
+	rule = frappe.get_cached_doc("Shipping Rule", shipping_rule)
+	if cint(rule.disabled) or rule.shipping_rule_type != "Selling" or rule.company != doc.company:
+		frappe.throw(
+			_("Shipping Rule {0} cannot be used for a sale by {1}.").format(
+				frappe.bold(shipping_rule), frappe.bold(doc.company)
+			)
+		)
+
+	doc.shipping_rule = shipping_rule
+	rule.apply(doc)
+	doc.calculate_taxes_and_totals()
+
+
 def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None):
 	"""Put the till's price back on every line, and stop ERPNext reaching for it again.
 
@@ -3563,6 +3638,9 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 		"warehouse": pos_profile.warehouse,
 		"cost_center": pos_profile.cost_center,
 	}
+	# Only when the cashier wrote one: set_missing_values fills the Item's own otherwise.
+	if item.get("description"):
+		item_data["description"] = item.get("description")
 
 	# Resolve per-item tax fields using ERPNext item selection logic.
 	item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(doc, item, pos_profile)
@@ -4800,6 +4878,7 @@ def submit_draft_invoice(invoice_id, data=None):
 				walkin_phone=data.get("walkin_phone"),
 				extra_fields=_ef,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+				shipping_rule=data.get("shipping_rule") or None,
 			)
 
 			invoice_doc.customer = rebuilt_doc.customer
@@ -4835,6 +4914,7 @@ def submit_draft_invoice(invoice_id, data=None):
 			invoice_doc.taxes_and_charges = rebuilt_doc.taxes_and_charges
 			invoice_doc.apply_discount_on = rebuilt_doc.apply_discount_on
 			invoice_doc.discount_amount = rebuilt_doc.discount_amount
+			invoice_doc.shipping_rule = rebuilt_doc.get("shipping_rule")
 			invoice_doc.set("items", [])
 			for item_row in rebuilt_doc.get("items", []):
 				invoice_doc.append("items", item_row.as_dict())

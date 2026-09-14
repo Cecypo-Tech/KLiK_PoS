@@ -129,7 +129,7 @@ interface CartState {
   addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number) => Promise<void>
   updateQuantity: (id: string, quantity: number) => Promise<void>
   adjustQuantity: (id: string, delta: number) => Promise<void>
-  updateUOM: (id: string, uom: string, price: number) => Promise<void>
+  updateUOM: (id: string, uom: string, price: number, conversionFactor?: number) => Promise<void>
   removeItem: (id: string) => void
   clearCart: () => void
   applyCoupon: (coupon: GiftCoupon) => void
@@ -142,6 +142,10 @@ interface CartState {
   setSelectedPriceList: (priceList: string | null) => Promise<void>
   refreshCartPricing: () => Promise<void>
   updateItemBundleEntries: (id: string, entries: SerialBatchEntry[]) => void
+  /** Shipping Rule chosen at checkout; its charge is added by the server. */
+  shippingRule: string | null
+  setShippingRule: (rule: string | null) => void
+  updateItemDescription: (id: string, description: string) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -178,6 +182,7 @@ export const useCartStore = create<CartState>()(
       selectedPriceList: null,
       isPricingLoading: false,
       pricingError: null,
+      shippingRule: null,
 
       refreshCartPricing: async () => {
         const state = get();
@@ -478,11 +483,14 @@ export const useCartStore = create<CartState>()(
         await get().refreshCartPricing();
       },
 
-      updateUOM: async (id, uom, price) => {
+      updateUOM: async (id, uom, price, conversionFactor) => {
         set((state) => ({
           cartItems: state.cartItems.map((item) => {
             if (item.id === id) {
-              return { ...item, uom, price };
+              // The factor turns this UOM into stock units, which the net weight needs.
+              return conversionFactor
+                ? { ...item, uom, price, conversion_factor: conversionFactor }
+                : { ...item, uom, price };
             }
             return item;
           })
@@ -508,6 +516,7 @@ export const useCartStore = create<CartState>()(
           walkinDetails: { ...EMPTY_WALKIN },
           extraFields: {},
           selectedPriceList: null,
+          shippingRule: null,
         }));
       },
 
@@ -540,6 +549,13 @@ export const useCartStore = create<CartState>()(
       clearWalkinDetails: () => set({ walkinDetails: { ...EMPTY_WALKIN } }),
       setExtraFields: (v) => set({ extraFields: v }),
       clearExtraFields: () => set({ extraFields: {} }),
+      setShippingRule: (rule) => set({ shippingRule: rule || null }),
+      updateItemDescription: (id, description) =>
+        set((state) => ({
+          cartItems: state.cartItems.map((item) =>
+            item.id === id ? { ...item, description } : item
+          ),
+        })),
 
       setSelectedPriceList: async (priceList) => {
         set({ selectedPriceList: priceList });

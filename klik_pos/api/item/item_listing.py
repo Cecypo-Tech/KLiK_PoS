@@ -61,7 +61,7 @@ def get_items(
             "i.name, i.item_name, i.description, i.item_group, i.image, "
             "i.stock_uom, i.sales_uom, i.has_batch_no, i.has_serial_no, "
             "i.is_stock_item, i.has_variants, i.variant_of, i.variant_based_on, "
-            "i.allow_negative_stock, "
+            "i.allow_negative_stock, i.weight_per_unit, i.weight_uom, "
             "CASE WHEN pb.name IS NULL THEN 0 ELSE 1 END AS is_product_bundle"
         )
         params_list = []
@@ -360,6 +360,10 @@ def get_items(
                     "sold": 0,
                     "preparationTime": 10,
                     "uom": item_uom,
+                    # Weight is per stock UOM; the cart multiplies by conversion_factor.
+                    "weight_per_unit": flt(item.get("weight_per_unit")),
+                    "weight_uom": item.get("weight_uom") or "",
+                    "conversion_factor": flt(conversion_factor) or 1,
                     "barcode": barcode_map.get(item_code),
                     "has_batch_no": item.has_batch_no,
                     "has_serial_no": item.has_serial_no,

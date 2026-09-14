@@ -56,6 +56,8 @@ export interface BackendTaxBreakdownLine {
   tax_amount?: number;
   total?: number;
   included_in_print_rate?: number;
+  /** 1 for the Shipping Rule's charge row, which is not a tax. */
+  is_shipping?: number;
 }
 
 export interface BackendTaxPreviewLine {
@@ -74,4 +76,7 @@ export interface BackendTaxPreview {
   grand_total: number;
   rounded_total: number;
   disable_rounded_total: number;
+  /** The Shipping Rule's charge inside total_taxes_and_charges. Absent on an older backend. */
+  shipping_amount?: number;
+  total_net_weight?: number;
 }

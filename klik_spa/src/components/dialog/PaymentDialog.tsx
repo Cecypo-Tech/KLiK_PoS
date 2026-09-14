@@ -8,6 +8,9 @@ import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
 import { useSalesTaxCharges } from "../../hooks/useSalesTaxCharges";
 import { useDeliveryPersonnel } from "../../hooks/useDeliveryPersonnel";
+import { useShippingRules } from "../../hooks/useShippingRules";
+import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
+import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import {
   createDraftSalesInvoice,
   createSalesInvoice,
@@ -173,8 +176,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [orderDiscountAmount, setOrderDiscountAmount] = useState(0);
   const [orderDiscountPercentInput, setOrderDiscountPercentInput] = useState(0);
   const [backendTaxPreview, setBackendTaxPreview] = useState<BackendTaxPreview | null>(null);
-  const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
-  const [taxPreviewError, setTaxPreviewError] = useState<string | null>(null);
+  const [, setIsTaxPreviewLoading] = useState(false);
+  const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
   const [showMpesaOptionsModal, setShowMpesaOptionsModal] = useState(false);
@@ -190,6 +193,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [isApplyingLoyalty, setIsApplyingLoyalty] = useState(false);
   const backendTaxPreviewRef = useRef<BackendTaxPreview | null>(null);
   const taxPreviewRequestIdRef = useRef(0);
+  // The debounce is for typing. Opening checkout and picking from a list (a shipping rule)
+  // skip it: those are single decisions, and the debounce alone was most of the wait.
+  const taxPreviewImmediateRef = useRef(true);
+  // Preview requests on their way, by cache key. While checkout opens, payment modes and
+  // other lookups land and re-run the preview effect; without this each re-run discarded the
+  // answer already in flight, waited out the debounce and asked the server the same thing.
+  const taxPreviewInFlightRef = useRef<Map<string, ReturnType<typeof validateCheckoutInvoice>>>(new Map());
   const taxPreviewCacheRef = useRef<Map<string, CachedTaxPreviewEntry>>(new Map());
   const initializedCreditDefaultRef = useRef(false);
   const initializedOrderDiscountRef = useRef(false);
@@ -208,7 +218,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const { salesTaxCharges, defaultTax, isLoading: salesTaxLoading } = useSalesTaxCharges();
   const { personnel: deliveryPersonnelList } = useDeliveryPersonnel();
   const navigate = useNavigate();
-  const { clearCart, walkinDetails, setWalkinDetails, extraFields } = useCartStore();
+  const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
   const posCompanyName =
     typeof posDetails?.company === "string"
@@ -237,6 +247,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const allowPartialPayments = Boolean(posDetails?.allow_partial_payment);
   const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
   const allow_holding_invoices = Boolean(posDetails?.allow_holding_invoices);
+  const isShippingRuleEnabled =
+    posDetails?.custom_enable_shipping_rule === 1
+    || posDetails?.custom_enable_shipping_rule === "1"
+    || posDetails?.custom_enable_shipping_rule === true;
+  // The store survives a hold and recall; a till with the feature off never sends one.
+  const activeShippingRule = isShippingRuleEnabled ? shippingRule : null;
+  const { rules: shippingRules } = useShippingRules(isShippingRuleEnabled);
+
+  useEffect(() => {
+    // The server refuses a rule and a delivery charge together - delivery would be paid twice.
+    if (activeShippingRule && deliveryCharge > 0) setDeliveryCharge(0);
+  }, [activeShippingRule, deliveryCharge]);
   const isTaxIncludedInBasicRate =
     posDetails?.is_tax_included_in_basic_rate === 1
     || posDetails?.is_tax_included_in_basic_rate === "1"
@@ -418,9 +440,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const displayTaxIsIncluded = hasBackendTaxBreakdown
     ? backendTaxLines.some((line) => Number(line.included_in_print_rate) === 1)
     : calculations.isInclusive;
+  // A Shipping Rule's charge is a row in the taxes table, but it is not tax.
+  const shippingAmount = hasBackendTaxPreview ? roundCurrency(Number(backendTaxPreview?.shipping_amount || 0)) : 0;
   const displayTaxTotal = hasBackendTaxPreview
-    ? backendTaxPreview?.total_taxes_and_charges || 0
+    ? roundCurrency(Math.max(0, Number(backendTaxPreview?.total_taxes_and_charges || 0) - shippingAmount))
     : calculations.taxAmount > 0 ? calculations.taxAmount : Math.max(0, localTaxTotal);
+  const cartNetWeight = useMemo(() => getCartNetWeight(cartItems), [cartItems]);
+  const netWeightTotal =
+    hasBackendTaxPreview && backendTaxPreview?.total_net_weight !== undefined
+      ? Number(backendTaxPreview.total_net_weight || 0)
+      : cartNetWeight.total;
+  const netWeightLabel = netWeightTotal > 0 ? formatCartWeight({ ...cartNetWeight, total: netWeightTotal }) : "";
 
   // The receipt's lines come from this cart; its Subtotal, Tax and Total come from the
   // server preview. If the server priced a line differently, the printed lines will not
@@ -702,6 +732,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       orderDiscountAmount: Number(orderDiscountAmount || 0),
       deliveryCharge: Number(deliveryCharge || 0),
       delivery_charge: Number(deliveryCharge || 0),
+      shipping_rule: activeShippingRule || null,
       grandTotal: checkoutGrandTotal,
       amountPaid: totalPaidAmount,
       outstandingAmount: outstandingAmount,
@@ -994,6 +1025,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     });
   }, [paymentAmounts]);
 
+  // The first preview can leave before the default tax template has loaded. When the
+  // template lands it changes the payload, and that request is still part of opening
+  // checkout - so it skips the debounce too. Declared before the preview effect so the flag
+  // is set by the time that effect schedules its request in the same render.
+  useEffect(() => {
+    if (selectedSalesTaxCharges) taxPreviewImmediateRef.current = true;
+  }, [selectedSalesTaxCharges]);
+
   useEffect(() => {
     const requestId = taxPreviewRequestIdRef.current + 1;
     taxPreviewRequestIdRef.current = requestId;
@@ -1019,6 +1058,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           discountPercentage: Number(discountData.discountPercentage || 0),
           discountAmount: Number(discountData.discountAmount || 0),
           bundle_entries: discountData.bundle_entries || [],
+          description: item.description || "",
           item_tax_template: item.item_tax_template || "",
           item_tax_rate: normalizedItemTaxRate,
         };
@@ -1026,6 +1066,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       SalesTaxCharges: selectedSalesTaxCharges,
       businessType: posDetails?.business_type || "",
       deliveryCharge: Number(deliveryCharge || 0),
+      shipping_rule: activeShippingRule || null,
       orderDiscountAmount: Number(orderDiscountAmount || 0),
       loyalty: appliedLoyalty
         ? {
@@ -1053,6 +1094,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         return;
       }
 
+      // Only spend the "no debounce" pass on a request that actually goes out, not on a
+      // run that bailed while the tax templates were still loading.
+      taxPreviewImmediateRef.current = false;
+
       const now = Date.now();
       const cachedEntry = taxPreviewCacheRef.current.get(previewCacheKey);
       if (cachedEntry && now - cachedEntry.timestamp <= TAX_PREVIEW_CACHE_TTL_MS) {
@@ -1078,6 +1123,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               discountPercentage: discountData.discountPercentage || 0,
               discountAmount: discountData.discountAmount || 0,
               bundle_entries: discountData.bundle_entries || [],
+              description: item.description || "",
               item_tax_template: item.item_tax_template || "",
               item_tax_rate: item.item_tax_rate || {},
             };
@@ -1086,6 +1132,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           SalesTaxCharges: selectedSalesTaxCharges,
           businessType: posDetails?.business_type,
           deliveryCharge,
+          shipping_rule: activeShippingRule || null,
           orderDiscountAmount: Number(orderDiscountAmount || 0),
           loyalty: appliedLoyalty
             ? {
@@ -1097,7 +1144,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           status: "held",
         };
 
-        const response = await validateCheckoutInvoice(payload);
+        const inFlight = taxPreviewInFlightRef.current;
+        let pending = inFlight.get(previewCacheKey);
+        if (!pending) {
+          const request = validateCheckoutInvoice(payload);
+          inFlight.set(previewCacheKey, request);
+          const settled = () => {
+            if (inFlight.get(previewCacheKey) === request) inFlight.delete(previewCacheKey);
+          };
+          request.then(settled, settled);
+          pending = request;
+        }
+        const response = await pending;
         if (taxPreviewRequestIdRef.current === requestId) {
           if (response?.tax_preview) {
             setBackendTaxPreview(response.tax_preview);
@@ -1146,7 +1204,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
     const timeoutId = window.setTimeout(() => {
       fetchBackendTaxPreview();
-    }, TAX_PREVIEW_DEBOUNCE_MS);
+    }, taxPreviewImmediateRef.current || taxPreviewInFlightRef.current.has(previewCacheKey) ? 0 : TAX_PREVIEW_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -1162,6 +1220,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     salesTaxLoading,
     posDetails?.business_type,
     deliveryCharge,
+    activeShippingRule,
     orderDiscountAmount,
     appliedLoyalty,
     isCreditSale,
@@ -1517,6 +1576,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             }
           : null,
         held_order_id: getOriginalHeldOrderId(),
+        shipping_rule: activeShippingRule || null,
       };
 
       const result = await createHeldOrder(orderData);
@@ -1600,6 +1660,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         e.preventDefault();
         e.stopPropagation();
         if (!isActionButtonDisabled()) handleCompletePayment();
+      } else if (e.key === 'F10' && e.shiftKey) {
+        // Shift+F10 holds, the keyboard twin of the Hold button.
+        e.preventDefault();
+        e.stopPropagation();
+        if (allow_holding_invoices && !invoiceSubmitted && !isProcessingPayment && !isHoldingOrder) {
+          void handleHoldOrder();
+        }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         // Completed screen: ESC does the default "Start New Order" action.
@@ -1613,7 +1680,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, isActionButtonDisabled, handleCompletePayment, invoiceSubmitted, finalizeCompletedOrderState, onClose]);
+  }, [isOpen, isActionButtonDisabled, handleCompletePayment, handleHoldOrder, allow_holding_invoices, isProcessingPayment, isHoldingOrder, invoiceSubmitted, finalizeCompletedOrderState, onClose]);
 
   const buildOrderText = () => {
     const lines: string[] = [];
@@ -1909,73 +1976,118 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const redeemableValue = Number(loyalty.redeemable_value || 0);
     const tier = loyalty.loyalty_program_tier || loyalty.customer_loyalty_program_tier;
 
-    return (
-      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
-              <Award className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-white">Redeem Loyalty Points</div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">
-                {loyalty.loyalty_program_name || loyalty.loyalty_program}
-                {tier ? ` · ${tier}` : ""}
-              </div>
-            </div>
-          </div>
-          <div className="text-right text-xs text-gray-600 dark:text-gray-300">
-            <div className="font-semibold text-gray-900 dark:text-white">
-              {availablePoints.toLocaleString()} pts
-            </div>
-            <div>{formatCurrencyWithSymbol(redeemableValue, displayCurrencySymbol)}</div>
-          </div>
-        </div>
+    const locked = invoiceSubmitted || isProcessingPayment;
 
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+    return (
+      <div className="min-w-[14rem] flex-[2]">
+        <label
+          className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 mb-1"
+          title={`${loyalty.loyalty_program_name || loyalty.loyalty_program}${tier ? ` · ${tier}` : ""}`}
+        >
+          <Award className="h-3.5 w-3.5" />
+          Loyalty ({availablePoints.toLocaleString()} pts · {formatCurrencyWithSymbol(redeemableValue, displayCurrencySymbol)})
+        </label>
+        <div className="flex items-center gap-1.5">
           <input
             type="number"
             min="0"
             step="1"
             max={availablePoints}
             value={loyaltyPointsInput}
+            {...selectAllOnFocus}
             onChange={(event) => handleLoyaltyPointsInputChange(event.target.value)}
-            disabled={invoiceSubmitted || isProcessingPayment || isApplyingLoyalty || availablePoints <= 0}
-            placeholder="Points to redeem"
-            className="w-full px-3 py-2 border border-amber-200 dark:border-amber-800 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={locked || isApplyingLoyalty || availablePoints <= 0}
+            placeholder="Points"
+            className="min-w-0 flex-1 px-2 py-1.5 text-sm border border-amber-200 dark:border-amber-800 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50"
           />
           <button
             type="button"
             onClick={() => void handleApplyLoyaltyRedemption()}
-            disabled={invoiceSubmitted || isProcessingPayment || isApplyingLoyalty || availablePoints <= 0 || !appliedLoyalty}
-            className="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+            disabled={locked || isApplyingLoyalty || availablePoints <= 0 || !appliedLoyalty}
+            className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed font-medium"
           >
             {isApplyingLoyalty ? "Applying..." : "Apply"}
           </button>
+          {appliedLoyalty && (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 pl-2 pr-0.5 py-0.5 text-xs text-amber-800 dark:text-amber-200">
+              {appliedLoyalty.loyalty_points.toLocaleString()} pts · -{formatCurrencyWithSymbol(appliedLoyalty.loyalty_amount, displayCurrencySymbol)}
+              <button
+                type="button"
+                onClick={clearLoyaltyRedemption}
+                disabled={locked}
+                className="flex h-5 w-5 items-center justify-center rounded-full text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Remove loyalty redemption"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
         </div>
-
-        {appliedLoyalty && (
-          <div className="flex items-center justify-between gap-3 rounded-md bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800 p-3">
-            <div>
-              <div className="text-sm font-medium text-gray-900 dark:text-white">
-                {appliedLoyalty.loyalty_points.toLocaleString()} points applied
-              </div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">
-                {formatCurrencyWithSymbol(appliedLoyalty.loyalty_amount, displayCurrencySymbol)} will reduce amount due.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={clearLoyaltyRedemption}
-              disabled={invoiceSubmitted || isProcessingPayment}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Remove loyalty redemption"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
       </div>
+    );
+  };
+
+  const showLoyaltyRedemption = Boolean(
+    selectedCustomer && selectedCustomer.loyalty?.enabled && selectedCustomer.loyalty?.loyalty_program,
+  );
+
+  const renderDeliveryChargeInput = () => {
+    const chargedByRule = Boolean(activeShippingRule);
+    const locked = invoiceSubmitted || isProcessingPayment || chargedByRule;
+    return (
+      <div className="min-w-[9rem] flex-1">
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Delivery charge</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={chargedByRule ? 0 : deliveryCharge}
+          {...selectAllOnFocus}
+          onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value || 0)))}
+          disabled={locked}
+          title={
+            chargedByRule
+              ? "Charged by shipping rule"
+              : deliveryChargeItemCode
+                ? `Posted as service item: ${deliveryChargeItemCode}`
+                : "Set Delivery Charge Item on POS Profile to post this amount as a service item."
+          }
+          className={`w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
+        />
+      </div>
+    );
+  };
+
+  const renderShippingRuleSelect = (extraClassName = "px-4 py-2") => {
+    const locked = invoiceSubmitted || isProcessingPayment;
+    // A recalled order may carry a rule that is no longer in the list; still show it.
+    const options =
+      activeShippingRule && !shippingRules.some((rule) => rule.name === activeShippingRule)
+        ? [{ name: activeShippingRule, label: activeShippingRule }, ...shippingRules]
+        : shippingRules;
+    return (
+      <select
+        aria-label="Shipping rule"
+        value={activeShippingRule || ""}
+        onChange={(e) => {
+          taxPreviewImmediateRef.current = true;
+          setShippingRule(e.target.value || null);
+        }}
+        disabled={locked}
+        className={`border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors focus:ring-2 focus:ring-beveren-500 ${activeShippingRule ? "" : "text-gray-500 dark:text-gray-400"} ${locked ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${extraClassName}`}
+      >
+        <option value="">Select shipping rule</option>
+        {options.map((rule) => {
+          const fixed = "calculate_based_on" in rule && rule.calculate_based_on === "Fixed";
+          const amount = "shipping_amount" in rule ? Number(rule.shipping_amount || 0) : 0;
+          return (
+            <option key={rule.name} value={rule.name}>
+              {rule.label || rule.name}
+              {fixed && amount > 0 ? ` (${formatCurrencyWithSymbol(amount, displayCurrencySymbol)})` : ""}
+            </option>
+          );
+        })}
+      </select>
     );
   };
 
@@ -2060,7 +2172,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-          <div className="p-4 space-y-6 [padding-bottom:calc(8rem+env(safe-area-inset-bottom))]">
+          <div className="p-4 space-y-4 [padding-bottom:calc(8rem+env(safe-area-inset-bottom))]">
             {invoiceSubmitted ? (
               <div className="space-y-4">
                 <div className="flex items-center justify-center space-x-3 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
@@ -2183,44 +2295,28 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     )
                   }
                 />
-                {renderLoyaltyRedemption()}
                 {renderMpesaStatusNotice()}
-                {isDeliveryChargeEnabled && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Delivery Charge (Service Item)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={deliveryCharge}
-                      onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value || 0)))}
-                      disabled={invoiceSubmitted || isProcessingPayment}
-                      className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
+                {(showLoyaltyRedemption || isDeliveryChargeEnabled || allowDiscountChange || isShippingRuleEnabled) && (
+                  <div className="flex flex-wrap items-end gap-3">
+                    {renderLoyaltyRedemption()}
+                    {isDeliveryChargeEnabled && renderDeliveryChargeInput()}
+                    {isShippingRuleEnabled && (
+                      <div className="min-w-[12rem] flex-1">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Shipping</label>
+                        {renderShippingRuleSelect("w-full px-2 py-1.5 text-sm")}
+                      </div>
+                    )}
+                    <TaxSection
+                      invoiceSubmitted={invoiceSubmitted}
+                      isProcessingPayment={isProcessingPayment}
+                      allowDiscountChange={allowDiscountChange}
+                      orderDiscountAmount={orderDiscountAmount}
+                      orderDiscountPercentInput={orderDiscountPercentInput}
+                      onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
+                      onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
                     />
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      {deliveryChargeItemCode
-                        ? `Posted as service item: ${deliveryChargeItemCode}`
-                        : "Set Delivery Charge Item on POS Profile to post this amount as a service item."}
-                    </p>
                   </div>
                 )}
-                <TaxSection
-                  selectedCustomer={selectedCustomer}
-                  invoiceSubmitted={invoiceSubmitted}
-                  isProcessingPayment={isProcessingPayment}
-                  taxPin={walkinDetails.taxId}
-                  onTaxPinChange={(v) => setWalkinDetails({ taxId: v })}
-                  calculations={calculations}
-                  displayCurrencySymbol={displayCurrencySymbol}
-                  backendTaxPreview={backendTaxPreview}
-                  isTaxPreviewLoading={isTaxPreviewLoading}
-                  taxPreviewError={taxPreviewError}
-                  allowDiscountChange={allowDiscountChange}
-                  orderDiscountAmount={orderDiscountAmount}
-                  orderDiscountPercentInput={orderDiscountPercentInput}
-                  onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
-                  onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
-                />
 
                 <TotalsSection
                   calculations={calculations}
@@ -2235,6 +2331,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   displayCurrencySymbol={displayCurrencySymbol}
                   isB2B={isB2B}
                   backendTaxPreview={backendTaxPreview}
+                  shippingAmount={shippingAmount}
+                  netWeightLabel={netWeightLabel}
                 />
                 <div className="space-y-3 pt-6">
                   <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
@@ -2354,7 +2452,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         />
 
         <div className="flex flex-1 min-h-0">
-          <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-6">
+          <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-4">
             {invoiceSubmitted && sharingMode ? (
               <SharingInterface
                 sharingMode={sharingMode}
@@ -2446,45 +2544,22 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   }
                 />
 
-                {renderLoyaltyRedemption()}
                 {renderMpesaStatusNotice()}
-
-                {isDeliveryChargeEnabled && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Delivery Charge (Service Item)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={deliveryCharge}
-                      onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value || 0)))}
-                      disabled={invoiceSubmitted || isProcessingPayment}
-                      className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
+                {(showLoyaltyRedemption || isDeliveryChargeEnabled || allowDiscountChange) && (
+                  <div className="flex flex-wrap items-end gap-3">
+                    {renderLoyaltyRedemption()}
+                    {isDeliveryChargeEnabled && renderDeliveryChargeInput()}
+                    <TaxSection
+                      invoiceSubmitted={invoiceSubmitted}
+                      isProcessingPayment={isProcessingPayment}
+                      allowDiscountChange={allowDiscountChange}
+                      orderDiscountAmount={orderDiscountAmount}
+                      orderDiscountPercentInput={orderDiscountPercentInput}
+                      onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
+                      onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
                     />
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      {deliveryChargeItemCode
-                        ? `Posted as service item: ${deliveryChargeItemCode}`
-                        : "Set Delivery Charge Item on POS Profile to post this amount as a service item."}
-                    </p>
                   </div>
                 )}
-                <TaxSection
-                  selectedCustomer={selectedCustomer}
-                  invoiceSubmitted={invoiceSubmitted}
-                  isProcessingPayment={isProcessingPayment}
-                  taxPin={walkinDetails.taxId}
-                  onTaxPinChange={(v) => setWalkinDetails({ taxId: v })}
-                  calculations={calculations}
-                  displayCurrencySymbol={displayCurrencySymbol}
-                  backendTaxPreview={backendTaxPreview}
-                  isTaxPreviewLoading={isTaxPreviewLoading}
-                  taxPreviewError={taxPreviewError}
-                  allowDiscountChange={allowDiscountChange}
-                  orderDiscountAmount={orderDiscountAmount}
-                  orderDiscountPercentInput={orderDiscountPercentInput}
-                  onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
-                  onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
-                />
 
                 <SalesPersonSection
                   requiresSalespersonPin={requiresSalespersonPin}
@@ -2514,6 +2589,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   displayCurrencySymbol={displayCurrencySymbol}
                   isB2B={isB2B}
                   backendTaxPreview={backendTaxPreview}
+                  shippingAmount={shippingAmount}
+                  netWeightLabel={netWeightLabel}
                 />
               </>
             )}
@@ -2565,22 +2642,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               currentDate={currentDate}
               extraCharges={reconciliation.extraCharges}
               taxBreakdown={backendTaxLines}
+              shippingAmount={shippingAmount}
             />
           </div>
         </div>
 
         <div className="border-t border-gray-200 dark:border-gray-700 p-6 flex-shrink-0 bg-white dark:bg-gray-800">
           <div className="flex items-center justify-between gap-4">
-            {isDeliveryRequired && (
-              <div className="flex-1 max-w-xs">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Delivery Personnel</label>
-                <button type="button" onClick={() => setShowDeliveryPersonnelModal(true)} disabled={invoiceSubmitted || isProcessingPayment} className={`w-full px-4 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-between ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
-                  <span>{getSelectedDeliveryPersonnelName() || <span className="text-gray-500 dark:text-gray-400">Select Delivery Personnel</span>}</span>
-                  <ChevronDown size={16} className="text-gray-400 dark:text-gray-500 flex-shrink-0 ml-2" />
-                </button>
+            {(isDeliveryRequired || isShippingRuleEnabled) && (
+              <div className="flex flex-1 flex-wrap items-center gap-3">
+                {isDeliveryRequired && (
+                  <button type="button" onClick={() => setShowDeliveryPersonnelModal(true)} disabled={invoiceSubmitted || isProcessingPayment} className={`flex-1 min-w-[12rem] max-w-xs px-4 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-between ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+                    <span>{getSelectedDeliveryPersonnelName() || <span className="text-gray-500 dark:text-gray-400">Select Delivery Personnel</span>}</span>
+                    <ChevronDown size={16} className="text-gray-400 dark:text-gray-500 flex-shrink-0 ml-2" />
+                  </button>
+                )}
+                {isShippingRuleEnabled && renderShippingRuleSelect("flex-1 min-w-[12rem] max-w-xs px-4 py-2")}
               </div>
             )}
-            <div className={`flex items-center gap-4 ${isDeliveryRequired ? "" : "w-full justify-between"}`}>
+            <div className={`flex items-center gap-4 ${isDeliveryRequired || isShippingRuleEnabled ? "" : "w-full justify-between"}`}>
               <label className="flex items-center gap-2 cursor-pointer group">
                 <div className="relative">
                   <input

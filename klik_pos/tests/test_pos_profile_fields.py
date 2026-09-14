@@ -61,7 +61,7 @@ class TestPosProfileFeatureFields(FrappeTestCase):
     @patch("frappe.db.has_column", return_value=False)
     def test_creates_all_when_none_exist(self, _hc, mock_create):
         result = install_pos_profile_feature_fields()
-        self.assertEqual(result, ["allow_price_list_switching", "allow_warehouse_change", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers"])
+        self.assertEqual(result, ["allow_price_list_switching", "allow_warehouse_change", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
         sent = mock_create.call_args[0][0]
         self.assertEqual(sent["POS Profile"], POS_PROFILE_FEATURE_FIELDS)
         self.assertTrue(mock_create.call_args.kwargs.get("update"))
@@ -71,9 +71,9 @@ class TestPosProfileFeatureFields(FrappeTestCase):
         # warehouse already exists (e.g. standard field), price-list and sales-lens missing
         with patch("frappe.db.has_column", side_effect=lambda dt, fn: fn == "allow_warehouse_change"):
             result = install_pos_profile_feature_fields()
-        self.assertEqual(result, ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers"])
+        self.assertEqual(result, ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
         sent = mock_create.call_args[0][0]
-        self.assertEqual([f["fieldname"] for f in sent["POS Profile"]], ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers"])
+        self.assertEqual([f["fieldname"] for f in sent["POS Profile"]], ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
 
     @patch("klik_pos.setup.pos_profile_fields.create_custom_fields")
     @patch("frappe.db.has_column", return_value=True)
@@ -118,3 +118,33 @@ class TestMpesaReconciledPaymentChild(FrappeTestCase):
         self.assertTrue(fields["payment_entry"].read_only)
         self.assertEqual(fields["allocated_amount"].fieldtype, "Currency")
         self.assertTrue(fields["allocated_amount"].read_only)
+
+
+class TestPosProfileFormLayout(FrappeTestCase):
+    """The shipped field_order Property Setter decides where POS Profile fields render."""
+
+    def _order(self):
+        import json
+
+        import frappe
+
+        rows = json.load(open(frappe.get_app_path("klik_pos", "fixtures", "property_setter.json")))
+        setter = next(r for r in rows if r.get("doc_type") == "POS Profile" and r.get("property") == "field_order")
+        return json.loads(setter["value"])
+
+    def test_users_and_filters_sit_on_the_details_tab(self):
+        order = self._order()
+        first_tab = order.index("accounting_tab")
+        for fieldname in ("applicable_for_users", "item_groups", "customer_groups"):
+            self.assertLess(order.index(fieldname), first_tab, f"{fieldname} is not on the Details tab")
+
+    def test_pos_item_details_checkboxes_are_split_across_both_columns(self):
+        order = self._order()
+        start = order.index("pos_item_details_section")
+        column = order.index("column_break_hwfg")
+        table = order.index("custom_pos_extra_fields")
+        self.assertLess(start, column)
+        self.assertLess(column, table)
+        # Seven checkboxes, 4 | 3, with the Extra Fields table closing the second column.
+        self.assertEqual(len(order[start + 1:column]), 4)
+        self.assertEqual(len(order[column + 1:table]), 3)

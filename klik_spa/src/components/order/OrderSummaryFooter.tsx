@@ -16,6 +16,8 @@ interface OrderSummaryFooterProps {
   currency_symbol?: string;
   allow_holding_invoices?: boolean;
   taxExclusive?: boolean;
+  /** Formatted total net weight, e.g. "12.5 Kg"; empty hides the row. */
+  netWeightLabel?: string;
 }
 
 export const OrderSummaryFooter = ({
@@ -32,6 +34,7 @@ export const OrderSummaryFooter = ({
   currency_symbol,
   allow_holding_invoices,
   taxExclusive = false,
+  netWeightLabel = "",
 }: OrderSummaryFooterProps) => {
   const discount = totalItemDiscount + couponDiscount;
 
@@ -55,6 +58,12 @@ export const OrderSummaryFooter = ({
           <div className="flex justify-between text-green-600 dark:text-green-400">
             <span>Discount</span>
             <span>-{formatCurrencyWithSymbol(discount, currency_symbol)}</span>
+          </div>
+        )}
+        {netWeightLabel && (
+          <div className="flex justify-between text-gray-500 dark:text-gray-400">
+            <span>Net Weight</span>
+            <span className="tabular-nums">{netWeightLabel}</span>
           </div>
         )}
       </div>

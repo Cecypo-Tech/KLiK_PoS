@@ -107,6 +107,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
             "bundle_entries": item.get("bundle_entries") or [],
             "item_tax_template": item.get("item_tax_template") or "",
             "item_tax_rate": item.get("item_tax_rate") or {},
+            "description": item.get("description") or "",
         }
 
     # Persist the full frontend customer object (if sent) so resume can restore it
@@ -132,6 +133,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
         "walkin_name": data.get("walkin_name") if isinstance(data, dict) else None,
         "walkin_phone": data.get("walkin_phone") if isinstance(data, dict) else None,
         "extra_fields": _parse_extra_fields(data),
+        "shipping_rule": (data.get("shipping_rule") or None) if isinstance(data, dict) else None,
     }
 
 
@@ -363,6 +365,7 @@ def get_held_order_details(order_id):
                 "bundle_entries": d.get("bundle_entries") or [],
                 "item_tax_template": d.get("item_tax_template") or "",
                 "item_tax_rate": d.get("item_tax_rate") or {},
+                "description": d.get("description") or "",
             })
 
         return {
@@ -373,6 +376,7 @@ def get_held_order_details(order_id):
             "walkin_name": cart_meta.get("walkin_name"),
             "walkin_phone": cart_meta.get("walkin_phone"),
             "extra_fields": cart_meta.get("extra_fields") or {},
+            "shipping_rule": cart_meta.get("shipping_rule"),
             "items": items,
             "cart_meta": cart_meta,
             "grand_total": flt(so.grand_total),

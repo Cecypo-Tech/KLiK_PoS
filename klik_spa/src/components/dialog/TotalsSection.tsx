@@ -16,6 +16,10 @@ interface TotalsSectionProps {
   displayCurrencySymbol: string;
   isB2B: boolean;
   backendTaxPreview: BackendTaxPreview | null;
+  /** The Shipping Rule's charge, shown on its own line rather than inside Tax. */
+  shippingAmount?: number;
+  /** e.g. "12.5 Kg"; the row is hidden when empty. */
+  netWeightLabel?: string;
 }
 
 export default function TotalsSection({
@@ -31,6 +35,8 @@ export default function TotalsSection({
   displayCurrencySymbol,
   isB2B,
   backendTaxPreview,
+  shippingAmount = 0,
+  netWeightLabel = "",
 }: TotalsSectionProps) {
   const amountDue = checkoutPayableTotal ?? checkoutGrandTotal;
   const changeDue = totalPaidAmount > amountDue ? subtractCurrency(totalPaidAmount, amountDue) : 0;
@@ -69,6 +75,20 @@ export default function TotalsSection({
                   : formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}
               </span>
             </div>
+            {shippingAmount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-600 dark:text-gray-400">Shipping</span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {formatCurrencyWithSymbol(shippingAmount, displayCurrencySymbol)}
+                </span>
+              </div>
+            )}
+            {netWeightLabel && (
+              <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400">
+                <span>Net Weight</span>
+                <span>{netWeightLabel}</span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 md:border-l md:border-gray-200 md:dark:border-gray-600 md:pl-6">

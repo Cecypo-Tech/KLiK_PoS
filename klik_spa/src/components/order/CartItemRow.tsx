@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye } from "lucide-react";
+import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye, Pencil } from "lucide-react";
 import { toast } from "react-toastify";
 import type { BundleEntry, CartItem } from "../../../types";
 import { QuantityInput } from "./QuantityInput";
@@ -10,6 +10,8 @@ import { UOMSelectField } from "./UOMSelectField";
 import { SerialBatchBundleModal } from "./SerialBatchBundleSelector";
 import { useCartStore } from "../../stores/cartStore";
 import ProductDetailsModal from "../ProductDetailsModal";
+import DescriptionDialog from "./DescriptionDialog";
+import { CART_ROW_GRID } from "./cartTableLayout";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 
@@ -21,7 +23,8 @@ interface CartItemRowProps {
   itemDiscount: any;
   onUpdateQuantity: (id: string, quantity: number) => void;
   onRemoveItem?: (id: string) => void;
-  onUOMChange: (itemId: string, uom: string, price: number) => void;
+  onUOMChange: (itemId: string, uom: string, price: number, conversionFactor?: number) => void;
+  onDescriptionChange?: (itemId: string, description: string) => void;
   onDiscountChange: (itemId: string, field: string, value: number | string) => void;
   onCustomRateChange: (item: CartItem, rate?: number, includesTax?: boolean) => void;
   onDuplicateItem: (item: CartItem) => void;
@@ -98,6 +101,7 @@ export const CartItemRow = ({
   onCustomRateChange,
   onDuplicateItem,
   onBundleUpdate,
+  onDescriptionChange,
   selectedCustomer,
   posDetails,
   currency_symbol,
@@ -123,6 +127,7 @@ export const CartItemRow = ({
   const [showBundleModal, setShowBundleModal] = useState(false);
   const [isBundleDetailsOpen, setIsBundleDetailsOpen] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
+  const [showDescriptionDialog, setShowDescriptionDialog] = useState(false);
   const [bundleEntries, setBundleEntries] = useState<BundleEntry[]>(() => {
     if (item.bundle_entries && Array.isArray(item.bundle_entries)) {
       return item.bundle_entries;
@@ -414,71 +419,75 @@ export const CartItemRow = ({
     <>
       <div
         data-cart-item-id={itemId}
-        className={`${isMobile ? "bg-gray-50 dark:bg-gray-700 rounded-lg overflow-hidden" : "rounded-lg border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"}${glowing ? " cart-item-glow" : ""}`}
+        className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/40 ${glowing ? "cart-item-glow" : ""}`}
       >
         <div
-          className={isMobile ? "p-3" : "px-2 py-2 cursor-pointer"}
+          className={`${isMobile ? "px-3 py-2" : "px-3 py-1.5"} cursor-pointer`}
           onClick={onToggleExpand}
         >
-          {/* Row 1: name + remove */}
-          <div className="flex items-start gap-1">
-            <div className="flex-1 min-w-0">
-              <div className="w-full font-semibold text-gray-900 dark:text-white text-sm leading-tight flex items-start gap-1">
-                <svg
-                  className={`flex-shrink-0 w-3 h-3 mt-0.5 text-gray-400 dark:text-gray-500 transform transition-transform duration-200 ${
-                    isExpanded ? "rotate-90" : ""
-                  }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                <span className="min-w-0 break-words">{item.name}</span>
-              </div>
-              {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 font-mono leading-tight pl-4">
-                  {item.item_code || item.id}
+          <div className={CART_ROW_GRID}>
+            {/* Item: chevron, name, code, actions */}
+            {/* The actions sit under the name: beside it they left a narrow cart no room for it. */}
+            <div className="min-w-0 grid grid-cols-[0.75rem_minmax(0,1fr)] items-start gap-x-1">
+              <svg
+                className={`flex-shrink-0 w-3 h-3 mt-1 text-gray-400 dark:text-gray-500 transform transition-transform duration-200 ${
+                  isExpanded ? "rotate-90" : ""
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium leading-tight text-gray-900 dark:text-white line-clamp-2 break-words" title={item.name}>
+                  {item.name}
                 </p>
-              )}
-              <p className={`text-gray-500 dark:text-gray-400 capitalize font-medium pl-4 ${isMobile ? "text-sm" : "text-xs"}`}>
-                {item.category}
-              </p>
+                {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
+                    {item.item_code || item.id}
+                  </p>
+                )}
+              </div>
+              {/* Quick Switch Price: per-line price-list pills, under the name */}
+              {quickSwitchPrice && fullItemData?.price_lists?.length ? (
+                <div className="col-start-2 mt-1 flex flex-wrap items-center gap-1">
+                  {fullItemData.price_lists
+                    .filter((priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0)
+                    .map((priceList) => {
+                      const active = itemDiscount.selectedPriceList === priceList.price_list;
+                      const shortName =
+                        priceList.price_list.length > 8
+                          ? priceList.price_list.slice(0, 8)
+                          : priceList.price_list;
+                      return (
+                        <button
+                          key={`${priceList.price_list}-${priceList.uom || ""}-${priceList.rate}`}
+                          onClick={(e) => { e.stopPropagation(); handleLinePriceListChange(priceList.price_list); }}
+                          title={`${priceList.price_list}: ${formatCurrencyWithSymbol(Number(priceList.rate || 0), currency_symbol)}`}
+                          className={`flex-shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                            active
+                              ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
+                              : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
+                          }`}
+                        >
+                          <span className="font-mono">{shortName} {Number(priceList.rate || 0).toFixed(2)}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              ) : null}
             </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowProductModal(true); }}
-              className={`flex-shrink-0 ${
-                isMobile ? "w-8 h-8" : "w-6 h-6"
-              } rounded-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors`}
-              title="View full details"
-            >
-              <Eye size={isMobile ? 14 : 11} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onRemoveItem?.(item.id); }}
-              className={`flex-shrink-0 ${
-                isMobile ? "w-8 h-8" : "w-6 h-6"
-              } rounded-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-200 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 transition-colors`}
-              title="Remove item"
-            >
-              <X size={isMobile ? 16 : 12} />
-            </button>
-          </div>
 
-          {/* Row 2: rate | qty pill | total */}
-          <div className="flex items-center gap-2 mt-1.5 pl-4">
-            <div className="text-right">
-              <p className="text-gray-500 dark:text-gray-400 capitalize font-medium text-xs whitespace-nowrap">
-                {formatCurrencyWithSymbol(discountedPrice, currency_symbol)}
-              </p>
-            </div>
-
-            <div className="flex items-center border border-gray-200 dark:border-gray-600 rounded-full overflow-hidden">
+            {/* Qty: - qty UOM + */}
+            <div className="flex items-center justify-center">
+              <div className="flex items-center border border-gray-200 dark:border-gray-600 rounded-full overflow-hidden">
               <button
                 onClick={(e) => { e.stopPropagation(); adjustQuantity(item.id, -1); }}
                 className={`${
                   isMobile ? "w-7 h-7" : "w-6 h-6"
                 } flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 dark:hover:text-red-400 transition-colors`}
+                aria-label="Decrease quantity"
               >
                 <Minus size={isMobile ? 12 : 10} />
               </button>
@@ -499,79 +508,82 @@ export const CartItemRow = ({
                 }}
                 onKeyDown={(e) => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
                 onClick={(e) => (e.target as HTMLInputElement).select()}
-                className={`${isMobile ? "w-9" : "w-8"} text-center font-semibold text-gray-900 dark:text-white text-sm border-x border-gray-200 dark:border-gray-600 py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+                className={`w-7 text-center font-semibold text-gray-900 dark:text-white text-sm border-l border-gray-200 dark:border-gray-600 py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
               />
+              {/* The UOM picker lives in the expanded panel; the label opens it. */}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+                className="max-w-[2.5rem] truncate px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 border-r border-gray-200 dark:border-gray-600 hover:text-beveren-600 dark:hover:text-beveren-400"
+                title={item.uom ? `Unit: ${item.uom}` : "Change unit"}
+              >
+                {item.uom || "Nos"}
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); adjustQuantity(item.id, 1); }}
                 className={`${
                   isMobile ? "w-7 h-7" : "w-6 h-6"
                 } flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400 transition-colors`}
+                aria-label="Increase quantity"
               >
                 <Plus size={isMobile ? 12 : 10} />
               </button>
+              </div>
             </div>
 
-            <div className={`ml-auto text-right font-mono tabular-nums`}>
+            {/* Rate */}
+            <p className="text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+              {formatCurrencyWithSymbol(discountedPrice, currency_symbol)}
+            </p>
+
+            {/* Total */}
+            <div className="text-right tabular-nums">
               {discountedTotal !== originalTotal ? (
-                <div>
-                  <p className="text-gray-400 line-through text-xs whitespace-nowrap">
-                    {formatCurrencyWithSymbol(originalTotal, currency_symbol)}
-                  </p>
-                  <p
-                    className={`text-beveren-600 dark:text-beveren-400 font-semibold whitespace-nowrap ${
-                      isMobile ? "text-base" : "text-sm"
-                    }`}
-                  >
-                    {formatCurrencyWithSymbol(discountedTotal, currency_symbol)}
-                  </p>
-                </div>
-              ) : (
-                <p
-                  className={`text-beveren-600 dark:text-beveren-400 font-semibold whitespace-nowrap ${
-                    isMobile ? "text-base" : "text-sm"
-                  }`}
-                >
-                  {formatCurrencyWithSymbol(amount, currency_symbol)}
+                <p className="text-[10px] leading-tight text-gray-400 dark:text-gray-500 line-through whitespace-nowrap">
+                  {formatCurrencyWithSymbol(originalTotal, currency_symbol)}
                 </p>
-              )}
+              ) : null}
+              <p
+                className={`text-beveren-600 dark:text-beveren-400 font-semibold whitespace-nowrap ${
+                  isMobile ? "text-sm" : "text-sm"
+                }`}
+              >
+                {formatCurrencyWithSymbol(discountedTotal !== originalTotal ? discountedTotal : amount, currency_symbol)}
+              </p>
+              {/* Line actions, far right under the total: edit description, details, remove. */}
+              <div className="mt-0.5 -mr-1 flex items-center justify-end">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowDescriptionDialog(true); }}
+                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
+                  title="Edit description"
+                  aria-label="Edit description"
+                >
+                  <Pencil size={isMobile ? 13 : 11} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowProductModal(true); }}
+                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
+                  title="View full details"
+                  aria-label="View full details"
+                >
+                  <Eye size={isMobile ? 14 : 12} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemoveItem?.(item.id); }}
+                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors`}
+                  title="Remove item"
+                  aria-label="Remove item"
+                >
+                  <X size={isMobile ? 15 : 13} />
+                </button>
+              </div>
             </div>
           </div>
-
-          {/* Quick Switch Price: per-line price-list pills */}
-          {quickSwitchPrice && fullItemData?.price_lists?.length ? (
-            <div className="flex items-center gap-1 mt-1.5 pl-4 overflow-x-auto no-scrollbar">
-              {fullItemData.price_lists
-                .filter((priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0)
-                .map((priceList) => {
-                  const active = itemDiscount.selectedPriceList === priceList.price_list;
-                  const shortName =
-                    priceList.price_list.length > 8
-                      ? priceList.price_list.slice(0, 8)
-                      : priceList.price_list;
-                  return (
-                    <button
-                      key={`${priceList.price_list}-${priceList.uom || ""}-${priceList.rate}`}
-                      onClick={(e) => { e.stopPropagation(); handleLinePriceListChange(priceList.price_list); }}
-                      title={`${priceList.price_list}: ${formatCurrencyWithSymbol(Number(priceList.rate || 0), currency_symbol)}`}
-                      className={`flex-shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                        active
-                          ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
-                          : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
-                      }`}
-                    >
-                      <span className="font-mono">{shortName} {Number(priceList.rate || 0).toFixed(2)}</span>
-                    </button>
-                  );
-                })}
-            </div>
-          ) : null}
         </div>
 
         {isExpanded ? (
           <div
-            className={`border-t border-gray-200 dark:border-gray-600 ${
-              isMobile ? "px-3 pb-3" : "px-6 py-3 ml-7"
-            } bg-gray-25 dark:bg-gray-750`}
+            className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-gray-50 dark:bg-gray-900/30"
           >
             <div className="w-full">
               <div className="grid grid-cols-2 gap-4 mb-4">
@@ -681,7 +693,8 @@ export const CartItemRow = ({
                 </div>
               )}
 
-              {allowPriceListSwitching && fullItemData?.price_lists?.length ? (
+              {/* With quick-switch pills on, the pills under the row are the price list selector. */}
+              {allowPriceListSwitching && !quickSwitchPrice && fullItemData?.price_lists?.length ? (
                 <div className="mb-4">
                   <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
                     Item Price List
@@ -907,6 +920,17 @@ export const CartItemRow = ({
           autoFetchBatch={autoFetchBatch}
         />
       </div>
+
+      <DescriptionDialog
+        isOpen={showDescriptionDialog}
+        itemName={item.name}
+        initialValue={item.description || ""}
+        onSave={(value) => {
+          onDescriptionChange?.(item.id, value);
+          setShowDescriptionDialog(false);
+        }}
+        onClose={() => setShowDescriptionDialog(false)}
+      />
 
       {showProductModal && (
         <ProductDetailsModal

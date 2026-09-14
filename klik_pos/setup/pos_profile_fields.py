@@ -73,6 +73,19 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "0",
         "module": "KLiK PoS",
     },
+    {
+        "fieldname": "custom_enable_shipping_rule",
+        "label": "Enable Shipping Rule at Checkout",
+        "fieldtype": "Check",
+        "insert_after": "custom_allow_viewing_other_cashiers",
+        "description": (
+            "Let cashiers pick a Selling Shipping Rule at checkout. The rule's charge is added "
+            "as its own row on the invoice, and the Delivery Charge box is disabled while a "
+            "rule is chosen."
+        ),
+        "default": "0",
+        "module": "KLiK PoS",
+    },
 ]
 
 

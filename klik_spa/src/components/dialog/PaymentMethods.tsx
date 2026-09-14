@@ -4,6 +4,7 @@ import { Circle, CheckCircle2, Plus, X } from "lucide-react";
 import type { PaymentMethod } from "./types";
 import { isReferenceMethod } from "./paymentIcons";
 import { partitionPaymentMethods } from "../../utils/paymentMethodVisibility";
+import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
 
 interface PaymentMethodsProps {
   paymentMethods: PaymentMethod[];
@@ -100,6 +101,7 @@ export default function PaymentMethods({
                 min="0"
                 step="0.01"
                 value={method.amount || ""}
+                {...selectAllOnFocus}
                 onChange={(e) => {
                   setActiveMethodId(method.id);
                   const inputValue = e.target.value;

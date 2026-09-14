@@ -535,32 +535,25 @@ export default function ClosingShiftPage() {
 
           {/* Payment Summary - Only show if not hidden */}
           {!hideExpectedAmount && !hasNoOpeningEntry && (
-            <div className="grid grid-cols-1 gap-4 mb-6">
-              {Object.values(paymentStats).map((stat) => (
-                      // @ts-expect-error just ignore for now
-                <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between mb-4">
-                                          {/* @ts-expect-error just ignore */}
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{stat.name}</h3>
-                                          {/* @ts-expect-error just ignore */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {(Object.values(paymentStats) as Array<{ name: string; amount: number }>).map((stat) => (
+                // Two rows: what it is, then its share and its amount.
+                <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2 min-w-0">
                     {stat.name.toLowerCase().includes('cash') ? (
-                      <div className="text-2xl">💵</div>
+                      <span className="text-base leading-none flex-shrink-0">💵</span>
                     ) : (
-                      <CreditCard className="w-8 h-8 text-beveren-600" />
+                      <CreditCard className="w-4 h-4 flex-shrink-0 text-beveren-600 dark:text-beveren-400" />
                     )}
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{stat.name}</h3>
                   </div>
-                  <div className="space-y-2">
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                                            {/* @ts-expect-error just ignore */}
-                      {formatCurrencyWithSymbol(stat.amount, posDetails?.currency || 'USD')}
-                    </div>
-                    {/* <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {stat.transactions} transactions
-                    </div> */}
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                                            {/* @ts-expect-error just ignore */}
+                  <div className="mt-1 flex items-baseline justify-between gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
                       {total > 0 ? ((stat.amount / total) * 100).toFixed(1) : 0}% of total
-                    </div>
+                    </span>
+                    <span className="text-sm font-bold tabular-nums text-gray-900 dark:text-white whitespace-nowrap">
+                      {formatCurrencyWithSymbol(stat.amount, posDetails?.currency || 'USD')}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -955,32 +948,25 @@ export default function ClosingShiftPage() {
           {!hideExpectedAmount && !hasNoOpeningEntry && (
             <>
               {/* Payment Method Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {Object.values(paymentStats).map((stat) => (
-                  // @ts-expect-error just ignore for now
-                  <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center justify-between mb-3">
-                                            {/* @ts-expect-error just ignore */}
-                      <h3 className="font-semibold text-gray-900 dark:text-white">{stat.name}</h3>
-                                            {/* @ts-expect-error just ignore */}
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                {(Object.values(paymentStats) as Array<{ name: string; amount: number }>).map((stat) => (
+                  // Two rows: what it is, then its share and its amount.
+                  <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center gap-2 min-w-0">
                       {stat.name.toLowerCase().includes('cash') ? (
-                        <div className="text-2xl">💵</div>
+                        <span className="text-base leading-none flex-shrink-0">💵</span>
                       ) : (
-                        <CreditCard className="w-8 h-8 text-orange-600" />
+                        <CreditCard className="w-4 h-4 flex-shrink-0 text-orange-600 dark:text-orange-400" />
                       )}
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{stat.name}</h3>
                     </div>
-                    <div className="space-y-2">
-                      <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                                              {/* @ts-expect-error just ignore */}
-                        {formatCurrencyWithSymbol(stat.amount, posDetails?.currency || 'USD')}
-                      </div>
-                      {/* <div className="text-sm text-gray-600 dark:text-gray-400">
-                        {stat.transactions} transactions
-                      </div> */}
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                                              {/* @ts-expect-error just ignore */}
+                    <div className="mt-1 flex items-baseline justify-between gap-2">
+                      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
                         {total > 0 ? ((stat.amount / total) * 100).toFixed(1) : 0}% of total
-                      </div>
+                      </span>
+                      <span className="text-base font-bold tabular-nums text-gray-900 dark:text-white whitespace-nowrap">
+                        {formatCurrencyWithSymbol(stat.amount, posDetails?.currency || 'USD')}
+                      </span>
                     </div>
                   </div>
                 ))}
