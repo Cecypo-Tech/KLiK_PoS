@@ -27,6 +27,9 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isStatementAvailable } from "../services/statementOfAccounts"
 import { resolveCompanyName } from "../utils/companyName"
+import { useTableSort } from "../hooks/useTableSort"
+import SortableHeaderButton from "./SortableHeaderButton"
+import { formatDateOnly, toSortableTimestamp } from "../utils/time"
 
 export default function CustomersPage() {
   const navigate = useNavigate()
@@ -97,7 +100,7 @@ export default function CustomersPage() {
     const list = customers
 
     // Sort by creation date (most recent first)
-    return list.sort((a, b) => {
+    return [...list].sort((a, b) => {
       const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
       const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
       return dateB - dateA
@@ -113,6 +116,18 @@ export default function CustomersPage() {
 
     return { total, totalOrders }
   }, [customers, isLoading])
+
+  const {
+    sortedData: sortedCustomers,
+    sortKey: customerSortKey,
+    sortDirection: customerSortDirection,
+    toggleSort: toggleCustomerSort,
+  } = useTableSort(filteredCustomers, {
+    name: (customer) => customer.name,
+    orders: (customer) => Number(customer.totalOrders || 0),
+    totalValue: (customer) => Number(customer.totalSpent || 0),
+    lastVisit: (customer) => (customer.lastVisit ? toSortableTimestamp(customer.lastVisit) : null),
+  })
 
   // Loading state - only block UI if we have no data yet
   if (isLoading && customers.length === 0) {
@@ -145,13 +160,8 @@ export default function CustomersPage() {
   }
 
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    })
-  }
+  // lastVisit is a bare posting_date; new Date("YYYY-MM-DD") would show the day before west of UTC.
+  const formatDate = (dateString: string) => formatDateOnly(dateString)
 
 
 
@@ -208,6 +218,137 @@ export default function CustomersPage() {
   // }
 
   // Mobile layout: full-width content with persistent bottom navigation
+  const headerCell = "px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+
+  // One icon per channel: a live link when the customer has it, greyed out when they do not.
+  const renderContactIcon = (value: string | undefined, scheme: "tel:" | "mailto:", Icon: typeof Phone, kind: string) => {
+    const contact = (value || "").trim()
+    const base = "inline-flex h-7 w-7 items-center justify-center rounded-md"
+    if (!contact) {
+      return (
+        <span
+          className={`${base} text-gray-300 dark:text-gray-600 cursor-default`}
+          title={`No ${kind} on file`}
+          aria-label={`No ${kind} on file`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Icon size={15} />
+        </span>
+      )
+    }
+    return (
+      <a
+        href={`${scheme}${contact}`}
+        onClick={(e) => e.stopPropagation()}
+        title={contact}
+        aria-label={`${kind}: ${contact}`}
+        className={`${base} text-beveren-600 dark:text-beveren-400 hover:bg-beveren-50 dark:hover:bg-gray-600`}
+      >
+        <Icon size={15} />
+      </a>
+    )
+  }
+
+  const renderCustomerTable = () => (
+    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+      <thead className="bg-gray-50 dark:bg-gray-700">
+        <tr>
+          <th className={`${headerCell} text-left`}>
+            <SortableHeaderButton label="Customer" sortKey="name" activeKey={customerSortKey} direction={customerSortDirection} onSort={toggleCustomerSort} />
+          </th>
+          <th className={`${headerCell} text-left`}>Contact</th>
+          <th className={`${headerCell} text-right`}>
+            <span className="inline-flex w-full justify-end">
+              <SortableHeaderButton label="Orders" sortKey="orders" activeKey={customerSortKey} direction={customerSortDirection} onSort={toggleCustomerSort} />
+            </span>
+          </th>
+          <th className={`${headerCell} text-right`}>
+            <span className="inline-flex w-full justify-end">
+              <SortableHeaderButton label="Total Value" sortKey="totalValue" activeKey={customerSortKey} direction={customerSortDirection} onSort={toggleCustomerSort} />
+            </span>
+          </th>
+          <th className={`${headerCell} text-left`}>
+            <SortableHeaderButton label="Last Visit" sortKey="lastVisit" activeKey={customerSortKey} direction={customerSortDirection} onSort={toggleCustomerSort} />
+          </th>
+          <th className={`${headerCell} text-right`}>Actions</th>
+        </tr>
+      </thead>
+      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+        {sortedCustomers.map((customer) => (
+          <tr
+            key={customer.id}
+            className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+            onClick={() => navigate(`/customers/${customer.id}`)}
+          >
+            <td className="px-4 py-2.5 whitespace-nowrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 bg-beveren-600 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-white font-medium text-xs">{getInitials(customer.name)}</span>
+                </div>
+                <span className="text-sm font-medium text-gray-900 dark:text-white truncate" title={customer.name}>
+                  {customer.name}
+                </span>
+              </div>
+            </td>
+            <td className="px-4 py-2.5 whitespace-nowrap">
+              <div className="flex items-center gap-1">
+                {renderContactIcon(customer.phone, "tel:", Phone, "phone")}
+                {renderContactIcon(customer.email, "mailto:", Mail, "email")}
+              </div>
+            </td>
+            <td className="px-4 py-2.5 whitespace-nowrap text-right text-sm tabular-nums text-gray-900 dark:text-white">
+              {Number(customer.totalOrders || 0)}
+            </td>
+            <td className="px-4 py-2.5 whitespace-nowrap text-right text-sm font-medium tabular-nums text-gray-900 dark:text-white">
+              {formatCurrencyWithSymbol(Number(customer.totalSpent || 0), customer.defaultCurrency || customer.companyCurrency)}
+            </td>
+            <td className="px-4 py-2.5 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+              {customer.lastVisit ? formatDate(customer.lastVisit) : 'Never'}
+            </td>
+            <td className="px-4 py-2.5 whitespace-nowrap text-right text-sm font-medium">
+              <div className="flex items-center justify-end space-x-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPaymentCustomer(customer)
+                  }}
+                  className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                  title="Receive Payment"
+                  aria-label={`Receive payment from ${customer.name}`}
+                >
+                  <Banknote size={16} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigate(`/customers/${customer.id}`)
+                  }}
+                  className="text-beveren-600 hover:text-beveren-700 dark:text-beveren-400 dark:hover:text-beveren-300"
+                  title="View customer"
+                >
+                  <Eye size={16} />
+                </button>
+                {canManageCustomers && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedCustomer(customer)
+                      setShowAddModal(true)
+                    }}
+                    className="text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                    title="Edit customer"
+                  >
+                    <Edit size={16} />
+                  </button>
+                )}
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+
   if (isMobile) {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -296,129 +437,7 @@ export default function CustomersPage() {
             {/* Customer List */}
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Customer
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Contact
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Orders & Spent
-                      </th>
-                      {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Status
-                      </th> */}
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Last Visit
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredCustomers.map((customer) => (
-                      <tr
-                        key={customer.id}
-                        className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                        onClick={() => navigate(`/customers/${customer.id}`)}
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="w-10 h-10 bg-beveren-600 rounded-full flex items-center justify-center flex-shrink-0">
-                              <span className="text-white font-medium text-sm">
-                                {getInitials(customer.name)}
-                              </span>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900 dark:text-white">
-                                {customer.name}
-                              </div>
-                              <div className="text-sm text-gray-500 dark:text-gray-400">
-                                ID: {customer.id}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="flex items-center text-sm text-gray-900 dark:text-white">
-                              <Mail size={14} className="mr-2 text-gray-400" />
-                              {customer.email}
-                            </div>
-                            <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-                              <Phone size={14} className="mr-2 text-gray-400" />
-                              {customer.phone}
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {customer.totalOrders} orders
-                            </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              {formatCurrencyWithSymbol(customer.totalSpent, customer.defaultCurrency || customer.companyCurrency)}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(customer.status)}`}>
-                            {customer.status === 'vip' && <Crown size={12} className="mr-1" />}
-                            {customer.status.toUpperCase()}
-                          </span>
-                        </td> */}
-
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {customer.lastVisit ? formatDate(customer.lastVisit) : 'Never'}
-                        </td>
-
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="flex items-center justify-end space-x-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setPaymentCustomer(customer)
-                              }}
-                              className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                              title="Receive Payment"
-                              aria-label={`Receive payment from ${customer.name}`}
-                            >
-                              <Banknote size={16} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                navigate(`/customers/${customer.id}`)
-                              }}
-                              className="text-beveren-600 hover:text-beveren-700 dark:text-beveren-400 dark:hover:text-beveren-300"
-                            >
-                              <Eye size={16} />
-                            </button>
-                            {canManageCustomers && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setSelectedCustomer(customer)
-                                  setShowAddModal(true)
-                                }}
-                                className="text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                              >
-                                <Edit size={16} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {renderCustomerTable()}
               </div>
 
               {filteredCustomers.length === 0 && (
@@ -597,129 +616,7 @@ export default function CustomersPage() {
           {/* Customer List */}
           <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead className="bg-gray-50 dark:bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Customer
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Contact
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Orders & Spent
-                    </th>
-                    {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Status
-                    </th> */}
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Last Visit
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {filteredCustomers.map((customer) => (
-                    <tr
-                      key={customer.id}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                      onClick={() => navigate(`/customers/${customer.id}`)}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="w-10 h-10 bg-beveren-600 rounded-full flex items-center justify-center flex-shrink-0">
-                            <span className="text-white font-medium text-sm">
-                              {getInitials(customer.name)}
-                            </span>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
-                              {customer.name}
-                            </div>
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
-                              ID: {customer.id}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="space-y-1">
-                          <div className="flex items-center text-sm text-gray-900 dark:text-white">
-                            <Mail size={14} className="mr-2 text-gray-400" />
-                            {customer.email}
-                          </div>
-                          <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-                            <Phone size={14} className="mr-2 text-gray-400" />
-                            {customer.phone}
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            {customer.totalOrders > 0 ? `${customer.totalOrders} orders` : 'No orders'}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">
-                            {customer.totalSpent > 0 ? formatCurrencyWithSymbol(customer.totalSpent, customer.defaultCurrency || customer.companyCurrency) : 'No purchases'}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(customer.status)}`}>
-                          {customer.status === 'vip' && <Crown size={12} className="mr-1" />}
-                          {customer.status.toUpperCase()}
-                        </span>
-                      </td> */}
-
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                        {customer.lastVisit ? formatDate(customer.lastVisit) : 'Never'}
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setPaymentCustomer(customer)
-                            }}
-                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                            title="Receive Payment"
-                            aria-label={`Receive payment from ${customer.name}`}
-                          >
-                            <Banknote size={16} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              navigate(`/customers/${customer.id}`)
-                            }}
-                            className="text-beveren-600 hover:text-beveren-700 dark:text-beveren-400 dark:hover:text-beveren-300"
-                          >
-                            <Eye size={16} />
-                          </button>
-                          {canManageCustomers && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setSelectedCustomer(customer)
-                                setShowAddModal(true)
-                              }}
-                              className="text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                            >
-                              <Edit size={16} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {renderCustomerTable()}
             </div>
 
 

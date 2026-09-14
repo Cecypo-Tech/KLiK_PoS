@@ -35,7 +35,9 @@ import EditDraftInvoiceDialog from "../components/EditDraftInvoiceDialog";
 import { addDraftInvoiceToCart } from "../utils/draftInvoiceToCart";
 import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
 import { useCartStore } from "../stores/cartStore";
-import { isToday, isThisWeek, isThisMonth, isThisYear } from "../utils/time";
+import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
+import { useTableSort } from "../hooks/useTableSort";
+import SortableHeaderButton from "../components/SortableHeaderButton";
 import AddCustomerModal from "../components/customer/AddCustomerModal";
 import CustomerPaymentEntryModal from "../components/customer/CustomerPaymentEntryModal";
 import StatementOfAccountsModal from "../components/customer/StatementOfAccountsModal";
@@ -291,6 +293,20 @@ export default function CustomerDetailsPage() {
   };
 
   // Loading state
+  const {
+    sortedData: sortedInvoices,
+    sortKey: invoiceSortKey,
+    sortDirection: invoiceSortDirection,
+    toggleSort: toggleInvoiceSort,
+  } = useTableSort(customerInvoices, {
+    date: (invoice) => toSortableTimestamp(invoice.date, invoice.time),
+    customer: (invoice) => invoice.customer,
+    cashier: (invoice) => invoice.cashier,
+    paymentMethod: (invoice) => invoice.paymentMethod,
+    amount: (invoice) => Number(invoice.totalAmount || 0),
+    status: (invoice) => invoice.status,
+  });
+
   if (isLoadingC) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -575,13 +591,13 @@ export default function CustomerDetailsPage() {
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Invoice
+                      <SortableHeaderButton label="Invoice" sortKey="date" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
+                    </th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <span className="inline-flex w-full justify-end"><SortableHeaderButton label="Amount" sortKey="amount" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} /></span>
                     </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Status
+                      <SortableHeaderButton label="Status" sortKey="status" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                     </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                       Actions
@@ -596,17 +612,17 @@ export default function CustomerDetailsPage() {
                       </td>
                     </tr>
                   ) : (
-                    customerInvoices.map((invoice) => (
+                    sortedInvoices.map((invoice) => (
                       <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div>
                             <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.id}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {invoice.date} {invoice.time}
+                              {formatDateTime(invoice.date, invoice.time)}
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">
                             {formatCurrencyWithSymbol(invoice.totalAmount, invoice.currency)}
                           </div>
@@ -1018,22 +1034,22 @@ export default function CustomerDetailsPage() {
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Invoice
+                        <SortableHeaderButton label="Invoice" sortKey="date" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Customer
+                        <SortableHeaderButton label="Customer" sortKey="customer" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Cashier
+                        <SortableHeaderButton label="Cashier" sortKey="cashier" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Payment
+                        <SortableHeaderButton label="Payment" sortKey="paymentMethod" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        <span className="inline-flex w-full justify-end"><SortableHeaderButton label="Amount" sortKey="amount" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} /></span>
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Status
+                        <SortableHeaderButton label="Status" sortKey="status" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                       </th>
                       {posDetails?.is_zatca_enabled && (
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -1053,13 +1069,13 @@ export default function CustomerDetailsPage() {
                         </td>
                       </tr>
                     ) : (
-                      customerInvoices.map((invoice) => (
+                      sortedInvoices.map((invoice) => (
                         <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div>
                               <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.id}</div>
                               <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {invoice.date} {invoice.time}
+                                {formatDateTime(invoice.date, invoice.time)}
                               </div>
                             </div>
                           </td>
@@ -1072,7 +1088,7 @@ export default function CustomerDetailsPage() {
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-gray-900 dark:text-white">{invoice.paymentMethod}</span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-6 py-4 whitespace-nowrap text-right tabular-nums">
                             <div className="text-sm font-medium text-gray-900 dark:text-white">
                               {formatCurrencyWithSymbol(invoice.totalAmount, invoice.currency)}
                             </div>

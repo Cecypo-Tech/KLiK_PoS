@@ -249,3 +249,22 @@ export const toSortableTimestamp = (dateString?: string, timeString?: string): n
 
   return Number.isNaN(timestamp) ? 0 : timestamp;
 };
+
+/**
+ * Format a date-only value ("YYYY-MM-DD", e.g. a posting_date) for display.
+ * `new Date("YYYY-MM-DD")` is UTC midnight, which toLocaleDateString shows as the previous
+ * day anywhere west of UTC. Read the parts instead so the calendar date never shifts.
+ * @param dateString - "YYYY-MM-DD", optionally followed by a time
+ * @returns e.g. "Sep 14, 2026"; '' when empty; the input unchanged when it is not a date
+ */
+export const formatDateOnly = (dateString?: string | null): string => {
+  if (!dateString) return '';
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateString);
+  if (!match) return dateString;
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
