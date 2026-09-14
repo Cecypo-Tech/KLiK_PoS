@@ -171,6 +171,11 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     so.custom_pos_opening_entry = opening_entry
     so.custom_is_klik_held = 1
     so.custom_klik_cart_meta = json.dumps(cart_meta)
+    # The cart already applied Pricing Rules through get_cart_pricing. Left on, ERPNext
+    # applies them again here and calculate_item_rate replaces the cashier's rate: a 5%
+    # margin rule held a keyed 2,000 as 2,142, and recalling the order showed a discount
+    # nobody gave. The Sales Invoice path does the same in build_sales_invoice_doc.
+    so.ignore_pricing_rule = 1
 
     _apply_order_discount(so, pos_profile, order_discount_amount)
 
@@ -211,6 +216,8 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     # under them.
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = get_current_pos_opening_entry() or ""
+    # Orders held before this flag existed carry 0; see _build_sales_order_doc.
+    so.ignore_pricing_rule = 1
     so.set("items", [])
 
     _apply_order_discount(so, pos_profile, order_discount_amount)
