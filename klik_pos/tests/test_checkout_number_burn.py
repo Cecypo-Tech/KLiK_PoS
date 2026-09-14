@@ -680,6 +680,10 @@ class TestRestrictedSalesUser(FrappeTestCase):
 			user.append("roles", {"role": CASHIER_ROLE})
 			user.insert(ignore_permissions=True)
 
+		# pos_profile_settings pinned the template with a DB write, which moved `modified` past
+		# the copy loaded above. Saving that stale copy raised TimestampMismatchError, and the
+		# failed setUpClass left the pinned template behind for every test that ran after it.
+		profile.reload()
 		if not any(u.user == CASHIER for u in profile.applicable_for_users):
 			profile.append("applicable_for_users", {"user": CASHIER})
 			profile.save(ignore_permissions=True)
