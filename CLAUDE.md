@@ -1,20 +1,16 @@
 # klik_pos
 
-Bench-level instructions live in `~/frappe-bench/CLAUDE.md` (gstack is required for all
-AI-assisted work in this repo). This file adds routing on top of that.
+Bench-level instructions live in `~/frappe-bench/CLAUDE.md` (superpowers is the process
+for every app in this bench). This file adds routing on top of that.
 
 ## Skill routing
 
-When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+Superpowers is the process (see `~/frappe-bench/.claude/rules/superpowers.md`).
 
-Key routing rules:
-- Architecture → invoke /plan-eng-review
-- Design system/plan review → invoke /design-consultation or /plan-design-review
-- Bugs/errors → invoke /investigate
-- QA/testing site behavior → invoke /qa or /qa-only
-- Code review/diff check → invoke /review
-- Visual polish → invoke /design-review
-- Ship/deploy/PR → invoke /ship or /land-and-deploy
-- Author a backlog-ready spec/issue → invoke /spec
-- Save progress → invoke /context-save
-- Resume context → invoke /context-restore
+- New feature or idea → `superpowers:brainstorming`, then `superpowers:writing-plans`
+- Bug, error log, failing test → `superpowers:systematic-debugging` before any fix
+- Implementing a written plan → `superpowers:executing-plans` (or
+  `superpowers:subagent-driven-development` for independent tasks), with
+  `superpowers:test-driven-development`
+- Before landing → `superpowers:requesting-code-review`, then
+  `superpowers:finishing-a-development-branch`
