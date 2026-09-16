@@ -1,7 +1,9 @@
 import { AlertCircle, Banknote, CheckCircle2, CreditCard, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { usePaymentModes } from "../hooks/usePaymentModes";
-import { fetchOpeningSuggestion, useCreatePOSOpeningEntry } from '../services/opeiningEntry';
+import { fetchOpeningConflict, fetchOpeningSuggestion, useCreatePOSOpeningEntry } from '../services/opeiningEntry';
+import { conflictNotice, type OpeningConflict } from '../utils/openingConflict';
 import {
   buildOpeningRows,
   canOpen,
@@ -54,6 +56,8 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   const [paymentMethods, setPaymentMethods] = useState<OpeningRow[]>([]);
   const [suggestion, setSuggestion] = useState<OpeningSuggestion | null>(null);
   const [error, setError] = useState<string>('');
+  const [conflict, setConflict] = useState<OpeningConflict | null>(null);
+  const navigate = useNavigate();
 
   const { createOpeningEntry, isCreating, error: createError, success } = useCreatePOSOpeningEntry();
   const { 
@@ -126,6 +130,19 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
     };
   }, [profileForPaymentModes]);
 
+  // The cashier's own open shift is found before they count the drawer, not after.
+  useEffect(() => {
+    let current = true;
+    setConflict(null);
+    if (!profileForPaymentModes || !isOpen) return;
+    fetchOpeningConflict(profileForPaymentModes).then((data) => {
+      if (current) setConflict(data);
+    });
+    return () => {
+      current = false;
+    };
+  }, [profileForPaymentModes, isOpen]);
+
   useEffect(() => {
     if (selectedProfile && paymentModesLoading) {
       setPaymentMethods([]);
@@ -163,7 +180,14 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
 
       const openingBalance = toPayload(paymentMethods);
       
-      await createOpeningEntry(openingBalance, selectedProfile || undefined);
+      const created = await createOpeningEntry(openingBalance, selectedProfile || undefined);
+      if (!created) {
+        // The hook holds the reason; the effect below shows it. Look again for a shift in
+        // the way so the cashier gets a way out, not just a message.
+        setStep('form');
+        fetchOpeningConflict(selectedProfile).then(setConflict);
+        return;
+      }
 
       clearAllCache();
 
@@ -191,6 +215,17 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   };
 
   const totalAmount = totalFloat(paymentMethods);
+  const notice = conflict ? conflictNotice(conflict) : null;
+
+  // The shift in the way is open, so refreshing the session status lets the cashier in;
+  // a shift that has to be closed first is then taken to the closing screen.
+  const resolveConflict = () => {
+    if (!notice) return;
+    onSuccess();
+    if (notice.action === 'close') {
+      navigate('/closing_shift');
+    }
+  };
 
   useEffect(() => {
     if (success && step === 'creating') {
@@ -215,6 +250,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
       setSelectedProfile('');
       setPaymentMethods([]);
       setSuggestion(null);
+      setConflict(null);
     }
   }, [isOpen]);
 
@@ -358,7 +394,23 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                 </div>
               )}
 
-              {error && (
+              {notice && (
+                <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div>{notice.message}</div>
+                    <button
+                      type="button"
+                      onClick={resolveConflict}
+                      className="px-3 py-1.5 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors"
+                    >
+                      {notice.action === 'continue' ? 'Continue to POS' : 'Go to Closing Shift'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {error && !notice && (
                 <div className="flex items-start space-x-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
                   <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div>{error}</div>
@@ -380,6 +432,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                     isCreating ||
                     isLoadingPaymentModes ||
                     !selectedProfile ||
+                    !!conflict ||
                     !canOpen(paymentMethods)
                   }
                   className="flex-1 px-4 py-2 bg-beveren-700 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"

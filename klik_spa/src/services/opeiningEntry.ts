@@ -1,5 +1,7 @@
 import {  useState} from "react";
 import type { OpeningSuggestion } from "../utils/openingBalances";
+import type { OpeningConflict } from "../utils/openingConflict";
+import { extractErrorMessage } from "../utils/errorExtraction";
 
 /**
  * What this till last closed at, per mode. Drives the opening screen's suggested figures;
@@ -23,6 +25,47 @@ export async function fetchOpeningSuggestion(posProfile: string): Promise<Openin
   }
 }
 
+/** The cashier's own open shift in the way of opening `posProfile`, or null. */
+export async function fetchOpeningConflict(posProfile: string): Promise<OpeningConflict | null> {
+  if (!posProfile) return null;
+  try {
+    const res = await fetch(
+      `/api/method/klik_pos.api.pos_entry.opening_conflict?pos_profile=${encodeURIComponent(posProfile)}`,
+      { credentials: "include", headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data?.message as OpeningConflict) ?? null;
+  } catch (err) {
+    // Create checks again, so a failed pre-check only costs the early warning.
+    console.warn("Could not check for an open shift:", err);
+    return null;
+  }
+}
+
+export type OpeningResult = { ok: true; name: string } | { ok: false; error: string };
+
+export async function postOpeningEntry(body: object, csrfToken: string): Promise<OpeningResult> {
+  try {
+    const res = await fetch("/api/method/klik_pos.api.pos_entry.create_opening_entry", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Frappe-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(body),
+      credentials: "include",
+    });
+    const data = await res.json();
+    if (res.ok && data?.message?.name) {
+      return { ok: true, name: data.message.name };
+    }
+    return { ok: false, error: extractErrorMessage(data, "Failed to create opening entry") };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unexpected error occurred" };
+  }
+}
+
 // HOOK 2: Create POS Opening Entry
 interface OpeningBalance {
   mode_of_payment: string;
@@ -32,7 +75,8 @@ interface OpeningBalance {
 }
 
 interface UseCreateOpeningReturn {
-  createOpeningEntry: (openingBalance: OpeningBalance[], posProfile?: string) => Promise<void>;
+  /** Resolves true only when the entry was created; the reason for a failure is in `error`. */
+  createOpeningEntry: (openingBalance: OpeningBalance[], posProfile?: string) => Promise<boolean>;
   isCreating: boolean;
   error: string | null;
   success: boolean;
@@ -47,39 +91,23 @@ export function useCreatePOSOpeningEntry(): UseCreateOpeningReturn {
     setIsCreating(true);
     setError(null);
     setSuccess(false);
-    const csrfToken = window.csrf_token;
 
-    try {
-      //eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const requestBody: any = { opening_balance: openingBalance };
-      if (posProfile) {
-        requestBody.pos_profile = posProfile;
-      }
-
-      const res = await fetch("/api/method/klik_pos.api.pos_entry.create_opening_entry", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'X-Frappe-CSRF-Token': csrfToken
-        },
-        body: JSON.stringify(requestBody),
-        credentials: "include"
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.message) {
-        setSuccess(true);
-      } else {
-        throw new Error(data._server_messages || "Failed to create opening entry");
-      }
-            //eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      console.error("Error creating POS Opening Entry:", err);
-      setError(err.message || "Unexpected error occurred");
-    } finally {
-      setIsCreating(false);
+    const requestBody: { opening_balance: OpeningBalance[]; pos_profile?: string } = {
+      opening_balance: openingBalance,
+    };
+    if (posProfile) {
+      requestBody.pos_profile = posProfile;
     }
+
+    const result = await postOpeningEntry(requestBody, window.csrf_token);
+    if (result.ok) {
+      setSuccess(true);
+    } else {
+      console.error("Error creating POS Opening Entry:", result.error);
+      setError(result.error);
+    }
+    setIsCreating(false);
+    return result.ok;
   };
 
   return {

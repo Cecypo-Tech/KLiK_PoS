@@ -60,22 +60,9 @@ def create_opening_entry():
 		if not balance_details:
 			frappe.throw(_("At least one balance detail (mode of payment) is required"))
 
-		# Check if an open entry exists
-		existing = frappe.db.exists(
-			"POS Opening Entry",
-			{
-				"pos_profile": pos_profile,
-				"user": user,
-				"docstatus": 1,
-				"pos_closing_entry": None,
-			},
-		)
-		if existing:
-			frappe.throw(
-				_(
-					"You already have an open POS Opening Entry for profile '{0}'. Please close the existing entry before creating a new one."
-				).format(pos_profile)
-			)
+		conflict = opening_conflict(pos_profile)
+		if conflict:
+			frappe.throw(_conflict_message(conflict), title=_("Shift Already Open"))
 
 		# Create the POS Opening Entry
 		doc = frappe.new_doc("POS Opening Entry")
@@ -118,11 +105,63 @@ def create_opening_entry():
 			"message": _("POS Opening Entry created successfully."),
 		}
 
+	except frappe.ValidationError:
+		# Already worded for the cashier; wrapping it again showed every message twice.
+		raise
 	except Exception as e:
 		# Log error with full traceback in Error Log
 		frappe.log_error(message=traceback.format_exc(), title="POS Opening Entry Creation Failed")
 		# Throw user-friendly message
 		frappe.throw(_("Failed to create POS Opening Entry: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def opening_conflict(pos_profile):
+	"""The current user's open shift that stops them opening `pos_profile`, or None.
+
+	Open means status Open, as everywhere else. A cashier holds one shift at a time; other
+	cashiers' shifts on the same till are no obstacle. `kind` tells the opening screen
+	what to offer: own_open - carry on in it; own_stale (opened before today) and
+	own_other_profile - close it first.
+	"""
+	user = frappe.session.user
+	shifts = frappe.get_all(
+		"POS Opening Entry",
+		filters={"user": user, "docstatus": 1, "status": "Open"},
+		fields=["name", "pos_profile", "period_start_date"],
+		order_by="period_start_date desc",
+	)
+	if not shifts:
+		return None
+
+	shift = next((s for s in shifts if s.pos_profile == pos_profile), shifts[0])
+	if shift.pos_profile != pos_profile:
+		kind = "own_other_profile"
+	elif frappe.utils.getdate(shift.period_start_date) != frappe.utils.getdate(today()):
+		kind = "own_stale"
+	else:
+		kind = "own_open"
+
+	return {
+		"kind": kind,
+		"entry": shift.name,
+		"pos_profile": shift.pos_profile,
+		"period_start_date": shift.period_start_date,
+	}
+
+
+def _conflict_message(conflict):
+	if conflict["kind"] == "own_open":
+		return _("Your shift {0} on {1} is already open. Continue in it instead of opening another.").format(
+			conflict["entry"], conflict["pos_profile"]
+		)
+	if conflict["kind"] == "own_stale":
+		return _("Your shift {0} on {1} was opened on an earlier day. Close it before opening a new one.").format(
+			conflict["entry"], conflict["pos_profile"]
+		)
+	return _("Your shift {0} on {1} is still open. Close it before opening another till.").format(
+		conflict["entry"], conflict["pos_profile"]
+	)
 
 
 def validate_opening_entry(doc, method):
