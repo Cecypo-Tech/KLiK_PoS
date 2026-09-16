@@ -118,13 +118,82 @@ class TestOneShiftPerTill(SharedShiftCase):
 		with self.assertRaises(frappe.ValidationError):
 			doc.check_open_pos_exists()
 
+	def _invoice(self, **overrides):
+		"""A klik POS invoice doc, in memory, not inserted."""
+		doc = frappe.new_doc("Sales Invoice")
+		doc.update(
+			{
+				"company": COMPANY,
+				"customer": "Walk In",
+				"pos_profile": self.till,
+				"is_pos": 1,
+				"custom_is_created_from_klik": 1,
+			}
+		)
+		doc.update(overrides)
+		return doc
+
+	def _before_submit(self, doc):
+		"""Call before_submit with the rest of its body stubbed out, so only the
+		shift check under test can raise."""
+		with (
+			patch.object(type(doc), "validate_reserved_stock_availability"),
+			patch.object(type(doc), "validate_full_payment"),
+			patch("klik_pos.api.sales_invoice._should_reserve_stock", return_value=False),
+		):
+			doc.before_submit()
+
 	def test_sales_invoices_use_erpnext_s_own_shift_check(self):
-		"""One Open shift on the till, opened today - ERPNext's rule, unmodified."""
+		"""klik must not reimplement ERPNext's shift rule."""
 		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 
 		from klik_pos.api.sales_invoice import CustomSalesInvoice
 
 		self.assertIs(CustomSalesInvoice.validate_pos_opening_entry, SalesInvoice.validate_pos_opening_entry)
+
+	def test_before_submit_refuses_a_klik_sale_with_no_open_shift(self):
+		frappe.set_user(OPENER)
+		doc = self._invoice()
+
+		with self.assertRaises(frappe.ValidationError):
+			self._before_submit(doc)
+
+	def test_before_submit_refuses_a_klik_sale_on_a_stale_shift(self):
+		_shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(OPENER)
+		doc = self._invoice()
+
+		with self.assertRaises(frappe.ValidationError):
+			self._before_submit(doc)
+
+	def test_before_submit_allows_a_klik_sale_on_today_s_shift(self):
+		_shift(self.till, OPENER)
+		frappe.set_user(OPENER)
+		doc = self._invoice()
+
+		self._before_submit(doc)
+
+	def test_before_submit_ignores_the_shift_on_a_return(self):
+		frappe.set_user(OPENER)
+		doc = self._invoice(is_return=1)
+
+		self._before_submit(doc)
+
+	def test_before_submit_ignores_the_shift_when_not_a_pos_sale(self):
+		frappe.set_user(OPENER)
+		doc = self._invoice(is_pos=0)
+
+		self._before_submit(doc)
+
+	def test_before_submit_skips_the_check_for_a_queued_worker(self):
+		frappe.set_user(OPENER)
+		doc = self._invoice()
+
+		frappe.flags.klik_processing_queued_invoice = True
+		try:
+			self._before_submit(doc)
+		finally:
+			frappe.flags.klik_processing_queued_invoice = False
 
 
 from klik_pos.api.pos_entry import _calculate_payment_reconciliation, _get_open_pos_entry

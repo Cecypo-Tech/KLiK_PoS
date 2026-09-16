@@ -2126,7 +2126,13 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 
 		_apply_klik_invoice_flags(doc, is_submitted=True)
 		_enforce_submit_permission(doc, user=requested_by or frappe.session.user)
-		doc.submit()
+		# The cashier's shift was valid when this sale was queued; a worker running
+		# after midnight must not refuse it for a shift that is now stale.
+		frappe.flags.klik_processing_queued_invoice = True
+		try:
+			doc.submit()
+		finally:
+			frappe.flags.klik_processing_queued_invoice = False
 		doc.reload()
 		try:
 			_cancel_sales_invoice_reservations(doc.name)
@@ -4122,6 +4128,18 @@ def return_sales_invoice(invoice_name):
 
 class CustomSalesInvoice(SalesInvoice):
 	def before_submit(self):
+		if (
+			self.get("custom_is_created_from_klik")
+			and self.pos_profile
+			and self.is_pos
+			and not self.is_return
+			and not frappe.flags.klik_processing_queued_invoice
+		):
+			# ERPNext only runs this from validate_created_using_pos, which klik never
+			# reaches (it never sets is_created_using_pos). Call it directly so a klik
+			# sale still needs exactly one Open shift on its till, opened today.
+			self.validate_pos_opening_entry()
+
 		if _should_reserve_stock(self):
 			_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
 			_cancel_sales_invoice_reservations(self.name)
