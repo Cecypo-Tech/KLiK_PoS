@@ -26,6 +26,7 @@ import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
 import { CartItemRow } from "./CartItemRow";
 import { OrderSummaryFooter } from "./OrderSummaryFooter";
+import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
@@ -544,6 +545,27 @@ export default function OrderSummary({
     }
   };
 
+  const holdFromFooter = () => {
+    if (!validateCustomer()) return;
+    void requireSalespersonAndRun("hold");
+  };
+
+  // F10 checks out and Shift+F10 holds, exactly as the footer buttons do - and only while
+  // they are there to press. An open payment dialog sits on top of this and takes F10.
+  usePosShortcutLayer(
+    {
+      f10: () => {
+        if (isValidatingCheckout) return;
+        void handleCheckoutClick();
+      },
+      shiftF10: () => {
+        if (posDetails?.allow_holding_invoices !== 1 || isHoldingOrder) return;
+        holdFromFooter();
+      },
+    },
+    cartItems.length > 0,
+  );
+
   const handleCompletePayment = async (paymentData: any) => {
   };
 
@@ -674,10 +696,7 @@ export default function OrderSummary({
           couponDiscount={couponDiscount}
           onCheckout={handleCheckoutClick}
           onClearCart={handleClearCart}
-          onHoldOrder={() => {
-            if (!validateCustomer()) return;
-            void requireSalespersonAndRun("hold");
-          }}
+          onHoldOrder={holdFromFooter}
           isHoldingOrder={isHoldingOrder}
           isValidating={isValidatingCheckout || isRecoveringCheckout}
           isMobile={isMobile}

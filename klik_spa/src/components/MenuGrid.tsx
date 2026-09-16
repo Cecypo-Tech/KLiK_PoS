@@ -145,16 +145,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
         el?.select();
         return;
       }
-      if (e.key === 'F10' && !e.shiftKey) {
-        e.preventDefault();
-        document.getElementById('pos-checkout-btn')?.click();
-        return;
-      }
-      if (e.key === 'F10' && e.shiftKey) {
-        e.preventDefault();
-        document.getElementById('pos-hold-btn')?.click();
-        return;
-      }
+      // F10 / Shift+F10 belong to the order summary: see utils/posShortcuts.
       if (e.key === 'Backspace' && !inInput) {
         e.preventDefault();
         const el = document.getElementById('pos-search-input') as HTMLInputElement | null;

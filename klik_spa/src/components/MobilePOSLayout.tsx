@@ -13,6 +13,7 @@ import BottomNavigation from "./BottomNavigation"
 import type { MenuItem, CartItem } from "../../types"
 import SalespersonAuthModal from "./dialog/SalespersonAuthModal"
 import { useSalespersonStore } from "../stores/salespersonStore"
+import { usePosShortcutLayer } from '../hooks/usePosShortcutLayer'
 
 interface MobilePOSLayoutProps {
   items: MenuItem[]
@@ -51,6 +52,8 @@ export default function MobilePOSLayout({
   const { cartItems, addToCart } = useCartStore()
   const { activeSalesperson, rememberLocked, ensureInitialized } = useSalespersonStore()
   const navigate = useNavigate()
+  // The cart lives on its own page here; F10 takes the cashier to it, where F10 checks out.
+  usePosShortcutLayer({ f10: () => navigate('/cart') }, cartItems.length > 0)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showSalespersonModal, setShowSalespersonModal] = useState(false)
 

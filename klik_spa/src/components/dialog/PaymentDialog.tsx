@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { paymentBlockReason } from "../../utils/paymentBlockReason";
+import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { Award, ChevronDown, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
@@ -1645,29 +1647,48 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return false;
   };
 
-  const isActionButtonDisabled = () => {
-    if (invoiceSubmitted || isProcessingPayment) return true;
-    if (!reconciliation.ok) return true;
-    if (isCreditSale && !dueDate) return true;
-    if (isB2C && !isCreditSale) return outstandingAmount > 0;
-    return false;
-  };
+  const submitBlockReason = () =>
+    paymentBlockReason({
+      invoiceSubmitted,
+      isProcessingPayment,
+      reconciliationOk: reconciliation.ok,
+      reconciliationMessage: reconciliation.message,
+      isCreditSale,
+      hasDueDate: Boolean(dueDate),
+      isB2C,
+      outstandingAmount,
+      outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
+    });
+
+  const isActionButtonDisabled = () => submitBlockReason() !== null;
+
+  // While open, the dialog owns F10: the cart's Checkout underneath must not fire too.
+  usePosShortcutLayer(
+    {
+      f10: () => {
+        // The completed screen has nothing to submit.
+        if (invoiceSubmitted) return;
+        const reason = submitBlockReason();
+        if (reason) {
+          toast.info(reason);
+          return;
+        }
+        void handleCompletePayment();
+      },
+      // Shift+F10 holds, the keyboard twin of the Hold button.
+      shiftF10: () => {
+        if (allow_holding_invoices && !invoiceSubmitted && !isProcessingPayment && !isHoldingOrder) {
+          void handleHoldOrder();
+        }
+      },
+    },
+    isOpen,
+  );
 
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'F10' && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isActionButtonDisabled()) handleCompletePayment();
-      } else if (e.key === 'F10' && e.shiftKey) {
-        // Shift+F10 holds, the keyboard twin of the Hold button.
-        e.preventDefault();
-        e.stopPropagation();
-        if (allow_holding_invoices && !invoiceSubmitted && !isProcessingPayment && !isHoldingOrder) {
-          void handleHoldOrder();
-        }
-      } else if (e.key === 'Escape') {
+      if (e.key === 'Escape') {
         e.preventDefault();
         // Completed screen: ESC does the default "Start New Order" action.
         // Payment-entry screen: ESC closes the dialog.
@@ -1680,7 +1701,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, isActionButtonDisabled, handleCompletePayment, handleHoldOrder, allow_holding_invoices, isProcessingPayment, isHoldingOrder, invoiceSubmitted, finalizeCompletedOrderState, onClose]);
+  }, [isOpen, invoiceSubmitted, finalizeCompletedOrderState, onClose]);
 
   const buildOrderText = () => {
     const lines: string[] = [];
