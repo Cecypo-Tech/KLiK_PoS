@@ -14,20 +14,10 @@ from klik_pos.klik_pos.utils import clear_pos_profile_cache, get_current_pos_pro
 
 @frappe.whitelist()
 def open_pos():
-	"""Check if the current user has an open POS Opening Entry."""
-	user = frappe.session.user
+	"""Whether the caller is in an Open shift: their own, or the till shift they joined."""
+	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-	# Open means status Open - the same rule as opening_conflict and the closing screen.
-	open_entry = frappe.db.exists(
-		"POS Opening Entry",
-		{
-			"user": user,
-			"docstatus": 1,
-			"status": "Open",
-		},
-	)
-
-	return True if open_entry else False
+	return bool(get_current_pos_opening_entry())
 
 
 @frappe.whitelist()
