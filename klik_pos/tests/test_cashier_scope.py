@@ -22,6 +22,24 @@ def _till(allow):
 	)
 
 
+def _fake_get_doc(*fakes):
+	"""A frappe.get_doc side_effect that returns a fixed fake for specific
+	(doctype, name) pairs given as a flat (doctype, name, fake, ...) sequence, and
+	otherwise delegates to the real frappe.get_doc - so frappe.log_error's own
+	Error Log lookup (and anything else) keeps working while it is patched in."""
+	table = {(fakes[i], fakes[i + 1]): fakes[i + 2] for i in range(0, len(fakes), 3)}
+	real_get_doc = frappe.get_doc
+
+	def side_effect(*args, **kwargs):
+		doctype = kwargs.get("doctype") if kwargs.get("doctype") is not None else (args[0] if args else None)
+		name = kwargs.get("name") if kwargs.get("name") is not None else (args[1] if len(args) > 1 else None)
+		if (doctype, name) in table:
+			return table[(doctype, name)]
+		return real_get_doc(*args, **kwargs)
+
+	return side_effect
+
+
 class TestTheRule(FrappeTestCase):
 	def test_flag_off_restricts_and_flag_on_does_not(self):
 		with _till(0):
@@ -124,8 +142,85 @@ class TestCollectingFollowsTheRule(FrappeTestCase):
 		self.assertFalse(result["success"])
 		self.assertIn("manager", result["error"])
 
+	def test_an_overpayment_with_no_allocated_amount_is_refused_when_restricted(self):
+		"""allocated_amount is empty and amount (500) exceeds outstanding (100): what will
+		actually be allocated is only 100, so 400 would land on account."""
+		invoice = frappe._dict(
+			name="SI-overpay", customer="Walk In", docstatus=1, owner=frappe.session.user,
+			outstanding_amount=100,
+		)
+		with _till(0), patch.object(payment.frappe, "get_doc", side_effect=_fake_get_doc("Sales Invoice", "SI-overpay", invoice)), \
+			patch.object(payment, "assert_may_collect"):
+			result = payment.create_customer_payment_entry(
+				customer="Walk In", amount=500, mode_of_payment="Cash", sales_invoice="SI-overpay",
+			)
+		self.assertFalse(result["success"])
+		self.assertIn("manager", result["error"])
+
+	def test_a_rounding_remainder_within_precision_is_accepted_when_restricted(self):
+		"""Three lines, each rounded to the cent, land half a cent (0.004) short of the
+		payment amount - real money, not a floating-point artefact. The old 0.00001
+		tolerance refused this; currency-precision rounding must accept it."""
+		rows = [
+			{"reference_doctype": "Sales Invoice", "reference_name": "SI-0", "allocated_amount": 33.329},
+			{"reference_doctype": "Sales Invoice", "reference_name": "SI-1", "allocated_amount": 33.329},
+			{"reference_doctype": "Sales Invoice", "reference_name": "SI-2", "allocated_amount": 33.328},
+		]
+		with _till(0), patch.object(payment, "_build_allocation_rows", return_value=rows), \
+			patch.object(payment, "assert_may_collect"), \
+			patch.object(payment, "get_current_pos_opening_entry", side_effect=RuntimeError("stopped-here")):
+			result = payment.create_customer_payment_entry(
+				customer="Walk In", amount=99.99, mode_of_payment="Cash",
+				allocations=[
+					{"sales_invoice": "SI-0", "allocated_amount": 33.329},
+					{"sales_invoice": "SI-1", "allocated_amount": 33.329},
+					{"sales_invoice": "SI-2", "allocated_amount": 33.328},
+				],
+			)
+		self.assertFalse(result["success"])
+		self.assertIn("stopped-here", result["error"])
+
 	def test_unallocated_list_shows_only_my_receipts_when_restricted(self):
 		sql = TestReadSideFollowsTheRule()._sql_for
 		with _till(0), patch.object(payment, "get_current_pos_profile", return_value=frappe._dict(company="Dev Co")):
 			text = sql(lambda: payment.get_unallocated_customer_payment_entries(limit=1))
 		self.assertIn("pe.owner = ", text)
+
+	def test_reconciling_someone_else_s_payment_entry_is_refused_when_restricted(self):
+		pe = frappe._dict(
+			name="PE-someone-else", owner="someone-else@example.com", docstatus=1,
+			payment_type="Receive", party_type="Customer", party="Walk In", company="Dev Co",
+			unallocated_amount=100,
+		)
+		si = frappe._dict(
+			name="SI-mine", customer="Walk In", docstatus=1, company="Dev Co", outstanding_amount=100,
+		)
+
+		with _till(0), patch.object(payment, "assert_may_collect"), \
+			patch.object(payment.frappe, "get_doc", side_effect=_fake_get_doc(
+				"Payment Entry", "PE-someone-else", pe, "Sales Invoice", "SI-mine", si
+			)):
+			result = payment.reconcile_payment_entry_with_invoice("PE-someone-else", "SI-mine")
+		self.assertFalse(result["success"])
+		self.assertIn("manager", result["error"])
+
+	def test_reconciling_my_own_payment_entry_is_allowed_when_restricted(self):
+		"""It must clear the ownership gate; stop the flow right after with a sentinel
+		so the test needs no real Payment Reconciliation."""
+		pe = frappe._dict(
+			name="PE-mine", owner=frappe.session.user, docstatus=1,
+			payment_type="Receive", party_type="Customer", party="Walk In", company="Dev Co",
+			unallocated_amount=100,
+		)
+		si = frappe._dict(
+			name="SI-mine", customer="Walk In", docstatus=1, company="Dev Co", outstanding_amount=100,
+		)
+
+		with _till(0), patch.object(payment, "assert_may_collect"), \
+			patch.object(payment.frappe, "get_doc", side_effect=_fake_get_doc(
+				"Payment Entry", "PE-mine", pe, "Sales Invoice", "SI-mine", si
+			)), \
+			patch.object(payment, "_get_customer_receivable_account", side_effect=RuntimeError("stopped-here")):
+			result = payment.reconcile_payment_entry_with_invoice("PE-mine", "SI-mine")
+		self.assertFalse(result["success"])
+		self.assertIn("stopped-here", result["error"])

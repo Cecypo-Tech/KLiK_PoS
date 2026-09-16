@@ -175,10 +175,15 @@ def create_customer_payment_entry(
 			allocation_rows = _build_allocation_rows(allocations, customer, amount, allocation_invoices)
 
 		if restricted_to_own():
-			allocated_total = flt(allocated_amount or amount) if invoice_doc else sum(
-				flt(row["allocated_amount"]) for row in allocation_rows
-			)
-			if not (invoice_doc or allocation_rows) or allocated_total + 0.00001 < amount:
+			if invoice_doc:
+				# What will actually be allocated, not the raw request: an overpayment
+				# with no allocated_amount given would otherwise read as fully allocated
+				# and slip past the on-account check.
+				allocated_total = min(flt(allocated_amount or amount), flt(invoice_doc.outstanding_amount))
+			else:
+				allocated_total = sum(flt(row["allocated_amount"]) for row in allocation_rows)
+			precision = frappe.get_precision("Payment Entry", "paid_amount") or 2
+			if not (invoice_doc or allocation_rows) or flt(amount - allocated_total, precision) > 0:
 				frappe.throw(
 					_("Only a manager can receive money on account. Allocate the full amount to your own invoices.")
 				)
@@ -458,6 +463,11 @@ def reconcile_payment_entry_with_invoice(payment_entry, sales_invoice, allocated
 		si = frappe.get_doc("Sales Invoice", sales_invoice)
 
 		assert_may_collect([sales_invoice])
+		if restricted_to_own() and pe.owner != frappe.session.user:
+			frappe.throw(
+				_("Only a manager can reconcile a payment entry that isn't yours."),
+				exc=frappe.PermissionError,
+			)
 
 		if pe.docstatus != 1:
 			frappe.throw(_("Payment Entry {0} must be submitted.").format(payment_entry))
