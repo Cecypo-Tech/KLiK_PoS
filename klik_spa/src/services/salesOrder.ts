@@ -31,7 +31,13 @@ async function apiPost(endpoint: string, body: object) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function createHeldOrder(data: any) {
-  return apiPost('klik_pos.api.sales_order.create_held_order', { data });
+  return apiPost('klik_pos.api.sales_order.create_held_order', { data }) as Promise<{
+    success: boolean;
+    order_name?: string;
+    approval_requested?: boolean;
+    approval_state?: string | null;
+    price_breach?: number;
+  }>;
 }
 
 export async function getHeldOrderDetails(orderId: string) {
@@ -53,7 +59,33 @@ export async function getHeldOrderDetails(orderId: string) {
     grand_total: number;
     currency: string;
     message?: string;
+    approval_state?: string | null;
+    price_breach?: number;
   };
+}
+
+export async function getHeldOrderActions(orderId: string) {
+  const response = await fetch(
+    `/api/method/klik_pos.api.sales_order.get_held_order_actions?order_id=${encodeURIComponent(orderId)}`,
+    { credentials: 'include' },
+  );
+  const result = await response.json();
+  return result.message as {
+    success: boolean;
+    actions?: string[];
+    approval_state?: string | null;
+    price_breach?: number;
+    code?: string;
+    message?: string;
+  };
+}
+
+export async function applyHeldOrderAction(orderId: string, action: string) {
+  return apiPost('klik_pos.api.sales_order.apply_held_order_action', { order_id: orderId, action }) as Promise<{
+    success: boolean;
+    approval_state?: string | null;
+    price_breach?: number;
+  }>;
 }
 
 export async function deleteHeldOrder(orderId: string) {

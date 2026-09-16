@@ -6,9 +6,11 @@ from frappe.utils import cint, flt, nowdate
 
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
+    _apply_pos_tax_treatment,
     _apply_walkin_party_fields,
     _get_active_pos_profile,
     _parse_extra_fields,
+    _resolve_item_tax_details_for_line,
     get_current_pos_opening_entry,
     parse_invoice_data,
 )
@@ -82,6 +84,93 @@ def _held_order_gone(order_id):
 def _gone_response(order_id, message):
     # The code lets the POS drop its link to the order instead of retrying it forever.
     return {"success": False, "code": "held_order_gone", "order_id": order_id, "message": message}
+
+
+# ---------------------------------------------------------------------------
+# Price approval (optional: cecypo_powerpack). Everything here is a no-op when the
+# fields or the Sales Order workflow are absent.
+# ---------------------------------------------------------------------------
+
+APPROVAL_STATE_FIELD = "workflow_state"
+PRICE_BREACH_FIELD = "powerpack_price_breach"
+REQUEST_APPROVAL_ACTION = "Request Price Approval"
+
+
+def _held_order_workflow():
+    from frappe.model.workflow import get_workflow_name
+
+    name = get_workflow_name("Sales Order")
+    return frappe.get_cached_doc("Workflow", name) if name else None
+
+
+def _approval_fields(so):
+    """The held order's approval state and breach flag, or null / 0 without PowerPack."""
+    meta = frappe.get_meta("Sales Order")
+    state = so.get(APPROVAL_STATE_FIELD) if meta.has_field(APPROVAL_STATE_FIELD) else None
+    breach = cint(so.get(PRICE_BREACH_FIELD)) if meta.has_field(PRICE_BREACH_FIELD) else 0
+    return {"approval_state": state or None, "price_breach": breach}
+
+
+def _held_order_transitions(so, workflow):
+    """The caller's draft-to-draft transitions from the order's current state."""
+    from frappe.model.workflow import is_transition_condition_satisfied
+
+    state = so.get(workflow.workflow_state_field) or workflow.states[0].state
+    draft_states = {s.state for s in workflow.states if cint(s.doc_status) == 0}
+    roles = set(frappe.get_roles())
+    return [
+        t
+        for t in workflow.transitions
+        if t.state == state
+        and t.allowed in roles
+        and t.next_state in draft_states
+        and is_transition_condition_satisfied(t, so)
+    ]
+
+
+def _available_held_order_actions(so):
+    workflow = _held_order_workflow()
+    if not workflow:
+        return []
+    actions = []
+    for t in _held_order_transitions(so, workflow):
+        if t.action not in actions:
+            actions.append(t.action)
+    return actions
+
+
+def _apply_held_order_action(so, action):
+    """frappe.model.workflow.apply_workflow for a held order, after klik's own access check.
+
+    Held orders are saved with ignore_permissions (a cashier need not hold Sales Order
+    write), so frappe's apply_workflow, which saves with the caller's permissions, cannot
+    be used. Only draft-to-draft transitions: the POS never submits an order this way.
+    """
+    from frappe.model.workflow import has_approval_access
+
+    workflow = _held_order_workflow()
+    if not workflow:
+        frappe.throw(_("Sales Order has no active workflow."))
+    transition = next((t for t in _held_order_transitions(so, workflow) if t.action == action), None)
+    if not transition:
+        frappe.throw(_("{0} is not available for held order {1}.").format(action, so.name))
+    if not has_approval_access(frappe.session.user, so, transition):
+        frappe.throw(_("Self approval is not allowed"))
+    so.set(workflow.workflow_state_field, transition.next_state)
+    so.flags.ignore_permissions = True
+    so.save()
+    so.add_comment("Workflow", _(transition.next_state))
+    return transition.next_state
+
+
+def _request_approval_if_needed(so):
+    """Send a breaching held order for price approval. True when a request was made."""
+    if not cint(so.get(PRICE_BREACH_FIELD)):
+        return False
+    if REQUEST_APPROVAL_ACTION not in _available_held_order_actions(so):
+        return False
+    _apply_held_order_action(so, REQUEST_APPROVAL_ACTION)
+    return True
 
 
 def _lock_held_order(order_id):
@@ -167,6 +256,38 @@ def _apply_order_discount(so, pos_profile, order_discount_amount):
         so.discount_amount = 0
 
 
+def _so_item_row(so, pos_profile, item, warehouse):
+    """A held order's item row, including the per-item tax template/rate the Sales Invoice
+    built from the same cart would resolve.
+
+    Deliberately does NOT pin price_list_rate from the cart the way
+    build_sales_invoice_doc._prepare_item_data does for an invoice - see
+    _reassert_pos_line_prices' restore_price_list_rate for why: klik's own heldOrderToCart
+    round-trips the list price back into the client payload on recall, and pinning it from
+    that let it drift with whatever a Pricing Rule margin had done to it on the previous
+    cycle. A held order lets set_missing_values fetch the Item Price fresh every time
+    instead, which is what test_held_order_pricing_rule.py pins down.
+
+    Without item_tax_template/item_tax_rate, _apply_pos_tax_treatment's _populate_per_item_taxes
+    has nothing to build a tax row from, and the held order would still price VAT-bearing
+    items as though they carried no item tax at all.
+    """
+    row = {
+        "item_code": item["id"],
+        "qty": flt(item.get("quantity") or 1),
+        "rate": flt(item.get("price") or 0),
+        "uom": item.get("uom") or "",
+        "delivery_date": nowdate(),
+        "warehouse": warehouse,
+    }
+    item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(so, item, pos_profile)
+    if item_tax_template:
+        row["item_tax_template"] = item_tax_template
+    if item_tax_rate:
+        row["item_tax_rate"] = frappe.as_json(item_tax_rate)
+    return row
+
+
 def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount=0.0):
     """Create a new draft Sales Order from parsed cart data."""
     pos_profile = _get_active_pos_profile()
@@ -181,7 +302,6 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     so.company = pos_profile.company
     so.currency = pos_profile.currency
     so.selling_price_list = pos_profile.selling_price_list
-    so.taxes_and_charges = sales_and_tax_charges or getattr(pos_profile, "taxes_and_charges", "") or ""
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = opening_entry
     so.custom_is_klik_held = 1
@@ -204,17 +324,17 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
 
     for item in items:
-        so.append("items", {
-            "item_code": item["id"],
-            "qty": flt(item.get("quantity") or 1),
-            "rate": flt(item.get("price") or 0),
-            "uom": item.get("uom") or "",
-            "delivery_date": nowdate(),
-            "warehouse": warehouse,
-        })
+        so.append("items", _so_item_row(so, pos_profile, item, warehouse))
 
-    so.set_missing_values()
-    so.calculate_taxes_and_totals()
+    # Same tax treatment as the invoice checked out from this cart - the till's
+    # taxes-and-charges template, per-item tax rows, and tax-inclusive basic rate if the POS
+    # Profile calls for it - so a held order's totals, and the net rate the minimum-selling-
+    # price floor judges it on, match what checkout will actually produce. A held order used
+    # to only set taxes_and_charges and skip all of this, pricing every rate as tax-exclusive.
+    pos_line_prices = [
+        (row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in so.items
+    ]
+    _apply_pos_tax_treatment(so, pos_profile, sales_and_tax_charges, pos_line_prices, restore_price_list_rate=False)
     return so
 
 
@@ -225,7 +345,6 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
 
     so.customer = customer
     so.delivery_date = nowdate()
-    so.taxes_and_charges = sales_and_tax_charges or getattr(pos_profile, "taxes_and_charges", "") or ""
     # Whoever holds it now owns where it lives. A cashier may take over an order held on
     # another shift; left stamped with that shift, its close would delete the order from
     # under them.
@@ -234,6 +353,9 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     # Orders held before this flag existed carry 0; see _build_sales_order_doc.
     so.ignore_pricing_rule = 1
     so.set("items", [])
+    # _apply_pos_tax_treatment appends to "taxes"; without clearing it here, re-holding an
+    # already-held order would duplicate every tax row instead of replacing them.
+    so.set("taxes", [])
 
     _apply_order_discount(so, pos_profile, order_discount_amount)
 
@@ -247,17 +369,12 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
 
     for item in items:
-        so.append("items", {
-            "item_code": item["id"],
-            "qty": flt(item.get("quantity") or 1),
-            "rate": flt(item.get("price") or 0),
-            "uom": item.get("uom") or "",
-            "delivery_date": nowdate(),
-            "warehouse": warehouse,
-        })
+        so.append("items", _so_item_row(so, pos_profile, item, warehouse))
 
-    so.set_missing_values()
-    so.calculate_taxes_and_totals()
+    pos_line_prices = [
+        (row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in so.items
+    ]
+    _apply_pos_tax_treatment(so, pos_profile, sales_and_tax_charges, pos_line_prices, restore_price_list_rate=False)
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +439,13 @@ def create_held_order(data):
             so = _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
             so.insert(ignore_permissions=True)
 
-        return {"success": True, "order_name": so.name}
+        approval_requested = _request_approval_if_needed(so)
+        return {
+            "success": True,
+            "order_name": so.name,
+            "approval_requested": approval_requested,
+            **_approval_fields(so),
+        }
 
     except Exception as e:
         # Roll back BEFORE logging, and never return without rolling back.
@@ -399,10 +522,39 @@ def get_held_order_details(order_id):
             "currency": so.currency,
             "discount_amount": flt(so.discount_amount or 0),
             "apply_discount_on": so.apply_discount_on or "",
+            **_approval_fields(so),
         }
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Get Held Order Details Error")
+        return {"success": False, "message": str(e)}
+
+
+@frappe.whitelist()
+def get_held_order_actions(order_id):
+    """Workflow actions the caller may take on a held order from the POS."""
+    gone = _held_order_gone(order_id)
+    if gone:
+        return _gone_response(order_id, gone)
+    so = frappe.get_doc("Sales Order", order_id)
+    _assert_held_order_access(so)
+    return {"success": True, "actions": _available_held_order_actions(so), **_approval_fields(so)}
+
+
+@frappe.whitelist()
+def apply_held_order_action(order_id, action):
+    """Apply one of get_held_order_actions' actions."""
+    try:
+        gone = _held_order_gone(order_id)
+        if gone:
+            return _gone_response(order_id, gone)
+        so = frappe.get_doc("Sales Order", order_id)
+        _assert_held_order_access(so)
+        _apply_held_order_action(so, action)
+        return {"success": True, **_approval_fields(so)}
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Held Order Workflow Action Error")
         return {"success": False, "message": str(e)}
 
 
@@ -509,15 +661,21 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 # till is one that lets its users see each other's.
                 filters["owner"] = frappe.session.user
 
+        so_fields = [
+            "name", "customer", "customer_name", "transaction_date",
+            "grand_total", "currency", "owner", "modified",
+            "custom_pos_profile", "custom_pos_opening_entry",
+        ]
+        if frappe.db.has_column("Sales Order", APPROVAL_STATE_FIELD):
+            so_fields.append(APPROVAL_STATE_FIELD)
+        if frappe.db.has_column("Sales Order", PRICE_BREACH_FIELD):
+            so_fields.append(PRICE_BREACH_FIELD)
+
         orders = frappe.get_all(
             "Sales Order",
             filters=filters,
             or_filters=or_filters,
-            fields=[
-                "name", "customer", "customer_name", "transaction_date",
-                "grand_total", "currency", "owner", "modified",
-                "custom_pos_profile", "custom_pos_opening_entry",
-            ],
+            fields=so_fields,
             order_by="modified desc",
             limit=limit,
             start=start,
@@ -563,6 +721,8 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             order["status"] = "Held"
             order["items"] = items_map.get(order.name, [])
             order["cashier"] = cashier_map.get(order.owner) or order.owner
+            order["approval_state"] = order.pop(APPROVAL_STATE_FIELD, None) or None
+            order["price_breach"] = cint(order.pop(PRICE_BREACH_FIELD, 0))
 
         return {"success": True, "data": orders, "total_count": len(orders)}
 
@@ -614,8 +774,8 @@ def checkout_held_order(order_id, data=None):
             frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
 
         # Reuse the full invoice submission pipeline
-        from klik_pos.api.sales_invoice import queue_sales_invoice
-        result = queue_sales_invoice(data)
+        from klik_pos.api.sales_invoice import _queue_sales_invoice
+        result = _queue_sales_invoice(data, source_order=order_id)
 
         if result.get("success"):
             # SO fulfilled — remove it so it doesn't clutter held orders list

@@ -22,7 +22,8 @@ import {
   validateCheckoutInvoice,
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
-import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
@@ -1629,7 +1630,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       }
 
       clearCart();
-      toast.success(orderData.held_order_id ? "Order updated and held successfully!" : "Order held successfully!");
+      if (result.approval_requested) {
+        toast.success("Held and sent for price approval");
+      } else {
+        toast.success(orderData.held_order_id ? "Order updated and held successfully!" : "Order held successfully!");
+      }
       await Promise.resolve(onHoldOrder(orderData));
     } catch (err: any) {
       if (err instanceof HeldOrderGoneError) {
@@ -1694,8 +1699,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return false;
   };
 
-  const submitBlockReason = () =>
-    paymentBlockReason({
+  const submitBlockReason = () => {
+    const originalHeldOrderId = getOriginalHeldOrderId();
+    const heldOrderApproval = originalHeldOrderId ? getOriginalHeldOrderApproval() : null;
+    return paymentBlockReason({
       invoiceSubmitted,
       isProcessingPayment,
       reconciliationOk: reconciliation.ok,
@@ -1706,7 +1713,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       outstandingAmount,
       outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
       alreadySubmittedAs,
+      priceApprovalMessage: heldOrderApproval
+        ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
+        : null,
     });
+  };
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
 
