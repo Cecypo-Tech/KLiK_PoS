@@ -12,6 +12,7 @@ const ready: PaymentBlockState = {
   outstandingAmount: 0,
   outstandingLabel: "KSh 0.00",
   alreadySubmittedAs: null,
+  priceApprovalMessage: null,
 };
 
 describe("paymentBlockReason", () => {
@@ -25,6 +26,22 @@ describe("paymentBlockReason", () => {
 
   it("blocks a sale already recorded as another invoice", () => {
     expect(paymentBlockReason({ ...ready, alreadySubmittedAs: "POS-01190" })).toMatch(/POS-01190/);
+  });
+
+  it("blocks a held order that still needs price approval", () => {
+    expect(
+      paymentBlockReason({ ...ready, priceApprovalMessage: "Wait for approval on the held order." }),
+    ).toBe("Wait for approval on the held order.");
+  });
+
+  it("still prefers the already-submitted duplicate check over price approval", () => {
+    expect(
+      paymentBlockReason({
+        ...ready,
+        alreadySubmittedAs: "POS-01190",
+        priceApprovalMessage: "Wait for approval on the held order.",
+      }),
+    ).toMatch(/POS-01190/);
   });
 
   it("says a payment is in progress", () => {

@@ -41,8 +41,10 @@ import { useAllPaymentModes } from "../hooks/usePaymentModes";
 import PaymentDialog from "../components/dialog/PaymentDialog";
 import { addDraftInvoiceToCart } from "../utils/draftInvoiceToCart";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
-import { getHeldOrders } from "../services/salesOrder";
+import { applyHeldOrderAction, getHeldOrders } from "../services/salesOrder";
 import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
+import { approvalBadge, PRICE_APPROVED, WITHDRAW_APPROVAL } from "../utils/priceApproval";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { handlePrintInvoice } from "../utils/printHandler";
 import { useCartStore } from "../stores/cartStore";
 import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
@@ -50,6 +52,12 @@ import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 // import InvoiceViewPage from "./InvoiceViewPage";
+
+interface HeldOrderExtras {
+  isHeldOrder?: boolean;
+  approvalState?: string | null;
+  priceBreach?: number;
+}
 
 const INVOICE_HISTORY_VIEW_MODE_KEY = "invoice-history-view-mode";
 const INVOICE_HISTORY_FILTERS_KEY = "invoice-history-filters";
@@ -169,7 +177,9 @@ export default function InvoiceHistoryPage() {
   // Held draft Sales Orders (custom_is_klik_held=1) — surfaced under the Held tab.
   // Mapped to the SalesInvoice shape with `isHeldOrder` so the row + action handlers
   // can route through the Sales Order flow instead of the (now empty) draft-SI flow.
-  const [heldOrders, setHeldOrders] = useState<(SalesInvoice & { isHeldOrder?: boolean })[]>([]);
+  const [heldOrders, setHeldOrders] = useState<(SalesInvoice & HeldOrderExtras)[]>([]);
+  const [withdrawTarget, setWithdrawTarget] = useState<string | null>(null);
+  const [isWithdrawingApproval, setIsWithdrawingApproval] = useState(false);
   const refetchHeldOrders = useCallback(async () => {
     try {
       const res = await getHeldOrders({ skipOpeningEntryFilter: true, search: searchTerm, limit: 200 });
@@ -207,7 +217,9 @@ export default function InvoiceHistoryPage() {
         custom_pos_opening_entry: o.custom_pos_opening_entry || "",
         canReturn: false,
         isHeldOrder: true,
-      })) as unknown as (SalesInvoice & { isHeldOrder?: boolean })[];
+        approvalState: o.approval_state ?? null,
+        priceBreach: Number(o.price_breach) || 0,
+      })) as unknown as (SalesInvoice & HeldOrderExtras)[];
       setHeldOrders(mapped);
     } catch {
       setHeldOrders([]);
@@ -396,6 +408,25 @@ const getStatusBadge = (status: string) => {
     default:
       return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400`; // Neutral fallback
   }
+};
+
+const APPROVAL_BADGE_TONE_CLASSES: Record<string, string> = {
+  amber: "bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-400",
+  green: "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
+  red: "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
+};
+
+const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
+  if (!invoice.isHeldOrder) return null;
+  const badge = approvalBadge(invoice.approvalState, invoice.priceBreach);
+  if (!badge) return null;
+  return (
+    <span
+      className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${APPROVAL_BADGE_TONE_CLASSES[badge.tone]}`}
+    >
+      {badge.label}
+    </span>
+  );
 };
 
 
@@ -713,6 +744,7 @@ const getStatusBadge = (status: string) => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={getStatusBadge(invoice.status)}>{invoice.status}</span>
+                    {renderApprovalBadge(invoice)}
                   </td>
                   {posDetails?.is_zatca_enabled && (
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -745,6 +777,15 @@ const getStatusBadge = (status: string) => {
                             <Check className="w-4 h-4" />
                             <span>Submit</span>
                           </button>
+                          {(invoice as SalesInvoice & HeldOrderExtras).approvalState === PRICE_APPROVED && (
+                            <button
+                              onClick={() => setWithdrawTarget(invoice.id || invoice.name)}
+                              className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 flex items-center space-x-1"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              <span>Withdraw approval</span>
+                            </button>
+                          )}
                         </>
                       )}
                       {/* @ts-expect-error just ignore */}
@@ -785,7 +826,10 @@ const getStatusBadge = (status: string) => {
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.id}</div>
-                <span className={getStatusBadge(invoice.status)}>{invoice.status}</span>
+                <div className="flex items-center gap-1">
+                  <span className={getStatusBadge(invoice.status)}>{invoice.status}</span>
+                  {renderApprovalBadge(invoice)}
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
@@ -832,6 +876,15 @@ const getStatusBadge = (status: string) => {
                       <Check className="w-3 h-3" />
                       <span>Submit</span>
                     </button>
+                    {(invoice as SalesInvoice & HeldOrderExtras).approvalState === PRICE_APPROVED && (
+                      <button
+                        onClick={() => setWithdrawTarget(invoice.id || invoice.name)}
+                        className="flex-1 text-xs px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center justify-center space-x-1"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        <span>Withdraw</span>
+                      </button>
+                    )}
                   </>
                 )}
                   {canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && hasReturnableItems(invoice) && (
@@ -987,6 +1040,22 @@ const getStatusBadge = (status: string) => {
       console.error("Error opening payment dialog for draft invoice:", error);
       const errorMessage = extractErrorFromException(error, "Failed to load invoice for payment");
       toast.error(errorMessage);
+    }
+  };
+
+  const handleWithdrawApproval = async () => {
+    if (!withdrawTarget) return;
+    setIsWithdrawingApproval(true);
+    try {
+      await applyHeldOrderAction(withdrawTarget, WITHDRAW_APPROVAL);
+      toast.success("Price approval withdrawn");
+      await refetchHeldOrders();
+      //eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to withdraw price approval");
+    } finally {
+      setIsWithdrawingApproval(false);
+      setWithdrawTarget(null);
     }
   };
 
@@ -1484,6 +1553,17 @@ const getStatusBadge = (status: string) => {
           allowDismiss
           title="Verify salesperson"
           description="Verify the salesperson before continuing this invoice action."
+        />
+
+        <ConfirmDialog
+          isOpen={!!withdrawTarget}
+          onClose={() => setWithdrawTarget(null)}
+          onConfirm={() => void handleWithdrawApproval()}
+          title="Withdraw price approval"
+          message={`Withdraw the price approval on held order ${withdrawTarget}? It will need approval again before it can be checked out.`}
+          confirmText={isWithdrawingApproval ? "Withdrawing..." : "Withdraw"}
+          cancelText="Cancel"
+          confirmButtonClass="bg-red-600 hover:bg-red-700 text-white"
         />
 
         {showDraftPaymentDialog && (

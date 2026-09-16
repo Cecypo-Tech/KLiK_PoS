@@ -8,6 +8,8 @@ interface DraftInvoiceCache {
   customer: Customer | null;
   originalDraftInvoiceId: string; // draft SI (M-Pesa / legacy held)
   originalHeldOrderId?: string;   // SO-based held order
+  originalHeldOrderApprovalState?: string | null; // price approval workflow_state as loaded
+  originalHeldOrderPriceBreach?: number;          // price breach flag as loaded
   orderDiscountAmount?: number;   // additional discount amount carried over from hold/draft
 }
 
@@ -42,6 +44,7 @@ export function cacheHeldOrder(
   items: CartItem[],
   customer: Customer | null,
   orderDiscountAmount = 0,
+  approval?: { state?: string | null; priceBreach?: number },
 ): void {
   const cache: DraftInvoiceCache = {
     items,
@@ -50,6 +53,8 @@ export function cacheHeldOrder(
     customer,
     originalDraftInvoiceId: '',
     originalHeldOrderId: orderId,
+    originalHeldOrderApprovalState: approval?.state ?? null,
+    originalHeldOrderPriceBreach: approval?.priceBreach ?? 0,
     orderDiscountAmount,
   };
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
@@ -179,6 +184,15 @@ export function getOriginalDraftInvoiceId(): string | null {
 
 export function getOriginalHeldOrderId(): string | null {
   return readCacheIgnoringAge()?.originalHeldOrderId || null;
+}
+
+/** The held order's approval state / price breach as loaded into the cart, for the checkout gate. */
+export function getOriginalHeldOrderApproval(): { state: string | null; priceBreach: number } {
+  const cache = readCacheIgnoringAge();
+  return {
+    state: cache?.originalHeldOrderApprovalState ?? null,
+    priceBreach: cache?.originalHeldOrderPriceBreach ?? 0,
+  };
 }
 
 export function getOriginalOrderDiscountAmount(): number {

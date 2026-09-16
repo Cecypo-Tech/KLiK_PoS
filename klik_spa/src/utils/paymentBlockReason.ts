@@ -11,6 +11,8 @@ export interface PaymentBlockState {
   outstandingLabel: string;
   /** Set when this sale is already recorded as that invoice (submitted outside the POS). */
   alreadySubmittedAs: string | null;
+  /** Why a held order this cart came from still cannot be checked out, or null. */
+  priceApprovalMessage: string | null;
 }
 
 /**
@@ -22,6 +24,7 @@ export function paymentBlockReason(s: PaymentBlockState): string | null {
   if (s.alreadySubmittedAs) {
     return `This sale is already recorded as ${s.alreadySubmittedAs}; clear the cart to start a new sale`;
   }
+  if (s.priceApprovalMessage) return s.priceApprovalMessage;
   if (s.isProcessingPayment) return "Payment is already being processed";
   if (!s.reconciliationOk) return s.reconciliationMessage || "This sale is on hold";
   if (s.isCreditSale && !s.hasDueDate) return "Select a due date for this credit sale";
