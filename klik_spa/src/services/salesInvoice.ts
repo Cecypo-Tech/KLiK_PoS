@@ -325,6 +325,18 @@ export async function markInvoiceAsPrinted(invoiceName: string) {
   return result.message;
 }
 
+/** The draft being finished was submitted or cancelled somewhere else meanwhile. */
+export class DraftNoLongerDraftError extends Error {
+  constructor(
+    message: string,
+    public readonly invoiceId: string,
+    public readonly docstatus: number,
+  ) {
+    super(message);
+    this.name = "DraftNoLongerDraftError";
+  }
+}
+
 export async function submitDraftInvoice(invoiceId: string, data?: unknown) {
   const csrfToken = window.csrf_token;
 
@@ -339,6 +351,14 @@ export async function submitDraftInvoice(invoiceId: string, data?: unknown) {
   });
 
   const result = await response.json();
+
+  if (result.message?.code === 'not_draft') {
+    throw new DraftNoLongerDraftError(
+      result.message.error,
+      result.message.invoice_id || invoiceId,
+      Number(result.message.docstatus),
+    );
+  }
 
   if (!response.ok || !result.message || result.message.success === false) {
     const errorMessage = extractErrorMessage(result, result.message?.error || 'Failed to submit draft invoice');

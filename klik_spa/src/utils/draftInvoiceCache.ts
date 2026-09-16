@@ -103,6 +103,16 @@ export function getCachedDraftInvoiceItems(): DraftInvoiceCache | null {
   }
 }
 
+/**
+ * Drop the link to a draft that is no longer one (submitted or cancelled elsewhere) while
+ * keeping the cart, so the sale can go through as a new invoice.
+ */
+export function forgetOriginalDraftInvoice(): void {
+  const cache = readCacheIgnoringAge();
+  if (!cache) return;
+  localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cache, originalDraftInvoiceId: '' }));
+}
+
 export function clearDraftInvoiceCache(): void {
   localStorage.removeItem(CACHE_KEY);
 }

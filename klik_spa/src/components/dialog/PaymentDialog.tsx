@@ -16,12 +16,14 @@ import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import {
   createDraftSalesInvoice,
   createSalesInvoice,
+  DraftNoLongerDraftError,
   previewLoyaltyRedemption,
   submitDraftInvoice,
   validateCheckoutInvoice,
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder } from "../../services/salesOrder";
-import { clearDraftInvoiceCache, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
 import { extractErrorFromException } from "../../utils/errorExtraction";
@@ -1450,6 +1452,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
       clearDraftInvoiceCache();
     } catch (err: any) {
+      if (err instanceof DraftNoLongerDraftError) {
+        // Submitted or cancelled elsewhere (e.g. from the desk). Retrying it can never
+        // succeed, so let go of it; the next Submit goes through as a new invoice.
+        if (err.invoiceId === mpesaDraftInvoiceName) {
+          setMpesaDraftInvoiceName(null);
+          setMpesaFlow(null);
+        }
+        forgetOriginalDraftInvoice();
+        const notice = staleDraftNotice(err.invoiceId, err.docstatus);
+        toast[notice.level](notice.message, { autoClose: 10000 });
+        return;
+      }
       if (activeCheckoutRequestId) {
         // The checkout failed, but an invoice may still exist on the server. Keep the key
         // when it does, so a retry replays instead of ringing the sale up twice; drop it

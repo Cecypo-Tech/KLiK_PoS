@@ -4849,8 +4849,13 @@ def submit_draft_invoice(invoice_id, data=None):
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
 
 		if invoice_doc.status != "Draft":
+			# code/docstatus let the POS tell "submitted or cancelled elsewhere" from any other
+			# failure, and drop its link to this invoice instead of retrying it forever.
 			return {
 				"success": False,
+				"code": "not_draft",
+				"invoice_id": invoice_id,
+				"docstatus": invoice_doc.docstatus,
 				"error": f"Cannot submit invoice {invoice_id}. Only Draft invoices can be submitted. Current status: {invoice_doc.status}",
 			}
 

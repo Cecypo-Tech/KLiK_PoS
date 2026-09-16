@@ -3,8 +3,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("../stores/cartStore", () => ({ useCartStore: { setState: vi.fn() } }));
 
 import {
+  cacheDraftInvoiceItems,
   cacheHeldOrder,
   clearDraftInvoiceCache,
+  forgetOriginalDraftInvoice,
+  getOriginalDraftInvoiceId,
   getCachedDraftInvoiceItems,
   getOriginalHeldOrderId,
   hasCachedDraftInvoiceItems,
@@ -69,5 +72,21 @@ describe("the cart cache itself", () => {
 
     expect(getCachedDraftInvoiceItems()?.originalHeldOrderId).toBe("SAL-ORD-0001");
     expect(hasCachedDraftInvoiceItems()).toBe(true);
+  });
+});
+
+describe("forgetOriginalDraftInvoice", () => {
+  it("drops the link to a draft that is no longer one, and keeps the cart", () => {
+    cacheDraftInvoiceItems("POS-01190", [{ id: "A" } as never], null, 5);
+
+    forgetOriginalDraftInvoice();
+
+    expect(getOriginalDraftInvoiceId()).toBeNull();
+    expect(getCachedDraftInvoiceItems()?.items).toHaveLength(1);
+  });
+
+  it("does nothing when there is no cache", () => {
+    expect(() => forgetOriginalDraftInvoice()).not.toThrow();
+    expect(getOriginalDraftInvoiceId()).toBeNull();
   });
 });
