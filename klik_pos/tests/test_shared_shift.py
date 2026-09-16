@@ -125,3 +125,50 @@ class TestOneShiftPerTill(SharedShiftCase):
 		from klik_pos.api.sales_invoice import CustomSalesInvoice
 
 		self.assertIs(CustomSalesInvoice.validate_pos_opening_entry, SalesInvoice.validate_pos_opening_entry)
+
+
+from klik_pos.api.pos_entry import _calculate_payment_reconciliation, _get_open_pos_entry
+
+
+def _paid_invoice(till, entry, owner, amount):
+	"""A submitted cash sale stamped with `entry`, written past validation."""
+	si = frappe.new_doc("Sales Invoice")
+	si.update({"company": COMPANY, "customer": "Walk In", "pos_profile": till,
+		"posting_date": frappe.utils.nowdate(), "custom_pos_opening_entry": entry})
+	si.append("items", {"item_code": "Consulting", "qty": 1, "rate": amount})
+	si.flags.ignore_validate = True
+	si.flags.ignore_mandatory = True
+	si.insert(ignore_permissions=True)
+	si.append("payments", {"mode_of_payment": "Cash", "amount": amount})
+	si.db_update_all()
+	frappe.db.set_value("Sales Invoice", si.name, {"docstatus": 1, "owner": owner}, update_modified=False)
+	frappe.db.sql(
+		"update `tabSales Invoice Payment` set docstatus=1, amount=%s where parent=%s", (amount, si.name)
+	)
+	return si.name
+
+
+class TestClosingTheTill(SharedShiftCase):
+	def test_a_joined_cashier_closes_the_till_s_shift(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
+
+		self.assertEqual(_get_open_pos_entry(JOINER).name, entry)
+
+	def test_the_close_counts_every_cashier_s_sales_once(self):
+		entry = _shift(self.till, OPENER)
+		_paid_invoice(self.till, entry, OPENER, 100)
+		_paid_invoice(self.till, entry, JOINER, 50)
+		# A sale on the same till under an older, different (now closed) shift must not be
+		# counted: a real POS Opening Entry, not just a name, so the invoice's link validates.
+		older = _shift(self.till, OPENER, status="Closed", days_ago=2)
+		_paid_invoice(self.till, older, OPENER, 999)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
+		opening = _get_open_pos_entry(JOINER)
+
+		rows = _calculate_payment_reconciliation(opening, {"closing_balance": {"Cash": 150}})
+		cash = next(r for r in rows if r["mode_of_payment"] == "Cash")
+
+		self.assertEqual(frappe.utils.flt(cash["expected_amount"]), 150)

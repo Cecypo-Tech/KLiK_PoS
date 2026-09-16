@@ -240,17 +240,19 @@ def _parse_request_data():
 
 
 def _get_open_pos_entry(user):
-	"""Fetch and validate the open POS Opening Entry for the user."""
-	open_entry = frappe.get_all(
-		"POS Opening Entry",
-		filters={"user": user, "docstatus": 1, "status": "Open"},
-		fields=["name", "pos_profile", "company", "period_start_date"],
-	)
+	"""The shift the caller is closing: their own Open shift, or the till shift they joined.
+	Closing it closes the till for every cashier in it."""
+	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-	if not open_entry:
+	entry = get_current_pos_opening_entry()
+	if not entry:
 		frappe.throw(_("No open POS Opening Entry found for user."))
-
-	return open_entry[0]
+	return frappe.db.get_value(
+		"POS Opening Entry",
+		entry,
+		["name", "pos_profile", "company", "period_start_date"],
+		as_dict=True,
+	)
 
 
 def _calculate_payment_reconciliation(opening_entry, data):
@@ -259,9 +261,6 @@ def _calculate_payment_reconciliation(opening_entry, data):
 	sales amounts, and expected vs closing amounts.
 	"""
 	opening_entry_name = opening_entry.name
-	opening_start = opening_entry.period_start_date
-	opening_date = opening_start.date()
-	opening_time = opening_start.time().strftime("%H:%M:%S")
 
 	# Fetch opening balances
 	opening_modes = frappe.get_all(
@@ -279,15 +278,11 @@ def _calculate_payment_reconciliation(opening_entry, data):
 		       COUNT(DISTINCT si.name) as transactions
 		FROM `tabSales Invoice` si
 		JOIN `tabSales Invoice Payment` sip ON si.name = sip.parent
-		WHERE si.pos_profile = %s
+		WHERE si.custom_pos_opening_entry = %s
 		  AND si.docstatus = 1
-		  AND si.posting_date = %s
-		  AND si.posting_time >= %s
-		  AND si.custom_pos_opening_entry IS NOT NULL
-		  AND si.custom_pos_opening_entry != ''
 		GROUP BY sip.mode_of_payment
 		""",
-		(opening_entry.pos_profile, opening_date, opening_time),
+		(opening_entry_name,),
 		as_dict=True,
 	)
 	sales_map = {row.mode_of_payment: row.total_amount for row in sales_data}
