@@ -111,11 +111,11 @@ class TestOpeningConflict(OpeningConflictCase):
 		self.assertEqual(conflict["entry"], entry)
 		self.assertEqual(conflict["pos_profile"], self.other_profile)
 
-	def test_another_cashier_on_the_same_profile_is_no_conflict(self):
-		"""klik_pos lets several cashiers share a till; only your own shift is in the way."""
+	def test_another_cashier_s_open_shift_is_offered_to_join(self):
+		"""A till runs one shift: another cashier's open shift is joined, not duplicated."""
 		_shift(self.profile, OTHER)
 
-		self.assertIsNone(opening_conflict(self.profile))
+		self.assertEqual(opening_conflict(self.profile)["kind"], "till_open")
 
 	def test_a_shift_closed_without_a_closing_entry_is_no_conflict(self):
 		_shift(self.profile, CASHIER, status="Closed", closing_entry=None)

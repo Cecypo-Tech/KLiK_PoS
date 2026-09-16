@@ -11,7 +11,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import shift
-from klik_pos.api.pos_entry import open_pos
+from klik_pos.api.pos_entry import open_pos, opening_conflict
 from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 from klik_pos.tests.test_opening_conflict import COMPANY, _profile, _shift, _user
 
@@ -82,3 +82,46 @@ class TestJoining(SharedShiftCase):
 		mine = _shift(other_till, JOINER)
 
 		self.assertEqual(get_current_pos_opening_entry(), mine)
+
+
+class TestOneShiftPerTill(SharedShiftCase):
+	def test_another_cashier_s_shift_today_is_offered_to_join(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		conflict = opening_conflict(self.till)
+
+		self.assertEqual(conflict["kind"], "till_open")
+		self.assertEqual(conflict["entry"], entry)
+		self.assertEqual(conflict["user"], OPENER)
+
+	def test_another_cashier_s_shift_from_yesterday_is_offered_to_join_and_close(self):
+		_shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		self.assertEqual(opening_conflict(self.till)["kind"], "till_stale")
+
+	def test_a_joined_shift_on_this_till_is_continued(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
+
+		conflict = opening_conflict(self.till)
+		self.assertEqual((conflict["kind"], conflict["entry"]), ("own_open", entry))
+
+	def test_erpnext_refuses_a_second_shift_on_a_till(self):
+		"""klik no longer switches ERPNext's own check off."""
+		_shift(self.till, OPENER)
+		doc = frappe.new_doc("POS Opening Entry")
+		doc.update({"pos_profile": self.till, "user": JOINER, "company": COMPANY})
+
+		with self.assertRaises(frappe.ValidationError):
+			doc.check_open_pos_exists()
+
+	def test_sales_invoices_use_erpnext_s_own_shift_check(self):
+		"""One Open shift on the till, opened today - ERPNext's rule, unmodified."""
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
+
+		from klik_pos.api.sales_invoice import CustomSalesInvoice
+
+		self.assertIs(CustomSalesInvoice.validate_pos_opening_entry, SalesInvoice.validate_pos_opening_entry)

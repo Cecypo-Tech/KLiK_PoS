@@ -106,41 +106,61 @@ def create_opening_entry():
 
 @frappe.whitelist()
 def opening_conflict(pos_profile):
-	"""The current user's open shift that stops them opening `pos_profile`, or None.
+	"""What stands in the way of the caller opening `pos_profile`, or None.
 
-	Open means status Open, as everywhere else. A cashier holds one shift at a time; other
-	cashiers' shifts on the same till are no obstacle. `kind` tells the opening screen
-	what to offer: own_open - carry on in it; own_stale (opened before today, so a shift
-	running past midnight counts, as with ERPNext's daily shifts) and own_other_profile -
-	close it first.
+	A cashier works in one shift, and a till runs one shift. So the caller's own Open shift
+	(or the one they joined, on this till) comes first; after that, a shift someone else
+	opened on this till, which the caller should join rather than duplicate. A shift opened
+	before today must be closed first (ERPNext's daily shifts); for someone else's that
+	means joining it and then closing it.
 	"""
+	from klik_pos.api.shift import joined_shift, open_shift_on_till
+
 	user = frappe.session.user
-	shifts = frappe.get_all(
+	today_date = frappe.utils.getdate(today())
+
+	def _describe(kind, row, profile):
+		return {
+			"kind": kind,
+			"entry": row.name,
+			"pos_profile": profile,
+			"period_start_date": row.period_start_date,
+			"user": row.user,
+			"user_name": frappe.db.get_value("User", row.user, "full_name") or row.user,
+		}
+
+	def _stale(row):
+		return frappe.utils.getdate(row.period_start_date) != today_date
+
+	own = frappe.get_all(
 		"POS Opening Entry",
 		filters={"user": user, "docstatus": 1, "status": "Open"},
-		fields=["name", "pos_profile", "period_start_date"],
+		fields=["name", "user", "pos_profile", "period_start_date"],
 		order_by="period_start_date desc",
 	)
-	if not shifts:
+	if own:
+		row = next((s for s in own if s.pos_profile == pos_profile), own[0])
+		if row.pos_profile != pos_profile:
+			return _describe("own_other_profile", row, row.pos_profile)
+		return _describe("own_stale" if _stale(row) else "own_open", row, pos_profile)
+
+	till_shift = open_shift_on_till(pos_profile)
+	if not till_shift:
 		return None
-
-	shift = next((s for s in shifts if s.pos_profile == pos_profile), shifts[0])
-	if shift.pos_profile != pos_profile:
-		kind = "own_other_profile"
-	elif frappe.utils.getdate(shift.period_start_date) != frappe.utils.getdate(today()):
-		kind = "own_stale"
-	else:
-		kind = "own_open"
-
-	return {
-		"kind": kind,
-		"entry": shift.name,
-		"pos_profile": shift.pos_profile,
-		"period_start_date": shift.period_start_date,
-	}
+	if joined_shift(user) == till_shift.name:
+		return _describe("own_stale" if _stale(till_shift) else "own_open", till_shift, pos_profile)
+	return _describe("till_stale" if _stale(till_shift) else "till_open", till_shift, pos_profile)
 
 
 def _conflict_message(conflict):
+	if conflict["kind"] == "till_open":
+		return _("{0} already has shift {1} open on {2}. Join it instead of opening another.").format(
+			conflict["user_name"], conflict["entry"], conflict["pos_profile"]
+		)
+	if conflict["kind"] == "till_stale":
+		return _("Shift {0} on {1} was opened on an earlier day. Join it and close it first.").format(
+			conflict["entry"], conflict["pos_profile"]
+		)
 	if conflict["kind"] == "own_open":
 		return _("Your shift {0} on {1} is already open. Continue in it instead of opening another.").format(
 			conflict["entry"], conflict["pos_profile"]

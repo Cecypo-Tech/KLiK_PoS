@@ -4111,21 +4111,6 @@ def return_sales_invoice(invoice_name):
 
 
 class CustomSalesInvoice(SalesInvoice):
-	def validate_pos_opening_entry(self):
-		opening_entries = frappe.get_all(
-			"POS Opening Entry",
-			fields=["name", "period_start_date"],
-			filters={"pos_profile": self.pos_profile, "status": "Open"},
-			order_by="period_start_date desc",
-		)
-		if not opening_entries:
-			frappe.throw(
-				title=_("POS Opening Entry Missing"),
-				msg=_("No open POS Opening Entry found for POS Profile {0}.").format(
-					frappe.bold(self.pos_profile)
-				),
-			)
-
 	def before_submit(self):
 		if _should_reserve_stock(self):
 			_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
