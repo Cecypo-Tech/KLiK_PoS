@@ -688,13 +688,17 @@ export default function ClosingShiftPage() {
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleViewInvoice(invoice)}
-                            className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
-                          >
-                            <Eye className="w-4 h-4" />
-                            <span>View</span>
-                          </button>
+                          {invoice.canOpen !== false ? (
+                            <button
+                              onClick={() => handleViewInvoice(invoice)}
+                              className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
+                            >
+                              <Eye className="w-4 h-4" />
+                              <span>View</span>
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 text-xs" title="Rung by another cashier">—</span>
+                          )}
                           {/* {invoice.status === "Draft" && (
                             <button
                               onClick={() => handleEditInvoice(invoice)}
@@ -714,7 +718,7 @@ export default function ClosingShiftPage() {
                             </button>
                           )}
                                                 {/* @ts-expect-error just ignore */}
-                          {canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && !invoice.is_return && hasReturnableItems(invoice) && (
+                          {invoice.canOpen !== false && canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && !invoice.is_return && hasReturnableItems(invoice) && (
                             <button
                               onClick={() => handleSingleReturnClick(invoice)}
                               className="text-orange-600 hover:text-orange-900 flex items-center space-x-1"
@@ -1115,13 +1119,17 @@ export default function ClosingShiftPage() {
                       )}
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleViewInvoice(invoice)}
-                            className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
-                          >
-                            <Eye className="w-4 h-4" />
-                            <span>View</span>
-                          </button>
+                          {invoice.canOpen !== false ? (
+                            <button
+                              onClick={() => handleViewInvoice(invoice)}
+                              className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
+                            >
+                              <Eye className="w-4 h-4" />
+                              <span>View</span>
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 text-xs" title="Rung by another cashier">—</span>
+                          )}
 
                           {invoice.status === "Draft" && (
                             <button
@@ -1133,7 +1141,7 @@ export default function ClosingShiftPage() {
                             </button>
                           )}
                                                 {/* @ts-expect-error just ignore */}
-                          {canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && !invoice.is_return && hasReturnableItems(invoice) && (
+                          {invoice.canOpen !== false && canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && !invoice.is_return && hasReturnableItems(invoice) && (
                             <button
                               onClick={() => handleSingleReturnClick(invoice)}
                               className="text-orange-600 hover:text-orange-900 flex items-center space-x-1"

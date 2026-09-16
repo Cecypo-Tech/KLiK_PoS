@@ -157,6 +157,7 @@ export function useSalesInvoices(
           queueAttempts: Number(invoice.queue_attempts) || 0,
           queueLastAttemptAt: (invoice.queue_last_attempt_at as string) || "",
           canReturn: canReturn,
+          canOpen: invoice.can_open !== false,
         } as SalesInvoice & {
           queueStatus?: string;
           queueError?: string;

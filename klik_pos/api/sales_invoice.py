@@ -1174,20 +1174,26 @@ def _profile_allows_other_cashiers(pos_doc):
 	return bool(getattr(pos_doc, "custom_allow_viewing_other_cashiers", 0))
 
 
+def _may_read_row(owner, pos_profile, user, pos_doc):
+	"""Whether `user` may open a row owned by `owner` on `pos_profile`: their own, or
+	another cashier's rung on `pos_doc` when that till lets its users read each other's."""
+	if owner == user:
+		return True
+	if not pos_doc or pos_profile != getattr(pos_doc, "name", None):
+		return False
+	return _profile_allows_other_cashiers(pos_doc)
+
+
 def _may_read_invoice(invoice):
 	"""Whether the caller may open this invoice in the POS: their own, or another cashier's
 	rung on the till they are standing at when that till lets its users read each other's -
 	what the Invoice History list and held orders allow. The till decides for managers
 	too; with no till resolvable, only their own."""
-	if invoice.owner == frappe.session.user:
-		return True
 	try:
 		pos_doc = get_current_pos_profile()
 	except Exception:
-		return False
-	if not pos_doc or invoice.pos_profile != getattr(pos_doc, "name", None):
-		return False
-	return _profile_allows_other_cashiers(pos_doc)
+		pos_doc = None
+	return _may_read_row(invoice.owner, invoice.pos_profile, frappe.session.user, pos_doc)
 
 
 @frappe.whitelist()
@@ -1338,6 +1344,9 @@ def get_sales_invoices(
 		cashier_names_map = _batch_fetch_cashier_names(user_ids)
 		payment_methods_map = _batch_fetch_payment_methods(invoice_names)
 		items_map = _batch_fetch_items(invoice_names)
+
+		for inv in invoices:
+			inv["can_open"] = _may_read_row(inv.owner, inv.pos_profile, frappe.session.user, pos_doc)
 
 		_process_invoices(invoices, cashier_names_map, payment_methods_map, items_map)
 

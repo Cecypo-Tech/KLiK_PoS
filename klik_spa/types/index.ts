@@ -287,6 +287,12 @@ export interface SalesInvoice {
     allocated_percentage?: number
   }>
   tax_id: string
+  /**
+   * Whether the caller may open this invoice (View/Return) — see `can_open` from
+   * get_sales_invoices. Undefined on rows the backend did not compute it for; treat
+   * that the same as true, so only an explicit false hides the actions.
+   */
+  canOpen?: boolean
 }
 
 export interface DashboardStats {

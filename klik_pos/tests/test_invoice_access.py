@@ -18,7 +18,12 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import sales_invoice
-from klik_pos.api.sales_invoice import _may_read_invoice, get_invoice_details, get_sales_invoices
+from klik_pos.api.sales_invoice import (
+	_may_read_invoice,
+	_may_read_row,
+	get_invoice_details,
+	get_sales_invoices,
+)
 
 
 def _till(allow, name="Test Till"):
@@ -167,3 +172,22 @@ class TestNoTillResolvable(FrappeTestCase):
 		with patch.object(sales_invoice, "get_current_pos_profile", side_effect=Exception("no till")):
 			result = get_sales_invoices(limit=1, surface="history", skip_opening_entry_filter=True)
 		self.assertTrue(result["success"], result.get("error"))
+
+
+class TestRowsSayWhetherTheyOpen(FrappeTestCase):
+	def test_rows_follow_the_same_rule_as_opening(self):
+		till = frappe._dict({"name": "Test Till", "custom_allow_viewing_other_cashiers": 0})
+		self.assertTrue(_may_read_row("me@example.com", "Test Till", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Test Till", "me@example.com", till))
+		till.custom_allow_viewing_other_cashiers = 1
+		self.assertTrue(_may_read_row("you@example.com", "Test Till", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Other", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Test Till", "me@example.com", None))
+
+	def test_every_listed_row_carries_can_open(self):
+		frappe.set_user("Administrator")
+		with _till(0):
+			result = get_sales_invoices(limit=5, skip_opening_entry_filter=True)
+		self.assertTrue(result["success"], result.get("error"))
+		for row in result["data"]:
+			self.assertIn("can_open", row)
