@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchOpeningConflict, postOpeningEntry } from "./opeiningEntry";
+import { fetchOpeningConflict, joinShift, postOpeningEntry } from "./opeiningEntry";
 
 const respond = (status: number, body: unknown) =>
   vi.fn().mockResolvedValue({ ok: status < 400, status, json: async () => body });
@@ -53,5 +53,22 @@ describe("fetchOpeningConflict", () => {
     expect(await fetchOpeningConflict("Till")).toBeNull();
     vi.stubGlobal("fetch", respond(500, {}));
     expect(await fetchOpeningConflict("Till")).toBeNull();
+  });
+});
+
+describe("joinShift", () => {
+  it("posts the till and reports success", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const fetchMock = respond(200, { message: { success: true, entry: "POS-OPE-1" } });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await joinShift("Till A")).toEqual({ ok: true });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body)).toEqual({ pos_profile: "Till A" });
+  });
+
+  it("reports a refusal in the server's words", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const msg = JSON.stringify({ message: "You are not assigned to POS Profile Till A." });
+    vi.stubGlobal("fetch", respond(403, { _server_messages: JSON.stringify([msg]) }));
+    expect(await joinShift("Till A")).toEqual({ ok: false, error: "You are not assigned to POS Profile Till A." });
   });
 });

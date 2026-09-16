@@ -43,6 +43,23 @@ export async function fetchOpeningConflict(posProfile: string): Promise<OpeningC
   }
 }
 
+/** Joins the shift already open on `posProfile`, so a second cashier can sell on that till. */
+export async function joinShift(posProfile: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/method/klik_pos.api.shift.join_shift", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": window.csrf_token },
+      body: JSON.stringify({ pos_profile: posProfile }),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.message?.success) return { ok: true };
+    return { ok: false, error: extractErrorMessage(data, "Could not join the shift") };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not join the shift" };
+  }
+}
+
 export type OpeningResult = { ok: true; name: string } | { ok: false; error: string };
 
 export async function postOpeningEntry(body: object, csrfToken: string): Promise<OpeningResult> {

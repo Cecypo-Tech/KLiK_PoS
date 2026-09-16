@@ -2,7 +2,7 @@ import { AlertCircle, Banknote, CheckCircle2, CreditCard, Wallet, X } from 'luci
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePaymentModes } from "../hooks/usePaymentModes";
-import { fetchOpeningConflict, fetchOpeningSuggestion, useCreatePOSOpeningEntry } from '../services/opeiningEntry';
+import { fetchOpeningConflict, fetchOpeningSuggestion, joinShift, useCreatePOSOpeningEntry } from '../services/opeiningEntry';
 import { conflictNotice, type OpeningConflict } from '../utils/openingConflict';
 import {
   buildOpeningRows,
@@ -57,6 +57,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   const [suggestion, setSuggestion] = useState<OpeningSuggestion | null>(null);
   const [error, setError] = useState<string>('');
   const [conflict, setConflict] = useState<OpeningConflict | null>(null);
+  const [joining, setJoining] = useState(false);
   const navigate = useNavigate();
 
   const { createOpeningEntry, isCreating, error: createError, success } = useCreatePOSOpeningEntry();
@@ -220,11 +221,21 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   const notice = conflict ? conflictNotice(conflict) : null;
 
   // The shift in the way is open, so refreshing the session status lets the cashier in;
-  // a shift that has to be closed first is then taken to the closing screen.
-  const resolveConflict = () => {
-    if (!notice) return;
+  // a shift that has to be closed first is then taken to the closing screen. Joining
+  // another cashier's shift is a server round trip first, so it can fail.
+  const resolveConflict = async () => {
+    if (!notice || !conflict) return;
+    if (notice.action === 'join' || notice.action === 'join_close') {
+      setJoining(true);
+      const joined = await joinShift(conflict.pos_profile);
+      setJoining(false);
+      if (!joined.ok) {
+        setError(joined.error);
+        return;
+      }
+    }
     onSuccess();
-    if (notice.action === 'close') {
+    if (notice.action === 'close' || notice.action === 'join_close') {
       navigate('/closing_shift');
     }
   };
@@ -403,16 +414,19 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                     <div>{notice.message}</div>
                     <button
                       type="button"
-                      onClick={resolveConflict}
-                      className="px-3 py-1.5 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors"
+                      onClick={() => void resolveConflict()}
+                      disabled={joining}
+                      className="px-3 py-1.5 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
-                      {notice.action === 'continue' ? 'Continue to POS' : 'Go to Closing Shift'}
+                      {joining
+                        ? 'Joining...'
+                        : { continue: 'Continue to POS', close: 'Go to Closing Shift', join: 'Join shift', join_close: 'Join and close shift' }[notice.action]}
                     </button>
                   </div>
                 </div>
               )}
 
-              {error && !notice && (
+              {error && (
                 <div className="flex items-start space-x-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
                   <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div>{error}</div>
