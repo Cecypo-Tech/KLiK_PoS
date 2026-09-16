@@ -11,7 +11,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import shift
-from klik_pos.api.pos_entry import open_pos, opening_conflict
+from klik_pos.api.pos_entry import current_shift_state, open_pos, opening_conflict
 from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 from klik_pos.tests.test_opening_conflict import COMPANY, _profile, _shift, _user
 
@@ -241,3 +241,35 @@ class TestClosingTheTill(SharedShiftCase):
 		cash = next(r for r in rows if r["mode_of_payment"] == "Cash")
 
 		self.assertEqual(frappe.utils.flt(cash["expected_amount"]), 150)
+
+
+class TestCurrentShiftState(SharedShiftCase):
+	def test_own_shift_opened_today_is_not_stale(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(OPENER)
+
+		self.assertEqual(
+			current_shift_state(), {"entry": entry, "stale": False, "pos_profile": self.till}
+		)
+
+	def test_own_shift_opened_yesterday_is_stale(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(OPENER)
+
+		self.assertEqual(
+			current_shift_state(), {"entry": entry, "stale": True, "pos_profile": self.till}
+		)
+
+	def test_a_joined_shift_opened_yesterday_is_stale(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
+
+		self.assertEqual(
+			current_shift_state(), {"entry": entry, "stale": True, "pos_profile": self.till}
+		)
+
+	def test_no_shift_at_all(self):
+		frappe.set_user(OPENER)
+
+		self.assertEqual(current_shift_state(), {"entry": None, "stale": False, "pos_profile": None})

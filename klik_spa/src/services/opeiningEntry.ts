@@ -43,6 +43,35 @@ export async function fetchOpeningConflict(posProfile: string): Promise<OpeningC
   }
 }
 
+export interface CurrentShiftState {
+  entry: string | null;
+  stale: boolean;
+  pos_profile: string | null;
+}
+
+/**
+ * The caller's current shift (their own, or the till shift they joined), and whether it
+ * was opened on an earlier day. `open_pos` alone can't tell a stale own shift from a fresh
+ * one - both read as "has an open entry" - so the guard needs this to route a stale shift
+ * to Closing Shift instead of letting the cashier sell against it.
+ */
+export async function fetchCurrentShiftState(): Promise<CurrentShiftState | null> {
+  try {
+    const res = await fetch("/api/method/klik_pos.api.pos_entry.current_shift_state", {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data?.message as CurrentShiftState) ?? null;
+  } catch (err) {
+    // A failed check is not a reason to block the guard's normal flow; it just skips
+    // the stale-shift redirect for this pass.
+    console.warn("Could not check current shift state:", err);
+    return null;
+  }
+}
+
 /** Joins the shift already open on `posProfile`, so a second cashier can sell on that till. */
 export async function joinShift(posProfile: string): Promise<{ ok: true } | { ok: false; error: string }> {
   try {

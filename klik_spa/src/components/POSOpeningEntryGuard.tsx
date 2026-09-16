@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { usePOSOpeningStatus } from '../hooks/usePOSOpeningEntry';
 import POSOpeningModal from './PosOpeningEntryDialog';
 import erpnextAPI from '../services/erpnext-api';
 import { useI18n } from '../hooks/useI18n';
+import { fetchCurrentShiftState } from '../services/opeiningEntry';
 
 interface CurrentUser {
   name?: string;
@@ -29,6 +31,7 @@ export default function POSOpeningEntryGuard({
 }: POSOpeningEntryGuardProps) {
   const { isRTL } = useI18n();
   const location = useLocation();
+  const navigate = useNavigate();
   const [showOpeningModal, setShowOpeningModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
@@ -106,6 +109,32 @@ export default function POSOpeningEntryGuard({
       refetch();
     }
   }, [location.pathname, refetch, hasOpenEntry, isInitialized]);
+
+  // A stale own shift still reads as "has an open entry" (open_pos doesn't check the
+  // date), so without this the guard lets the cashier straight into checkout, where every
+  // sale then fails ERPNext's "Outdated POS Opening Entry" check. Route them to Closing
+  // Shift instead, once per route change.
+  useEffect(() => {
+    if (shouldExclude() || hasOpenEntry !== true) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchCurrentShiftState().then((state) => {
+      if (cancelled || !state?.stale || location.pathname.includes('/closing_shift')) {
+        return;
+      }
+      toast.warning(
+        `Shift ${state.entry} was opened on an earlier day. Close it before selling.`,
+        { toastId: 'stale-shift' }
+      );
+      navigate('/closing_shift');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, hasOpenEntry]);
 
   // This helps detect if opening entry was closed from ERPNext while user was away
   useEffect(() => {

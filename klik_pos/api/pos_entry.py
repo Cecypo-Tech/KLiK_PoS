@@ -21,6 +21,25 @@ def open_pos():
 
 
 @frappe.whitelist()
+def current_shift_state():
+	"""The caller's current shift (their own, or the till shift they joined), and whether
+	it was opened on an earlier day. open_pos alone can't tell the caller this: it returns
+	True for a stale own shift too, which is exactly the case that needs a route to
+	Closing Shift instead of the checkout screen."""
+	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
+
+	entry = get_current_pos_opening_entry()
+	if not entry:
+		return {"entry": None, "stale": False, "pos_profile": None}
+
+	row = frappe.db.get_value(
+		"POS Opening Entry", entry, ["pos_profile", "period_start_date"], as_dict=True
+	)
+	stale = bool(row) and frappe.utils.get_date_str(row.period_start_date) != today()
+	return {"entry": entry, "stale": stale, "pos_profile": row.pos_profile if row else None}
+
+
+@frappe.whitelist()
 def create_opening_entry():
 	"""
 	Create a POS Opening Entry with balance details only.

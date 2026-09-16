@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchOpeningConflict, joinShift, postOpeningEntry } from "./opeiningEntry";
+import { fetchCurrentShiftState, fetchOpeningConflict, joinShift, postOpeningEntry } from "./opeiningEntry";
 
 const respond = (status: number, body: unknown) =>
   vi.fn().mockResolvedValue({ ok: status < 400, status, json: async () => body });
@@ -53,6 +53,26 @@ describe("fetchOpeningConflict", () => {
     expect(await fetchOpeningConflict("Till")).toBeNull();
     vi.stubGlobal("fetch", respond(500, {}));
     expect(await fetchOpeningConflict("Till")).toBeNull();
+  });
+});
+
+describe("fetchCurrentShiftState", () => {
+  it("returns the caller's shift and whether it is stale", async () => {
+    const state = { entry: "POS-OPE-1", stale: true, pos_profile: "Till A" };
+    vi.stubGlobal("fetch", respond(200, { message: state }));
+    expect(await fetchCurrentShiftState()).toEqual(state);
+  });
+
+  it("returns null when there is nothing to report or the check fails", async () => {
+    vi.stubGlobal("fetch", respond(200, { message: null }));
+    expect(await fetchCurrentShiftState()).toBeNull();
+    vi.stubGlobal("fetch", respond(500, {}));
+    expect(await fetchCurrentShiftState()).toBeNull();
+  });
+
+  it("returns null on a network failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await fetchCurrentShiftState()).toBeNull();
   });
 });
 
