@@ -1171,7 +1171,20 @@ def _profile_allows_other_cashiers(pos_doc):
 	return bool(getattr(pos_doc, "custom_allow_viewing_other_cashiers", 0))
 
 
-@frappe.whitelist(allow_guest=True)
+def _may_read_invoice(invoice):
+	"""Whether the caller may open this invoice in the POS: their own, or any where their
+	till lets its users read each other's. The till decides for managers too, exactly as
+	it does for the Invoice History list; with no till resolvable, only their own."""
+	if invoice.owner == frappe.session.user:
+		return True
+	try:
+		pos_doc = get_current_pos_profile()
+	except Exception:
+		return False
+	return _profile_allows_other_cashiers(pos_doc)
+
+
+@frappe.whitelist()
 def get_sales_invoices(
 	limit=100,
 	start=0,
@@ -1195,14 +1208,16 @@ def get_sales_invoices(
 			"dashboard" - the Sales Dashboard. Restricts nothing: no opening entry, no POS
 				profile, no owner. The dashboard is an overview of the business, so the
 				gate is who may open it, checked here rather than only in the SPA.
-			"history"   - Invoice History. Cross-cashier reading is decided by the till's
+			"history"   - Invoice History, and "customer" - a customer's invoice list.
+				Cross-cashier reading is decided by the till's
 				POS Profile (custom_allow_viewing_other_cashiers), not by role. With it
 				off the owner filter is applied in SQL; previously the restriction existed
 				only because the page sent its own name as cashier_name, which anyone
 				could omit.
-			""          - Closing Shift and the customer invoice list. Untouched: a shift
-				legitimately spans cashiers on a shared till, and a customer's invoices
-				were rung by whoever served them.
+				The customer list follows the same rule because an invoice the caller may
+				not open (get_invoice_details) must not be listed either.
+			""          - Closing Shift. Untouched: a shift legitimately spans cashiers on a
+				shared till.
 	"""
 	try:
 		if isinstance(skip_opening_entry_filter, str):
@@ -1219,6 +1234,7 @@ def get_sales_invoices(
 			if not cashier_user_ids:
 				return {"success": True, "data": [], "total_count": 0}
 
+		pos_doc = None
 		try:
 			pos_doc = get_current_pos_profile()
 			current_pos_profile = getattr(pos_doc, "name", None)
@@ -1256,7 +1272,7 @@ def get_sales_invoices(
 		conditions = []
 		params = []
 
-		if surface == "history" and not _profile_allows_other_cashiers(pos_doc):
+		if surface in ("history", "customer") and not _profile_allows_other_cashiers(pos_doc):
 			conditions.append("si.owner = %s")
 			params.append(frappe.session.user)
 
@@ -1501,13 +1517,19 @@ def _calculate_return_quantities(invoice, items):
 		item["available_qty"] = round(item["qty"] - returned_qty_value, 6)
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_invoice_details(invoice_id):
 	"""
 	Main function to fetch complete invoice details.
+
+	Read permission first, then the till's rule for other cashiers' invoices - the same one
+	Invoice History lists by.
 	"""
 	try:
 		invoice = frappe.get_doc("Sales Invoice", invoice_id)
+		invoice.check_permission("read")
+		if not _may_read_invoice(invoice):
+			raise frappe.PermissionError(_("This invoice was rung by another cashier."))
 		invoice_data = invoice.as_dict()
 
 		# Get items with return data

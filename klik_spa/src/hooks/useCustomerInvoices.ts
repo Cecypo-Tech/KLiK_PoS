@@ -29,10 +29,11 @@ export function useCustomerInvoices(customerName: string) {
     try {
       const start = page * LIMIT;
 
-      // Search for invoices by customer name
+      // Search for invoices by customer name. surface=customer holds the list to the
+      // caller's own invoices unless the till allows others - the rule opening one follows.
       const searchParam = `&search=${encodeURIComponent(customerName)}`;
       const response = await fetch(
-        `/api/method/klik_pos.api.sales_invoice.get_sales_invoices?limit=${LIMIT}&start=${start}${searchParam}`,
+        `/api/method/klik_pos.api.sales_invoice.get_sales_invoices?limit=${LIMIT}&start=${start}${searchParam}&surface=customer`,
         {
           method: 'GET',
           headers: {

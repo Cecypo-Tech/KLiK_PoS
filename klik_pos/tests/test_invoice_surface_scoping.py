@@ -134,9 +134,9 @@ class TestSurfaceShapesTheQuery(FrappeTestCase):
 		self.assertNotIn("si.owner = ", sql)
 
 	def test_unspecified_surface_is_untouched(self):
-		"""Closing Shift and the customer invoice list must not gain an owner filter:
-		a shift spans cashiers on a shared till, and a customer was served by whoever
-		served them."""
+		"""Closing Shift must not gain an owner filter: a shift spans cashiers on a
+		shared till. (The customer list now says surface="customer"; see
+		test_invoice_access.)"""
 		with _with_roles("All", "Sales User"), _profile(0):
 			sql = self._sql_for()
 		self.assertNotIn("si.owner = ", sql)

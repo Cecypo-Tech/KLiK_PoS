@@ -38,7 +38,7 @@ def _till(allow_others):
 
 
 @contextmanager
-def _as_cashier(till, opening_entry=MY_SHIFT):
+def _as_cashier(till, opening_entry=MY_SHIFT, roles=("All", "Sales User")):
 	"""A Sales User standing at `till` (None: no till resolvable) with `opening_entry` open."""
 	profile_patch = (
 		patch.object(sales_order, "_get_active_pos_profile", side_effect=Exception("no till"))
@@ -46,7 +46,7 @@ def _as_cashier(till, opening_entry=MY_SHIFT):
 		else patch.object(sales_order, "_get_active_pos_profile", return_value=till)
 	)
 	with ExitStack() as stack:
-		stack.enter_context(patch("frappe.get_roles", return_value=["All", "Sales User"]))
+		stack.enter_context(patch("frappe.get_roles", return_value=list(roles)))
 		stack.enter_context(profile_patch)
 		stack.enter_context(
 			patch.object(sales_order, "get_current_pos_opening_entry", return_value=opening_entry)
@@ -75,8 +75,8 @@ def _order(**kwargs):
 
 
 class TestOneRuleForListingAndOpening(FrappeTestCase):
-	def _assert_both(self, so, till, expected, opening_entry=MY_SHIFT):
-		with _as_cashier(till, opening_entry):
+	def _assert_both(self, so, till, expected, opening_entry=MY_SHIFT, roles=("All", "Sales User")):
+		with _as_cashier(till, opening_entry, roles):
 			listed, allowed = _listed(so), _allowed(so)
 		self.assertEqual(
 			(listed, allowed), (expected, expected), f"listed={listed} allowed={allowed}"
@@ -94,6 +94,20 @@ class TestOneRuleForListingAndOpening(FrappeTestCase):
 		theirs = _order(opening_entry=live.name, owner=SOMEONE_ELSE)
 
 		self._assert_both(theirs, _till(0), False)
+
+	def test_a_manager_on_a_closed_till_is_held_to_their_own_orders_too(self):
+		"""The till decides, not the role: a manager who needs everyone's work gets a till
+		that allows it."""
+		live = _opening_entry(hours_ago=1)
+		theirs = _order(opening_entry=live.name, owner=SOMEONE_ELSE)
+
+		self._assert_both(theirs, _till(0), False, roles=("All", "System Manager"))
+
+	def test_a_manager_on_an_open_till_sees_everyone_s_orders(self):
+		live = _opening_entry(hours_ago=1)
+		theirs = _order(opening_entry=live.name, owner=SOMEONE_ELSE)
+
+		self._assert_both(theirs, _till(1), True, roles=("All", "System Manager"))
 
 	def test_my_own_order_on_another_till_is_neither_listed_nor_opened(self):
 		"""Listed and then refused, before. Another till can be another warehouse or company."""
