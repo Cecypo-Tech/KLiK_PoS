@@ -30,11 +30,6 @@ def _assert_held_order_access(so):
         frappe.throw(_("You are not allowed to access held order {0}.").format(so.name))
 
 
-def _is_manager():
-    roles = frappe.get_roles()
-    return "System Manager" in roles or "Administrator" in roles
-
-
 def _active_till():
     """The POS Profile the caller is standing at, or None when none can be resolved."""
     try:
@@ -465,7 +460,6 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
 
         limit = int(limit) if limit else 50
         start = int(start) if start else 0
-        is_admin_user = _is_manager()
 
         filters = {"custom_is_klik_held": 1, "docstatus": 0}
         or_filters = None
@@ -487,7 +481,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             opening_entry = get_current_pos_opening_entry()
             if opening_entry:
                 filters["custom_pos_opening_entry"] = opening_entry
-            elif not (is_admin_user or _till_allows_other_cashiers()):
+            elif not _till_allows_other_cashiers():
                 # No active session — only show the caller's own held orders, unless the
                 # till is one that lets its users see each other's.
                 filters["owner"] = frappe.session.user

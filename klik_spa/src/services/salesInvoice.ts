@@ -236,6 +236,10 @@ export async function getInvoiceDetails(invoiceName: string) {
     if (!response.ok) {
       throw new Error(data.message || 'Failed to get invoice details');
     }
+    // A refusal (e.g. another cashier's invoice) arrives as 200 with success: false.
+    if (data.message?.success === false) {
+      throw new Error(data.message.error || 'Failed to get invoice details');
+    }
 
     return {
       success: true,

@@ -11,6 +11,7 @@ const ready: PaymentBlockState = {
   isB2C: true,
   outstandingAmount: 0,
   outstandingLabel: "KSh 0.00",
+  alreadySubmittedAs: null,
 };
 
 describe("paymentBlockReason", () => {
@@ -20,6 +21,10 @@ describe("paymentBlockReason", () => {
 
   it("says a submitted invoice is already done", () => {
     expect(paymentBlockReason({ ...ready, invoiceSubmitted: true })).toMatch(/already submitted/);
+  });
+
+  it("blocks a sale already recorded as another invoice", () => {
+    expect(paymentBlockReason({ ...ready, alreadySubmittedAs: "POS-01190" })).toMatch(/POS-01190/);
   });
 
   it("says a payment is in progress", () => {

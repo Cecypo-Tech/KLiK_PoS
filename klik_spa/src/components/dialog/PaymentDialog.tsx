@@ -184,6 +184,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
+  // This sale turned out to be recorded already, as this invoice; Submit stays blocked.
+  const [alreadySubmittedAs, setAlreadySubmittedAs] = useState<string | null>(null);
   const [showMpesaOptionsModal, setShowMpesaOptionsModal] = useState(false);
   const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
@@ -1319,6 +1321,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (!isOpen) {
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
+      setAlreadySubmittedAs(null);
       setShowMpesaOptionsModal(false);
       setMpesaSearchTerm("");
       setSelectedMpesaPayments([]);
@@ -1453,15 +1456,29 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       clearDraftInvoiceCache();
     } catch (err: any) {
       if (err instanceof DraftNoLongerDraftError) {
-        // Submitted or cancelled elsewhere (e.g. from the desk). Retrying it can never
-        // succeed, so let go of it; the next Submit goes through as a new invoice.
-        if (err.invoiceId === mpesaDraftInvoiceName) {
-          setMpesaDraftInvoiceName(null);
-          setMpesaFlow(null);
+        // Submitted or cancelled elsewhere (e.g. from the desk); retrying can never succeed.
+        const wasMpesaDraft = err.invoiceId === mpesaDraftInvoiceName;
+        const notice = staleDraftNotice(err.invoiceId, err.docstatus, { wasMpesaDraft });
+        if (notice.blockSubmit) {
+          // Already recorded: keep the link and block Submit rather than ring it up twice.
+          setAlreadySubmittedAs(err.invoiceId);
+        } else {
+          if (wasMpesaDraft) {
+            // The M-Pesa receipt was attached to the cancelled draft. Clear the amount so it
+            // is not recorded again as a bare payment row with no receipt behind it.
+            const activeMpesa = getActiveMpesaPayment();
+            if (activeMpesa) {
+              setPaymentAmounts((prev) => ({ ...prev, [activeMpesa.method]: 0 }));
+            }
+            setSelectedMpesaPayments([]);
+            setMpesaDraftInvoiceName(null);
+            setMpesaFlow(null);
+          }
+          if (err.invoiceId === getOriginalDraftInvoiceId()) {
+            forgetOriginalDraftInvoice();
+          }
         }
-        forgetOriginalDraftInvoice();
-        const notice = staleDraftNotice(err.invoiceId, err.docstatus);
-        toast[notice.level](notice.message, { autoClose: 10000 });
+        toast[notice.level](notice.message, { autoClose: 10000, toastId: `stale-draft-${err.invoiceId}` });
         return;
       }
       if (activeCheckoutRequestId) {
@@ -1672,6 +1689,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       isB2C,
       outstandingAmount,
       outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
+      alreadySubmittedAs,
     });
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;

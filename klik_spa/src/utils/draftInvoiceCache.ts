@@ -110,7 +110,12 @@ export function getCachedDraftInvoiceItems(): DraftInvoiceCache | null {
 export function forgetOriginalDraftInvoice(): void {
   const cache = readCacheIgnoringAge();
   if (!cache) return;
-  localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cache, originalDraftInvoiceId: '' }));
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cache, originalDraftInvoiceId: '' }));
+  } catch {
+    // Storage refused (quota, private mode): the link stays and the refusal repeats, which
+    // is annoying but safe.
+  }
 }
 
 export function clearDraftInvoiceCache(): void {

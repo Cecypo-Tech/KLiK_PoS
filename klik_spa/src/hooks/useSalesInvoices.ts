@@ -8,8 +8,9 @@ export function useSalesInvoices(
   cashierName?: string,
   submittedOnly: boolean = false,
   /** Which screen is asking. The backend scopes differently per surface — see
-   *  get_sales_invoices. Omit it for Closing Shift and customer invoice lists. */
-  surface: "" | "history" | "dashboard" = ""
+   *  get_sales_invoices. Omit it for Closing Shift; the customer list (useCustomerInvoices)
+   *  sends "customer". */
+  surface: "" | "history" | "customer" | "dashboard" = ""
 ) {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);

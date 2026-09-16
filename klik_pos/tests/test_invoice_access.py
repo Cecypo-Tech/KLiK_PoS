@@ -12,21 +12,52 @@ given a till that allows it. The customer invoice list follows the same rule, so
 lists an invoice that will not open.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import sales_invoice
-from klik_pos.api.sales_invoice import get_invoice_details, get_sales_invoices
+from klik_pos.api.sales_invoice import _may_read_invoice, get_invoice_details, get_sales_invoices
 
 
-def _till(allow):
+def _till(allow, name="Test Till"):
 	return patch.object(
 		sales_invoice,
 		"get_current_pos_profile",
-		return_value=frappe._dict({"name": "Test Till", "custom_allow_viewing_other_cashiers": allow}),
+		return_value=frappe._dict({"name": name, "custom_allow_viewing_other_cashiers": allow}),
 	)
+
+
+def _inv(owner, till="Test Till"):
+	return frappe._dict({"owner": owner, "pos_profile": till})
+
+
+class TestTheRule(FrappeTestCase):
+	"""_may_read_invoice on its own, so the rule is covered on any site."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+
+	def test_my_own_invoice_opens_on_any_till(self):
+		with _till(0, name="Elsewhere"):
+			self.assertTrue(_may_read_invoice(_inv("Administrator")))
+
+	def test_another_cashier_s_invoice_needs_the_flag(self):
+		with _till(0):
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com")))
+		with _till(1):
+			self.assertTrue(_may_read_invoice(_inv("someone@example.com")))
+
+	def test_another_cashier_s_invoice_from_another_till_never_opens(self):
+		"""The list only ever shows the current till's invoices; opening follows it."""
+		with _till(1):
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
+
+	def test_with_no_till_only_my_own(self):
+		with patch.object(sales_invoice, "get_current_pos_profile", side_effect=Exception("no till")):
+			self.assertTrue(_may_read_invoice(_inv("Administrator")))
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com")))
 
 
 def _invoice_owned(by_me):
@@ -37,8 +68,9 @@ def _invoice_owned(by_me):
 
 
 class TestNotOpenToGuests(FrappeTestCase):
-	def test_invoice_endpoints_are_not_guest_methods(self):
+	def test_invoice_endpoints_are_whitelisted_but_not_for_guests(self):
 		for method in (get_invoice_details, get_sales_invoices):
+			self.assertIn(method, frappe.whitelisted, method.__name__)
 			self.assertNotIn(method, frappe.guest_methods, method.__name__)
 
 	def test_a_user_without_read_permission_is_refused(self):
@@ -57,7 +89,21 @@ class TestNotOpenToGuests(FrappeTestCase):
 		finally:
 			frappe.set_user("Administrator")
 		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "forbidden")
 		self.assertNotIn("data", result)
+
+
+class TestARefusalIsNotAnError(FrappeTestCase):
+	def test_refused_invoice_says_why_and_logs_nothing(self):
+		fake = MagicMock(owner="someone@example.com", pos_profile="Test Till")
+		frappe.set_user("Administrator")
+		before = frappe.db.count("Error Log")
+		with _till(0), patch.object(sales_invoice.frappe, "get_doc", return_value=fake):
+			result = get_invoice_details("SINV-FAKE")
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "forbidden")
+		self.assertIn("another cashier", result["error"])
+		self.assertEqual(frappe.db.count("Error Log"), before)
 
 
 class TestTheTillDecides(FrappeTestCase):
@@ -77,7 +123,8 @@ class TestTheTillDecides(FrappeTestCase):
 		self.assertNotIn("data", result)
 
 	def test_another_cashier_s_invoice_opens_where_the_till_allows_it(self):
-		with _till(1):
+		till = frappe.db.get_value("Sales Invoice", self.theirs, "pos_profile")
+		with _till(1, name=till):
 			self.assertTrue(get_invoice_details(self.theirs)["success"])
 
 	def test_my_own_invoice_always_opens(self):

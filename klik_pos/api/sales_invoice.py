@@ -1172,14 +1172,17 @@ def _profile_allows_other_cashiers(pos_doc):
 
 
 def _may_read_invoice(invoice):
-	"""Whether the caller may open this invoice in the POS: their own, or any where their
-	till lets its users read each other's. The till decides for managers too, exactly as
-	it does for the Invoice History list; with no till resolvable, only their own."""
+	"""Whether the caller may open this invoice in the POS: their own, or another cashier's
+	rung on the till they are standing at when that till lets its users read each other's -
+	what the Invoice History list and held orders allow. The till decides for managers
+	too; with no till resolvable, only their own."""
 	if invoice.owner == frappe.session.user:
 		return True
 	try:
 		pos_doc = get_current_pos_profile()
 	except Exception:
+		return False
+	if not pos_doc or invoice.pos_profile != getattr(pos_doc, "name", None):
 		return False
 	return _profile_allows_other_cashiers(pos_doc)
 
@@ -1595,6 +1598,15 @@ def get_invoice_details(invoice_id):
 			},
 		}
 
+	except frappe.PermissionError as e:
+		# A refusal is an answer, not a fault: no Error Log, and no leftover message from
+		# the lookups on the way here.
+		frappe.local.message_log = []
+		return {
+			"success": False,
+			"code": "forbidden",
+			"error": str(e) or _("You are not permitted to open invoice {0}.").format(invoice_id),
+		}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), f"Error fetching invoice {invoice_id}")
 		return {"success": False, "error": str(e)}

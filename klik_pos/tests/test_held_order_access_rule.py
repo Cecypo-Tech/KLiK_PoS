@@ -109,6 +109,16 @@ class TestOneRuleForListingAndOpening(FrappeTestCase):
 
 		self._assert_both(theirs, _till(1), True, roles=("All", "System Manager"))
 
+	def test_closing_shift_list_gives_a_manager_no_more_than_they_can_open(self):
+		"""With no shift open, the Closing Shift listing widened to everyone's orders for a
+		manager, who was then refused on opening them."""
+		theirs = _order(opening_entry="", owner=SOMEONE_ELSE)
+		with _as_cashier(_till(0), opening_entry=None, roles=("All", "System Manager")):
+			result = get_held_orders(limit=5000)
+			allowed = _allowed(theirs)
+		self.assertFalse(allowed)
+		self.assertNotIn(theirs.name, [row["name"] for row in result["data"]])
+
 	def test_my_own_order_on_another_till_is_neither_listed_nor_opened(self):
 		"""Listed and then refused, before. Another till can be another warehouse or company."""
 		elsewhere = _order(opening_entry="", profile=OTHER_TILL)
