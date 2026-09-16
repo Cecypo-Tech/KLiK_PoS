@@ -83,6 +83,25 @@ class TestJoining(SharedShiftCase):
 
 		self.assertEqual(get_current_pos_opening_entry(), mine)
 
+	def test_a_cashier_with_their_own_open_shift_cannot_join_another(self):
+		other_till = _profile()
+		_assign(other_till, JOINER)
+		mine = _shift(other_till, JOINER)
+		_shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		with self.assertRaises(frappe.ValidationError):
+			shift.join_shift(self.till)
+		self.assertEqual(get_current_pos_opening_entry(), mine)
+
+	def test_joining_a_disabled_till_is_refused(self):
+		_shift(self.till, OPENER)
+		frappe.db.set_value("POS Profile", self.till, "disabled", 1)
+		frappe.set_user(JOINER)
+
+		with self.assertRaises(frappe.ValidationError):
+			shift.join_shift(self.till)
+
 
 class TestOneShiftPerTill(SharedShiftCase):
 	def test_another_cashier_s_shift_today_is_offered_to_join(self):
@@ -241,6 +260,22 @@ class TestClosingTheTill(SharedShiftCase):
 		cash = next(r for r in rows if r["mode_of_payment"] == "Cash")
 
 		self.assertEqual(frappe.utils.flt(cash["expected_amount"]), 150)
+
+	def test_closing_forgets_everyone_who_joined(self):
+		"""Otherwise cancelling the Closing Entry would silently re-join them all."""
+		from klik_pos.api.pos_entry import _forget_joined_users
+
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
+		self.assertEqual(frappe.defaults.get_user_default(shift.JOINED_SHIFT_KEY, JOINER), entry)
+
+		_forget_joined_users(entry)
+
+		self.assertIsNone(frappe.defaults.get_user_default(shift.JOINED_SHIFT_KEY, JOINER))
+		self.assertFalse(
+			frappe.db.exists("DefaultValue", {"defkey": shift.JOINED_SHIFT_KEY, "defvalue": entry})
+		)
 
 
 class TestCurrentShiftState(SharedShiftCase):

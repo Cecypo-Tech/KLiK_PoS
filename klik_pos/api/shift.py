@@ -39,6 +39,16 @@ def join_shift(pos_profile):
 	user = frappe.session.user
 	if not frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": user}):
 		raise frappe.PermissionError(_("You are not assigned to POS Profile {0}.").format(pos_profile))
+
+	own_shift = frappe.db.exists(
+		"POS Opening Entry", {"user": user, "docstatus": 1, "status": "Open"}
+	)
+	if own_shift:
+		frappe.throw(_("Close your own shift {0} before joining another.").format(own_shift))
+
+	if frappe.db.get_value("POS Profile", pos_profile, "disabled"):
+		frappe.throw(_("POS Profile {0} is disabled.").format(pos_profile))
+
 	open_shift = open_shift_on_till(pos_profile)
 	if not open_shift:
 		frappe.throw(_("No shift is open on {0}. Open one instead.").format(pos_profile))

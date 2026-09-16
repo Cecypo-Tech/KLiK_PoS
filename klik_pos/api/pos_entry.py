@@ -489,6 +489,12 @@ def _create_and_submit_closing_doc(opening_entry, data, payment_data, user):
 	doc.submit()
 	frappe.db.set_value("POS Opening Entry", opening_entry.name, "pos_closing_entry", doc.name)
 
+	# Every cashier who joined this shift remembered it as a user default. Left in place,
+	# cancelling this Closing Entry would silently re-join them all to a shift that is
+	# meant to be over. Drop the default (and its cache) for each of them now, while we
+	# still know which entry just closed.
+	_forget_joined_users(opening_entry.name)
+
 	# Clear held Sales Orders and draft SIs for this session on close
 	_clear_draft_invoices_on_close_if_enabled(opening_entry)
 	_clear_held_orders_on_close(opening_entry)
@@ -501,6 +507,20 @@ def _create_and_submit_closing_doc(opening_entry, data, payment_data, user):
 		frappe.logger().warning("Failed to clear POS profile cache after closing entry", exc_info=True)
 
 	return doc
+
+
+def _forget_joined_users(opening_entry_name):
+	"""Release everyone who joined `opening_entry_name`, so a future cancel-and-reopen of
+	its Closing Entry cannot silently re-join them."""
+	from klik_pos.api.shift import JOINED_SHIFT_KEY
+
+	joined_users = frappe.get_all(
+		"DefaultValue",
+		filters={"defkey": JOINED_SHIFT_KEY, "defvalue": opening_entry_name},
+		pluck="parent",
+	)
+	for joined_user in joined_users:
+		frappe.defaults.clear_default(JOINED_SHIFT_KEY, value=opening_entry_name, parent=joined_user)
 
 
 def _clear_draft_invoices_on_close_if_enabled(opening_entry):
