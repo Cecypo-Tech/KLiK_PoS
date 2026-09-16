@@ -396,3 +396,54 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 
 		self.assertFalse(result["success"])
 		self.assertIn("at least", result["message"])
+
+	# ---- 11: the recommended till setup - Sales Order routed, Sales Invoice not ---------
+
+	def test_recommended_setup_sales_order_routed_invoice_not(self):
+		"""SO routing on, SI routing off is the configuration Task 4 recommends for dev:
+		an approved held order still covers its checkout invoice (carry_over_source_approval),
+		while an unapproved one hits cecypo_powerpack's own floor message directly, since with
+		invoice routing off there is no draft-save window for klik's own
+		_refuse_unapproved_price_breach to be the operative gate - see the module docstring."""
+		frappe.set_user("Administrator")
+		self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=0)
+		frappe.set_user(CASHIER)
+		try:
+			# (a) an approved held order still checks out, stamp and all.
+			held = self._hold(rate=90)
+			order_id = held["order_name"]
+			self._approve(order_id)
+			approved_rows = frappe.db.get_value("Sales Order", order_id, "powerpack_price_approved_rows")
+			self.assertTrue(approved_rows)
+
+			result = checkout_held_order(order_id, self._checkout_payload(rate=90))
+			self.assertTrue(result["success"], result.get("message"))
+			invoice = frappe.db.get_value(
+				"Sales Invoice",
+				result["invoice_name"],
+				["powerpack_source_order", "powerpack_price_approved_rows", "docstatus"],
+				as_dict=True,
+			)
+			self.assertEqual(invoice.powerpack_source_order, order_id)
+			self.assertEqual(invoice.powerpack_price_approved_rows, approved_rows)
+			self.assertEqual(invoice.docstatus, 1)
+
+			# (b) a pending held order's checkout is still refused, and creates no invoice.
+			pending = self._hold(rate=90)
+			pending_order_id = pending["order_name"]
+			frappe.db.commit()
+			self.addCleanup(self._delete_committed_order, pending_order_id)
+			before = frappe.db.count("Sales Invoice")
+
+			result = checkout_held_order(pending_order_id, self._checkout_payload(rate=90))
+
+			self.assertFalse(result["success"])
+			self.assertTrue(
+				"at least" in result["message"] or "need approval" in result["message"],
+				result["message"],
+			)
+			self.assertEqual(frappe.db.count("Sales Invoice"), before)
+		finally:
+			frappe.set_user("Administrator")
+			self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=1)
+			frappe.set_user(CASHIER)

@@ -152,16 +152,7 @@ def _apply_held_order_action(so, action):
     transition = next((t for t in _held_order_transitions(so, workflow) if t.action == action), None)
     if not transition:
         frappe.throw(_("{0} is not available for held order {1}.").format(action, so.name))
-    # has_approval_access refuses a transition where the acting user is also the document's
-    # owner, unless the transition is marked allow_self_approval - cecypo_powerpack's workflow
-    # leaves that off on every transition. That is right for the role-gated Approve/Reject
-    # transitions (nobody should approve their own request), but a transition open to "All" is
-    # not an approval at all - Request Price Approval is exactly the cashier acting on the held
-    # order they just created, and Withdraw Approval is the same requester taking their own
-    # order back off approved. Only enforce the guard on a transition actually restricted to a
-    # role; otherwise every auto-request right after holding a breaching cart would refuse
-    # itself with "Self approval is not allowed".
-    if transition.allowed != "All" and not has_approval_access(frappe.session.user, so, transition):
+    if not has_approval_access(frappe.session.user, so, transition):
         frappe.throw(_("Self approval is not allowed"))
     so.set(workflow.workflow_state_field, transition.next_state)
     so.flags.ignore_permissions = True
