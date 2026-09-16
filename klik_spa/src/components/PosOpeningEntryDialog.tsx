@@ -180,12 +180,14 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
 
       const openingBalance = toPayload(paymentMethods);
       
-      const created = await createOpeningEntry(openingBalance, selectedProfile || undefined);
-      if (!created) {
-        // The hook holds the reason; the effect below shows it. Look again for a shift in
-        // the way so the cashier gets a way out, not just a message.
+      const result = await createOpeningEntry(openingBalance, selectedProfile || undefined);
+      if (!result.ok) {
+        // Set here, not left to the createError effect: this update and setStep land in
+        // the same render, so that effect never sees step === 'creating'. Look again for a
+        // shift in the way, so the cashier gets a way out, not just a message.
+        setError(result.error);
         setStep('form');
-        fetchOpeningConflict(selectedProfile).then(setConflict);
+        fetchOpeningConflict(profileForPaymentModes).then(setConflict);
         return;
       }
 

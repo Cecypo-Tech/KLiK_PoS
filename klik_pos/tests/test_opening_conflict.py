@@ -143,7 +143,7 @@ class TestCreateOpeningEntryUsesTheSameRule(OpeningConflictCase):
 
 		self.assertEqual(self._create()["name"], "POS-OPE-FAKE")
 
-	def test_own_open_shift_blocks_opening_with_one_readable_message(self):
+	def test_own_stale_shift_blocks_opening_with_one_readable_message(self):
 		entry = _shift(self.profile, CASHIER, days_ago=1)
 		frappe.clear_messages()
 
@@ -153,3 +153,27 @@ class TestCreateOpeningEntryUsesTheSameRule(OpeningConflictCase):
 		self.assertIn(entry, str(raised.exception))
 		self.assertNotIn("Failed to create", str(raised.exception))
 		self.assertEqual(len(frappe.local.message_log), 1)
+
+	def test_own_shift_open_today_blocks_opening_too(self):
+		entry = _shift(self.profile, CASHIER)
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			self._create()
+
+		self.assertIn(entry, str(raised.exception))
+
+
+class TestOpenPosAgrees(OpeningConflictCase):
+	"""The guard and the opening screen must never disagree about the same shift."""
+
+	def test_open_with_a_closing_entry_linked_still_counts_as_open(self):
+		_shift(self.profile, CASHIER, closing_entry="POS-CLO-FAKE")
+
+		self.assertTrue(pos_entry.open_pos())
+		self.assertIsNotNone(opening_conflict(self.profile))
+
+	def test_closed_without_a_closing_entry_counts_as_closed(self):
+		_shift(self.profile, CASHIER, status="Closed")
+
+		self.assertFalse(pos_entry.open_pos())
+		self.assertIsNone(opening_conflict(self.profile))

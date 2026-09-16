@@ -21,6 +21,17 @@ describe("postOpeningEntry", () => {
     expect(result).toEqual({ ok: false, error: "Your shift POS-OPE-9 on Till is already open." });
   });
 
+  it("reports a proxy error page, which is not JSON, as a failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => { throw new SyntaxError("Unexpected token <"); } }),
+    );
+    expect(await postOpeningEntry({ opening_balance: [] }, "tok")).toEqual({
+      ok: false,
+      error: "Failed to create opening entry",
+    });
+  });
+
   it("reports a network failure as a failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await postOpeningEntry({ opening_balance: [] }, "tok")).toEqual({ ok: false, error: "offline" });

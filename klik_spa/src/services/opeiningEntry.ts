@@ -56,7 +56,8 @@ export async function postOpeningEntry(body: object, csrfToken: string): Promise
       body: JSON.stringify(body),
       credentials: "include",
     });
-    const data = await res.json();
+    // A proxy error page is HTML, not JSON; it still has to read as a failure.
+    const data = await res.json().catch(() => null);
     if (res.ok && data?.message?.name) {
       return { ok: true, name: data.message.name };
     }
@@ -75,8 +76,7 @@ interface OpeningBalance {
 }
 
 interface UseCreateOpeningReturn {
-  /** Resolves true only when the entry was created; the reason for a failure is in `error`. */
-  createOpeningEntry: (openingBalance: OpeningBalance[], posProfile?: string) => Promise<boolean>;
+  createOpeningEntry: (openingBalance: OpeningBalance[], posProfile?: string) => Promise<OpeningResult>;
   isCreating: boolean;
   error: string | null;
   success: boolean;
@@ -107,7 +107,7 @@ export function useCreatePOSOpeningEntry(): UseCreateOpeningReturn {
       setError(result.error);
     }
     setIsCreating(false);
-    return result.ok;
+    return result;
   };
 
   return {

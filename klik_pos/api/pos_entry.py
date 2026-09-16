@@ -17,13 +17,12 @@ def open_pos():
 	"""Check if the current user has an open POS Opening Entry."""
 	user = frappe.session.user
 
-	# Look for any submitted POS Opening Entry with no linked closing entry for this user
+	# Open means status Open - the same rule as opening_conflict and the closing screen.
 	open_entry = frappe.db.exists(
 		"POS Opening Entry",
 		{
 			"user": user,
 			"docstatus": 1,
-			"pos_closing_entry": None,
 			"status": "Open",
 		},
 	)
@@ -121,8 +120,9 @@ def opening_conflict(pos_profile):
 
 	Open means status Open, as everywhere else. A cashier holds one shift at a time; other
 	cashiers' shifts on the same till are no obstacle. `kind` tells the opening screen
-	what to offer: own_open - carry on in it; own_stale (opened before today) and
-	own_other_profile - close it first.
+	what to offer: own_open - carry on in it; own_stale (opened before today, so a shift
+	running past midnight counts, as with ERPNext's daily shifts) and own_other_profile -
+	close it first.
 	"""
 	user = frappe.session.user
 	shifts = frappe.get_all(
