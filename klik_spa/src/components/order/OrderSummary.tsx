@@ -551,7 +551,8 @@ export default function OrderSummary({
   };
 
   // F10 checks out and Shift+F10 holds, exactly as the footer buttons do - and only while
-  // they are there to press. An open payment dialog sits on top of this and takes F10.
+  // they are there to press. Off while this summary's payment dialog is open: the dialog
+  // owns F10 then, and a cart refilled behind it would otherwise push this layer on top.
   usePosShortcutLayer(
     {
       f10: () => {
@@ -563,7 +564,7 @@ export default function OrderSummary({
         holdFromFooter();
       },
     },
-    cartItems.length > 0,
+    cartItems.length > 0 && !showPaymentDialog,
   );
 
   const handleCompletePayment = async (paymentData: any) => {

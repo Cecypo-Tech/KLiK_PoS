@@ -90,10 +90,12 @@ describe("installPosShortcutListener", () => {
     const held = event(true);
     const release = event();
     const other = event(false, "Enter");
-    listeners.keydown(press);
-    listeners.keydown(held);
-    listeners.keyup(release);
-    listeners.keydown(other);
+    const keydown = listeners.keydown!;
+    const keyup = listeners.keyup!;
+    keydown(press);
+    keydown(held);
+    keyup(release);
+    keydown(other);
 
     expect(press.preventDefault).toHaveBeenCalled();
     expect(held.preventDefault).toHaveBeenCalled();

@@ -1662,18 +1662,25 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
 
+  // isProcessingPayment only lands on the next render, so two quick F10 presses would
+  // both see it false. The ref closes that gap for the shortcut.
+  const f10SubmitInFlight = useRef(false);
+
   // While open, the dialog owns F10: the cart's Checkout underneath must not fire too.
   usePosShortcutLayer(
     {
       f10: () => {
         // The completed screen has nothing to submit.
-        if (invoiceSubmitted) return;
+        if (invoiceSubmitted || f10SubmitInFlight.current) return;
         const reason = submitBlockReason();
         if (reason) {
-          toast.info(reason);
+          toast.info(reason, { toastId: "pos-f10-blocked" });
           return;
         }
-        void handleCompletePayment();
+        f10SubmitInFlight.current = true;
+        void handleCompletePayment().finally(() => {
+          f10SubmitInFlight.current = false;
+        });
       },
       // Shift+F10 holds, the keyboard twin of the Hold button.
       shiftF10: () => {

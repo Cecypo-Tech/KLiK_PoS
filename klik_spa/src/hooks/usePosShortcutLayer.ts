@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { installPosShortcutListener, posShortcuts, type ShortcutLayer } from "../utils/posShortcuts";
 
 /**
@@ -7,7 +7,10 @@ import { installPosShortcutListener, posShortcuts, type ShortcutLayer } from "..
  */
 export function usePosShortcutLayer(handlers: ShortcutLayer, active = true): void {
   const latest = useRef(handlers);
-  latest.current = handlers;
+  // After commit, so a render React discards never leaves its handlers behind.
+  useLayoutEffect(() => {
+    latest.current = handlers;
+  });
 
   useEffect(() => {
     installPosShortcutListener();
