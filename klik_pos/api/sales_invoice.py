@@ -2262,14 +2262,18 @@ def retry_failed_sales_invoice(invoice_name):
 		if (getattr(doc, "queue_status", "") or "").lower() not in ("failed", "processing", "queued"):
 			frappe.throw("This invoice is not in a retryable queue state.")
 
+		if _needs_shift_check(doc):
+			# A retry is a new attempt to sell, and a sale can only go through on a till
+			# with a shift open today. Run this before anything below reserves stock or
+			# marks the invoice Queued again, so a refusal leaves it exactly as it was.
+			doc.validate_pos_opening_entry()
+
 		_validate_reserved_stock_for_items(doc, exclude_invoice=doc.name)
 		_reserve_stock_for_queued_invoice(doc)
 
 		_update_queue_fields(doc, QUEUE_STATUSES["queued"], error_message="")
 		doc.save(ignore_permissions=True)
 
-		# No shift check here: this re-queues a sale that was already checked when it
-		# was first queued. Refusing it now, after midnight, would strand it.
 		frappe.enqueue(
 			"klik_pos.api.sales_invoice.process_queued_sales_invoice",
 			queue="long",
@@ -5014,6 +5018,14 @@ def submit_draft_invoice(invoice_id, data=None):
 		validate_required_salesperson(invoice_doc)
 
 		if enable_background_submission:
+			if _needs_shift_check(invoice_doc):
+				# A klik POS sale still needs exactly one Open shift on its till, opened
+				# today, before it is queued - the worker skips this check when it
+				# finishes the sale, so it must run before anything below marks the
+				# invoice Queued or reserves stock for it. Nothing here has written
+				# anything yet, so a refusal leaves the draft exactly as it was.
+				invoice_doc.validate_pos_opening_entry()
+
 			_mark_invoice_queued(invoice_doc, frappe.session.user)
 			_apply_klik_invoice_flags(invoice_doc, is_submitted=False)
 			invoice_doc.save(ignore_permissions=True)
@@ -5024,12 +5036,6 @@ def submit_draft_invoice(invoice_id, data=None):
 				_update_queue_fields(invoice_doc, QUEUE_STATUSES["failed"], error_message=str(reserve_error))
 				invoice_doc.save(ignore_permissions=True)
 				return {"success": False, "error": str(reserve_error)}
-
-			if _needs_shift_check(invoice_doc):
-				# A klik POS sale still needs exactly one Open shift on its till, opened
-				# today, before it is queued - the worker skips this check when it
-				# finishes the sale, so it must be run here or never.
-				invoice_doc.validate_pos_opening_entry()
 
 			frappe.enqueue(
 				"klik_pos.api.sales_invoice.process_queued_sales_invoice",

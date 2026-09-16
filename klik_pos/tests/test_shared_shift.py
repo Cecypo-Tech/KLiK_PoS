@@ -13,8 +13,10 @@ from frappe.tests.utils import FrappeTestCase
 from klik_pos.api import shift
 from klik_pos.api.pos_entry import current_shift_state, open_pos, opening_conflict
 from klik_pos.api.sales_invoice import (
+	QUEUE_STATUSES,
 	_needs_shift_check,
 	get_current_pos_opening_entry,
+	retry_failed_sales_invoice,
 	submit_draft_invoice,
 )
 from klik_pos.tests.test_opening_conflict import COMPANY, _profile, _shift, _user
@@ -402,12 +404,23 @@ class TestQueuePathShiftCheck(SharedShiftCase):
 	def test_queuing_on_a_till_with_no_open_shift_is_refused(self):
 		frappe.set_user(OPENER)
 		invoice_name = self._draft()
+		queue_status_before = frappe.db.get_value("Sales Invoice", invoice_name, "queue_status")
 
 		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
 			result = submit_draft_invoice(invoice_name)
 
 		self.assertFalse(result["success"])
 		mock_enqueue.assert_not_called()
+		# Nothing about queueing this sale was left behind: the queue status is exactly
+		# what the plain insert gave it (a fresh draft defaults to "Queued" whether or not
+		# it is ever actually queued - see the field's default in the custom field
+		# fixture), and no Stock Reservation Entry exists for it.
+		self.assertEqual(
+			frappe.db.get_value("Sales Invoice", invoice_name, "queue_status"), queue_status_before
+		)
+		self.assertFalse(
+			frappe.db.exists("Stock Reservation Entry", {"voucher_no": invoice_name})
+		)
 
 	def test_queuing_with_an_open_shift_opened_today_enqueues(self):
 		_shift(self.till, OPENER)
@@ -416,6 +429,29 @@ class TestQueuePathShiftCheck(SharedShiftCase):
 
 		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
 			result = submit_draft_invoice(invoice_name)
+
+		self.assertTrue(result["success"])
+		mock_enqueue.assert_called_once()
+
+	def test_retrying_a_failed_invoice_on_a_till_with_no_open_shift_is_refused(self):
+		frappe.set_user(OPENER)
+		invoice_name = self._draft()
+		frappe.db.set_value("Sales Invoice", invoice_name, "queue_status", QUEUE_STATUSES["failed"])
+
+		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
+			result = retry_failed_sales_invoice(invoice_name)
+
+		self.assertFalse(result["success"])
+		mock_enqueue.assert_not_called()
+
+	def test_retrying_a_failed_invoice_with_an_open_shift_today_enqueues(self):
+		_shift(self.till, OPENER)
+		frappe.set_user(OPENER)
+		invoice_name = self._draft()
+		frappe.db.set_value("Sales Invoice", invoice_name, "queue_status", QUEUE_STATUSES["failed"])
+
+		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
+			result = retry_failed_sales_invoice(invoice_name)
 
 		self.assertTrue(result["success"])
 		mock_enqueue.assert_called_once()
