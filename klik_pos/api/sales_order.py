@@ -6,9 +6,11 @@ from frappe.utils import cint, flt, nowdate
 
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
+    _apply_pos_tax_treatment,
     _apply_walkin_party_fields,
     _get_active_pos_profile,
     _parse_extra_fields,
+    _resolve_item_tax_details_for_line,
     get_current_pos_opening_entry,
     parse_invoice_data,
 )
@@ -254,6 +256,38 @@ def _apply_order_discount(so, pos_profile, order_discount_amount):
         so.discount_amount = 0
 
 
+def _so_item_row(so, pos_profile, item, warehouse):
+    """A held order's item row, including the per-item tax template/rate the Sales Invoice
+    built from the same cart would resolve.
+
+    Deliberately does NOT pin price_list_rate from the cart the way
+    build_sales_invoice_doc._prepare_item_data does for an invoice - see
+    _reassert_pos_line_prices' restore_price_list_rate for why: klik's own heldOrderToCart
+    round-trips the list price back into the client payload on recall, and pinning it from
+    that let it drift with whatever a Pricing Rule margin had done to it on the previous
+    cycle. A held order lets set_missing_values fetch the Item Price fresh every time
+    instead, which is what test_held_order_pricing_rule.py pins down.
+
+    Without item_tax_template/item_tax_rate, _apply_pos_tax_treatment's _populate_per_item_taxes
+    has nothing to build a tax row from, and the held order would still price VAT-bearing
+    items as though they carried no item tax at all.
+    """
+    row = {
+        "item_code": item["id"],
+        "qty": flt(item.get("quantity") or 1),
+        "rate": flt(item.get("price") or 0),
+        "uom": item.get("uom") or "",
+        "delivery_date": nowdate(),
+        "warehouse": warehouse,
+    }
+    item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(so, item, pos_profile)
+    if item_tax_template:
+        row["item_tax_template"] = item_tax_template
+    if item_tax_rate:
+        row["item_tax_rate"] = frappe.as_json(item_tax_rate)
+    return row
+
+
 def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount=0.0):
     """Create a new draft Sales Order from parsed cart data."""
     pos_profile = _get_active_pos_profile()
@@ -268,7 +302,6 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     so.company = pos_profile.company
     so.currency = pos_profile.currency
     so.selling_price_list = pos_profile.selling_price_list
-    so.taxes_and_charges = sales_and_tax_charges or getattr(pos_profile, "taxes_and_charges", "") or ""
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = opening_entry
     so.custom_is_klik_held = 1
@@ -291,17 +324,17 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
 
     for item in items:
-        so.append("items", {
-            "item_code": item["id"],
-            "qty": flt(item.get("quantity") or 1),
-            "rate": flt(item.get("price") or 0),
-            "uom": item.get("uom") or "",
-            "delivery_date": nowdate(),
-            "warehouse": warehouse,
-        })
+        so.append("items", _so_item_row(so, pos_profile, item, warehouse))
 
-    so.set_missing_values()
-    so.calculate_taxes_and_totals()
+    # Same tax treatment as the invoice checked out from this cart - the till's
+    # taxes-and-charges template, per-item tax rows, and tax-inclusive basic rate if the POS
+    # Profile calls for it - so a held order's totals, and the net rate the minimum-selling-
+    # price floor judges it on, match what checkout will actually produce. A held order used
+    # to only set taxes_and_charges and skip all of this, pricing every rate as tax-exclusive.
+    pos_line_prices = [
+        (row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in so.items
+    ]
+    _apply_pos_tax_treatment(so, pos_profile, sales_and_tax_charges, pos_line_prices, restore_price_list_rate=False)
     return so
 
 
@@ -312,7 +345,6 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
 
     so.customer = customer
     so.delivery_date = nowdate()
-    so.taxes_and_charges = sales_and_tax_charges or getattr(pos_profile, "taxes_and_charges", "") or ""
     # Whoever holds it now owns where it lives. A cashier may take over an order held on
     # another shift; left stamped with that shift, its close would delete the order from
     # under them.
@@ -321,6 +353,9 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     # Orders held before this flag existed carry 0; see _build_sales_order_doc.
     so.ignore_pricing_rule = 1
     so.set("items", [])
+    # _apply_pos_tax_treatment appends to "taxes"; without clearing it here, re-holding an
+    # already-held order would duplicate every tax row instead of replacing them.
+    so.set("taxes", [])
 
     _apply_order_discount(so, pos_profile, order_discount_amount)
 
@@ -334,17 +369,12 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
 
     for item in items:
-        so.append("items", {
-            "item_code": item["id"],
-            "qty": flt(item.get("quantity") or 1),
-            "rate": flt(item.get("price") or 0),
-            "uom": item.get("uom") or "",
-            "delivery_date": nowdate(),
-            "warehouse": warehouse,
-        })
+        so.append("items", _so_item_row(so, pos_profile, item, warehouse))
 
-    so.set_missing_values()
-    so.calculate_taxes_and_totals()
+    pos_line_prices = [
+        (row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in so.items
+    ]
+    _apply_pos_tax_treatment(so, pos_profile, sales_and_tax_charges, pos_line_prices, restore_price_list_rate=False)
 
 
 # ---------------------------------------------------------------------------

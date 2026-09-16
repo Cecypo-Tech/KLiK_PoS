@@ -2762,27 +2762,19 @@ def build_sales_invoice_doc(
 	# Handle round-off
 	_set_roundoff_fields(doc, roundoff_amount)
 
-	# Set taxes and charges
-	_set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile)
-	force_inclusive_tax = _is_pos_profile_tax_included_in_basic_rate(pos_profile)
-
 	# Add items to invoice
 	_populate_invoice_items(doc, items, pos_profile)
 	pos_line_prices = [
 		(row.item_code, flt(row.rate), flt(row.price_list_rate)) for row in doc.items
 	]
-
-	# Populate tax details from template (if any)
-	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
-
-	# Build per-item taxes from item_tax_rate fields
-	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
 	delivery_item_code = _upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge)
 
-	doc.set_taxes()
-	doc.set_missing_values()
-	_reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=delivery_item_code)
-	doc.calculate_taxes_and_totals()
+	# Taxes and charges template, per-item tax rows, the till's tax-inclusive setting, then
+	# set_taxes/set_missing_values/reassert-the-till's-rates/total - shared with the held-order
+	# builders in sales_order.py, so a held order is taxed exactly like its checkout invoice.
+	_apply_pos_tax_treatment(
+		doc, pos_profile, sales_and_tax_charges, pos_line_prices, skip_item_code=delivery_item_code
+	)
 	_set_total_net_weight(doc)
 	_apply_pos_shipping_rule(doc, shipping_rule)
 	apply_loyalty_redemption(doc, loyalty_redemption)
@@ -3383,6 +3375,40 @@ def _set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile):
 		doc.taxes_and_charges = pos_profile.taxes_and_charges
 
 
+def _apply_pos_tax_treatment(
+	doc, pos_profile, sales_and_tax_charges, pos_line_prices, skip_item_code=None, restore_price_list_rate=True
+):
+	"""Give a POS document (Sales Order or Sales Invoice) the same tax treatment: the till's
+	taxes-and-charges template, per-item tax rows, and - when the POS Profile treats entered
+	rates as tax-inclusive - inclusive tax on every row those create; then put the till's own
+	rates back, since set_missing_values can still reach for a Pricing Rule between here and
+	the final total.
+
+	Shared by build_sales_invoice_doc and the held-order builders in klik_pos.api.sales_order
+	(_build_sales_order_doc / _rebuild_sales_order), so a held order and the invoice checked
+	out from it are taxed identically. A held order used to only set taxes_and_charges and
+	never apply the till's tax-inclusive setting or per-item tax rows at all - so it priced
+	its net total as though every rate were tax-exclusive, its own totals were wrong, the
+	minimum-selling-price floor was checked on a different net than the invoice would use,
+	and an approved order's price snapshot could never cover its own checkout invoice.
+
+	Callers must have already appended every item row (and, for an invoice, the delivery
+	charge service item, named in skip_item_code) before calling this - it builds the tax
+	rows and pos_line_prices from what is already on doc.items.
+	"""
+	_set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile)
+	force_inclusive_tax = _is_pos_profile_tax_included_in_basic_rate(pos_profile)
+	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
+	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
+	doc.set_taxes()
+	doc.set_missing_values()
+	_reassert_pos_line_prices(
+		doc, pos_line_prices, skip_item_code=skip_item_code, restore_price_list_rate=restore_price_list_rate
+	)
+	doc.calculate_taxes_and_totals()
+	return force_inclusive_tax
+
+
 def _upsert_delivery_charge_service_item(doc, pos_profile, delivery_charge):
 	"""Create or update a configured delivery service item row using checkout delivery charge."""
 	charge = flt(delivery_charge or 0)
@@ -3558,7 +3584,9 @@ def _resolve_item_tax_details_for_line(doc, item, pos_profile):
 		"is_pos": 1,
 		"doctype": "Sales Invoice",
 		"name": "",
-		"transaction_date": doc.posting_date or nowdate(),
+		# doc.posting_date via attribute access raises on a Sales Order (no such field there -
+		# it has transaction_date instead); .get() is safe on either doctype.
+		"transaction_date": doc.get("posting_date") or doc.get("transaction_date") or nowdate(),
 		"item_tax_template": item_tax_template,
 	}
 
@@ -3662,7 +3690,7 @@ def _apply_pos_shipping_rule(doc, shipping_rule):
 	doc.calculate_taxes_and_totals()
 
 
-def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None):
+def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None, restore_price_list_rate=True):
 	"""Put the till's price back on every line, and stop ERPNext reaching for it again.
 
 	`doc.ignore_pricing_rule` cannot just be set once at the top: SalesInvoice.set_pos_fields
@@ -3675,6 +3703,16 @@ def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None):
 	`skip_item_code` is the delivery charge item. When it is already in the cart,
 	_upsert_delivery_charge_service_item writes the keyed charge onto that same row, so
 	restoring the cart price by index here would silently drop the delivery charge.
+
+	`restore_price_list_rate=False` leaves price_list_rate exactly as set_missing_values
+	computed it (a fresh Item Price lookup), instead of pinning it back to whatever the
+	caller captured beforehand. Held Sales Orders need this: klik's own heldOrderToCart
+	recall round-trips the list price back into the client payload as "original_price",
+	and pinning price_list_rate from that on every re-hold let it drift with whatever a
+	Pricing Rule margin had done to it on the previous cycle (hold, recall, hold again -
+	the discount grew each time). A Sales Invoice pins deliberately - see
+	_prepare_item_data - because letting set_missing_values reach for the Item Price
+	there records a discount the cashier never gave.
 	"""
 	doc.ignore_pricing_rule = 1
 
@@ -3696,7 +3734,8 @@ def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None):
 		# calculate_item_rate recomputes the discount from price_list_rate and rate anyway.
 		row.discount_percentage = 0.0
 		row.discount_amount = 0.0
-		row.price_list_rate = price_list_rate
+		if restore_price_list_rate:
+			row.price_list_rate = price_list_rate
 		row.rate = rate
 
 
