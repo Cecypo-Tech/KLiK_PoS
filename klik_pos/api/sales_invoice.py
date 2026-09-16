@@ -11,6 +11,7 @@ from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
+from .cashier_scope import own_invoice_filter
 from .item.item_price import get_price_list_with_customer_priority
 from .loyalty import (
 	apply_loyalty_redemption,
@@ -4469,6 +4470,7 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 			"status": ["!=", "Cancelled"],
 			"custom_pos_opening_entry": ["!=", ""],
 		}
+		filters.update(own_invoice_filter())
 
 		if start_date:
 			filters["posting_date"] = [">=", start_date]

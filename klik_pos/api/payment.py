@@ -4,6 +4,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, nowdate
 
+from klik_pos.api.cashier_scope import restricted_to_own
 from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.api.sql_builder import apply_sql_permissions
@@ -301,6 +302,10 @@ def get_outstanding_sales_invoices(limit=100, start=0, search=""):
 		if pos_profile:
 			conditions.append("si.company = %s")
 			params.append(pos_profile.company)
+
+		if restricted_to_own():
+			conditions.append("si.owner = %s")
+			params.append(frappe.session.user)
 
 		if search and search.strip():
 			search_term = f"%{search.strip()}%"

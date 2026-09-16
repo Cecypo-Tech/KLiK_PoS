@@ -10,6 +10,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from klik_pos.api.cashier_scope import own_invoice_filter, restricted_to_own
 from klik_pos.api.receivables import get_customer_receivables
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
@@ -68,11 +69,13 @@ def get_customer_account_summary(customer):
 	if not frappe.db.exists("Customer", customer):
 		frappe.throw(_("Customer {0} not found.").format(customer))
 
+	restricted = restricted_to_own()
+
 	# get_all applies read permissions; an exact customer filter, never a LIKE.
 	rows = frappe.get_all(
 		"Sales Invoice",
-		filters={"customer": customer, "docstatus": 1},
-		fields=["base_grand_total", "is_return"],
+		filters={"customer": customer, "docstatus": 1, **own_invoice_filter()},
+		fields=["base_grand_total", "is_return"] + (["outstanding_amount"] if restricted else []),
 	)
 
 	# A return is not an order: it must not inflate the count or drag the average, but its
@@ -84,10 +87,17 @@ def get_customer_account_summary(customer):
 
 	company = _default_company()
 
+	if restricted:
+		# Held to their own invoices: compute outstanding from these same filtered rows
+		# rather than _outstanding_for, which would count the whole customer.
+		outstanding = flt(sum(flt(row.outstanding_amount) for row in rows if not row.is_return), 2)
+	else:
+		outstanding = _outstanding_for(customer)
+
 	return {
 		"invoice_count": invoice_count,
 		"net_revenue": net_revenue,
 		"avg_order_value": avg_order_value,
-		"outstanding": _outstanding_for(customer),
+		"outstanding": outstanding,
 		"currency": frappe.get_cached_value("Company", company, "default_currency") if company else None,
 	}

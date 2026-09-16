@@ -1,6 +1,7 @@
 import frappe
 from frappe.utils import flt, getdate, nowdate, strip_html_tags
 
+from klik_pos.api.cashier_scope import own_invoice_filter
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 
@@ -131,7 +132,7 @@ def _bucket_key(due_date, posting_date, as_of):
 	return "bucket_90_plus"
 
 
-def _degraded_receivables_fallback(company, as_of_date, customer, error):
+def _degraded_receivables_fallback(company, as_of_date, customer, error, owner=None):
 	"""Sales-Invoice-only fallback for when the AR engine's own reads (Journal Entry, GL
 	Entry, Payment Ledger Entry) are denied to the caller.
 
@@ -140,6 +141,9 @@ def _degraded_receivables_fallback(company, as_of_date, customer, error):
 	narrower than the AR path: no unallocated advances (those live on Payment Entry / Journal
 	Entry references the AR engine nets in; a Sales-Invoice-only query cannot see them, and
 	guessing is worse than leaving it at 0.0).
+
+	`owner`, when set, is also a restricted cashier's own scope, not just a degraded read: it
+	narrows the invoices this fallback reports to the ones the caller rang.
 	"""
 	filters = {
 		"company": company,
@@ -148,6 +152,8 @@ def _degraded_receivables_fallback(company, as_of_date, customer, error):
 	}
 	if customer:
 		filters["customer"] = customer
+	if owner:
+		filters["owner"] = owner
 
 	invoices = frappe.get_all(
 		"Sales Invoice",
@@ -224,7 +230,7 @@ def _degraded_receivables_fallback(company, as_of_date, customer, error):
 		entry["invoices"].sort(key=lambda i: getdate(i["due_date"] or i["posting_date"]))
 	result.sort(key=lambda e: e["outstanding"], reverse=True)
 
-	reason_detail = strip_html_tags(str(error)) if str(error) else "a restricted doctype"
+	reason_detail = strip_html_tags(str(error)) if error else "a restricted doctype"
 	return {
 		"success": True,
 		"as_of_date": str(as_of_date),
@@ -255,6 +261,16 @@ def get_customer_receivables(as_of_date=None, customer=None):
 
 		pos_profile = get_current_pos_profile()
 		as_of_date = getdate(as_of_date or nowdate())
+
+		scope = own_invoice_filter()
+		if scope:
+			# Held to their own invoices: the AR engine cannot filter by owner, and unallocated
+			# advances are a manager's business, so read their own open invoices only.
+			result = _degraded_receivables_fallback(
+				pos_profile.company, as_of_date, customer, None, owner=scope["owner"]
+			)
+			result.update({"degraded": False, "degraded_reason": None})
+			return result
 
 		filters = {
 			"company": pos_profile.company,
