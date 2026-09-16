@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { staleDraftNotice } from "./staleDraft";
+import { heldOrderGoneMessage, staleDraftNotice } from "./staleDraft";
 
 describe("staleDraftNotice", () => {
   it("lets a cancelled draft be rung up again as a new sale", () => {
@@ -24,5 +24,17 @@ describe("staleDraftNotice", () => {
 
   it("treats an unknown state as submitted, the safe side", () => {
     expect(staleDraftNotice("POS-01190", Number.NaN).blockSubmit).toBe(true);
+  });
+});
+
+describe("heldOrderGoneMessage", () => {
+  it("asks for Invoice History to be checked before a gone order is rung up as a new sale", () => {
+    const msg = heldOrderGoneMessage("SAL-ORD-1 no longer exists.", "checkout");
+    expect(msg).toContain("SAL-ORD-1 no longer exists.");
+    expect(msg).toMatch(/Invoice History/);
+  });
+
+  it("says holding again saves the cart as a new held order", () => {
+    expect(heldOrderGoneMessage("gone.", "hold")).toMatch(/new held order/);
   });
 });

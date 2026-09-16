@@ -1,5 +1,13 @@
 const csrf = () => (window as { csrf_token?: string }).csrf_token as string;
 
+/** The held order being finished was checked out, cleared or completed elsewhere. */
+export class HeldOrderGoneError extends Error {
+  constructor(message: string, public readonly orderId: string) {
+    super(message);
+    this.name = 'HeldOrderGoneError';
+  }
+}
+
 async function apiPost(endpoint: string, body: object) {
   const response = await fetch(`/api/method/${endpoint}`, {
     method: 'POST',
@@ -11,6 +19,9 @@ async function apiPost(endpoint: string, body: object) {
     credentials: 'include',
   });
   const result = await response.json();
+  if (result.message?.code === 'held_order_gone') {
+    throw new HeldOrderGoneError(result.message.message, result.message.order_id);
+  }
   if (!response.ok || result.message?.success === false) {
     const msg = result.message?.message || result.message?.error || result._server_messages || 'Request failed';
     throw new Error(msg);

@@ -64,6 +64,26 @@ def _may_act_on_held_order(so):
     return mine or _profile_allows_other_cashiers(till)
 
 
+def _held_order_gone(order_id):
+    """Why a held order this POS is finishing can no longer be used, or None when it can.
+
+    Checked out by another cashier, cleared by a shift close, or submitted from the desk.
+    """
+    state = frappe.db.get_value(
+        "Sales Order", order_id, ["docstatus", "custom_is_klik_held"], as_dict=True
+    )
+    if not state:
+        return _("Held order {0} no longer exists - it was checked out or cleared elsewhere.").format(order_id)
+    if state.docstatus != 0:
+        return _("Held order {0} is no longer a draft - it was completed or cancelled elsewhere.").format(order_id)
+    return None
+
+
+def _gone_response(order_id, message):
+    # The code lets the POS drop its link to the order instead of retrying it forever.
+    return {"success": False, "code": "held_order_gone", "order_id": order_id, "message": message}
+
+
 def _lock_held_order(order_id):
     """Hold the order's row until this request ends, so only one checkout can invoice it.
 
@@ -286,6 +306,9 @@ def create_held_order(data):
         order_discount_amount = flt(data.get("orderDiscountAmount") or 0) if isinstance(data, dict) else 0
 
         if target_order_id:
+            gone = _held_order_gone(target_order_id)
+            if gone:
+                return _gone_response(target_order_id, gone)
             so = frappe.get_doc("Sales Order", target_order_id)
             # The id comes from the client and the save below ignores permissions, so without
             # this any Sales Order - held or not, any till - could be rewritten by id.
@@ -575,7 +598,16 @@ def checkout_held_order(order_id, data=None):
         if existing_checkout:
             return _checkout_request_response(existing_checkout)
 
-        _lock_held_order(order_id)
+        # Only now, with a replay of this checkout ruled out, is a missing order news.
+        gone = _held_order_gone(order_id)
+        if gone:
+            return _gone_response(order_id, gone)
+
+        try:
+            _lock_held_order(order_id)
+        except frappe.DoesNotExistError as e:
+            # Another cashier's checkout deleted it while this one waited for the lock.
+            return _gone_response(order_id, str(e))
         so = frappe.get_doc("Sales Order", order_id)
         _assert_held_order_access(so)
         if so.docstatus != 0:

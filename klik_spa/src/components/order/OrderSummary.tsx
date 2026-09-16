@@ -20,8 +20,9 @@ import {
   getCheckoutAttemptForCart,
   getCheckoutCartFingerprint,
 } from "../../utils/checkoutAttempt";
-import { createHeldOrder } from "../../services/salesOrder";
-import { getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
+import { forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { heldOrderGoneMessage } from "../../utils/staleDraft";
 import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
 import { CartItemRow } from "./CartItemRow";
@@ -495,6 +496,11 @@ export default function OrderSummary({
         toast.success(originalHeldOrderId ? "Order updated and held successfully!" : "Order held successfully!");
       }
     } catch (error) {
+      if (error instanceof HeldOrderGoneError) {
+        forgetOriginalHeldOrder();
+        toast.warning(heldOrderGoneMessage(error.message, "hold"), { toastId: `held-gone-${error.orderId}` });
+        return;
+      }
       toast.error(extractErrorFromException(error, "Failed to hold order"));
     } finally {
       setIsHoldingOrder(false);

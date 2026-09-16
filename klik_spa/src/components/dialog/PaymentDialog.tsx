@@ -21,9 +21,9 @@ import {
   submitDraftInvoice,
   validateCheckoutInvoice,
 } from "../../services/salesInvoice";
-import { checkoutHeldOrder, createHeldOrder } from "../../services/salesOrder";
-import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
-import { staleDraftNotice } from "../../utils/staleDraft";
+import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
+import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
 import { extractErrorFromException } from "../../utils/errorExtraction";
@@ -1481,6 +1481,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         toast[notice.level](notice.message, { autoClose: 10000, toastId: `stale-draft-${err.invoiceId}` });
         return;
       }
+      if (err instanceof HeldOrderGoneError) {
+        // The server ruled out a replay of this checkout first, so nothing was created
+        // under this attempt; start the next Submit on a fresh one.
+        if (activeCheckoutRequestId) clearCheckoutAttempt(activeCheckoutRequestId);
+        forgetOriginalHeldOrder();
+        toast.warning(heldOrderGoneMessage(err.message, "checkout"), {
+          autoClose: 10000,
+          toastId: `held-gone-${err.orderId}`,
+        });
+        return;
+      }
       if (activeCheckoutRequestId) {
         // The checkout failed, but an invoice may still exist on the server. Keep the key
         // when it does, so a retry replays instead of ringing the sale up twice; drop it
@@ -1621,6 +1632,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.success(orderData.held_order_id ? "Order updated and held successfully!" : "Order held successfully!");
       await Promise.resolve(onHoldOrder(orderData));
     } catch (err: any) {
+      if (err instanceof HeldOrderGoneError) {
+        forgetOriginalHeldOrder();
+        toast.warning(heldOrderGoneMessage(err.message, "hold"), { toastId: `held-gone-${err.orderId}` });
+        return;
+      }
       const errorMessage = extractErrorFromException(err, "Failed to hold order");
       toast.error(errorMessage);
     } finally {

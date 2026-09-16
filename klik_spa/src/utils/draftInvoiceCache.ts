@@ -118,6 +118,17 @@ export function forgetOriginalDraftInvoice(): void {
   }
 }
 
+/** The same for a held order that is gone: drop the link, keep the cart. */
+export function forgetOriginalHeldOrder(): void {
+  const cache = readCacheIgnoringAge();
+  if (!cache) return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...cache, originalHeldOrderId: '' }));
+  } catch {
+    // As above: the refusal repeats, which is safe.
+  }
+}
+
 export function clearDraftInvoiceCache(): void {
   localStorage.removeItem(CACHE_KEY);
 }

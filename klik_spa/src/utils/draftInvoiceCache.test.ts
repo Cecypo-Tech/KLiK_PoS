@@ -7,6 +7,7 @@ import {
   cacheHeldOrder,
   clearDraftInvoiceCache,
   forgetOriginalDraftInvoice,
+  forgetOriginalHeldOrder,
   getOriginalDraftInvoiceId,
   getCachedDraftInvoiceItems,
   getOriginalHeldOrderId,
@@ -88,5 +89,16 @@ describe("forgetOriginalDraftInvoice", () => {
   it("does nothing when there is no cache", () => {
     expect(() => forgetOriginalDraftInvoice()).not.toThrow();
     expect(getOriginalDraftInvoiceId()).toBeNull();
+  });
+});
+
+describe("forgetOriginalHeldOrder", () => {
+  it("drops the link to a held order that is gone, and keeps the cart", () => {
+    cacheHeldOrder("SAL-ORD-0033", [{ id: "A" } as never], null, 0);
+
+    forgetOriginalHeldOrder();
+
+    expect(getOriginalHeldOrderId()).toBeNull();
+    expect(getCachedDraftInvoiceItems()?.items).toHaveLength(1);
   });
 });
