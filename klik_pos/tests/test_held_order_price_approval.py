@@ -115,11 +115,26 @@ class SettingsSnapshot:
 
 
 class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
+	"""Everything this class or a test commits to the real database is cleaned up again:
+	the POS Profile and its shift (created once for the whole class, not per test — see
+	setUpClass) in tearDownClass, and a per-test committed record (a held order that must
+	survive _abort_checkout's full rollback — see tests 8 and 11) via addCleanup. tearDownClass
+	ends with a guard that fails loudly if a POS Profile or an open shift for the cashier
+	outlived the class, so a future leak here breaks the build instead of piling up on dev.
+	"""
+
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
 		if not frappe.get_meta("Sales Order").has_field("powerpack_price_breach"):
 			raise __import__("unittest").SkipTest("cecypo_powerpack price-approval fields are not installed")
+
+		# Baseline for the leak guard in tearDownClass, taken before this class creates
+		# anything of its own.
+		cls._profiles_before = frappe.db.count("POS Profile", {"name": ["like", "_Test Opening Conflict %"]})
+		cls._open_entries_before = frappe.db.count(
+			"POS Opening Entry", {"user": CASHIER, "docstatus": 1, "status": "Open"}
+		)
 
 		from cecypo_powerpack import price_approval as pa
 		from cecypo_powerpack.tests.test_price_approval import ensure_workflow_state_columns
@@ -131,7 +146,56 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 			frappe.get_doc({"doctype": "Role", "role_name": ROLE}).insert()
 
 		_ensure_item()
+
+		# The cashier user is a persistent, reused fixture (like cecypo_powerpack's own
+		# _MSP Item / _MSP Parent) and is deliberately never deleted. The POS Profile and its
+		# shift are NOT: they are created once here, for the whole class, rather than once per
+		# test (a run used to leave one committed profile and one open shift behind for every
+		# single test method — see tearDownClass for the cleanup and the guard).
+		_user(CASHIER)
+		user_doc = frappe.get_doc("User", CASHIER)
+		if not any(row.role == "Sales User" for row in user_doc.roles):
+			user_doc.append("roles", {"role": "Sales User"})
+			user_doc.flags.ignore_permissions = True
+			user_doc.save()
+
+		cls.till = _profile()
+		frappe.db.set_value("POS Profile", cls.till, "allow_partial_payment", 1)
+		cls.shift = _shift(cls.till, CASHIER)
 		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user("Administrator")
+
+		shift = getattr(cls, "shift", None)
+		if shift and frappe.db.exists("POS Opening Entry", shift):
+			doc = frappe.get_doc("POS Opening Entry", shift)
+			if doc.docstatus == 1:
+				doc.flags.ignore_permissions = True
+				doc.cancel()
+			frappe.delete_doc("POS Opening Entry", shift, force=True, ignore_permissions=True)
+
+		till = getattr(cls, "till", None)
+		if till and frappe.db.exists("POS Profile", till):
+			frappe.delete_doc("POS Profile", till, force=True, ignore_permissions=True)
+
+		frappe.db.commit()
+
+		# The leak guard: nothing this class committed may still be here.
+		profiles_after = frappe.db.count("POS Profile", {"name": ["like", "_Test Opening Conflict %"]})
+		open_entries_after = frappe.db.count(
+			"POS Opening Entry", {"user": CASHIER, "docstatus": 1, "status": "Open"}
+		)
+		if profiles_after != cls._profiles_before or open_entries_after != cls._open_entries_before:
+			raise AssertionError(
+				"TestHeldOrderPriceApproval leaked committed data: "
+				f"POS Profile count {cls._profiles_before} -> {profiles_after}, "
+				f"open POS Opening Entry count for {CASHIER} "
+				f"{cls._open_entries_before} -> {open_entries_after}"
+			)
+
+		super().tearDownClass()
 
 	def setUp(self):
 		frappe.set_user("Administrator")
@@ -150,18 +214,6 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 
 		self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=1)
 
-		_user(CASHIER)
-		user_doc = frappe.get_doc("User", CASHIER)
-		if not any(row.role == "Sales User" for row in user_doc.roles):
-			user_doc.append("roles", {"role": "Sales User"})
-			user_doc.flags.ignore_permissions = True
-			user_doc.save()
-
-		self.till = _profile()
-		frappe.db.set_value("POS Profile", self.till, "allow_partial_payment", 1)
-		self.shift = _shift(self.till, CASHIER)
-		frappe.db.commit()
-
 		frappe.set_user(CASHIER)
 
 	def tearDown(self):
@@ -170,6 +222,8 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 		# Submitting a Sales Order creates a Bin for our item, whose valuation_rate would
 		# otherwise silently take the floor out of play for every test after the first
 		# submit — see the identical comment in cecypo_powerpack's TestRoutedBreach.tearDown.
+		# The POS Profile and shift created once in setUpClass are untouched by this: they
+		# were committed there, not in this test, so this rollback cannot reach them.
 		frappe.db.rollback()
 		from cecypo_powerpack import price_approval as pa
 
@@ -399,17 +453,22 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 
 	# ---- 11: the recommended till setup - Sales Order routed, Sales Invoice not ---------
 
-	def test_recommended_setup_sales_order_routed_invoice_not(self):
-		"""SO routing on, SI routing off is the configuration Task 4 recommends for dev:
-		an approved held order still covers its checkout invoice (carry_over_source_approval),
-		while an unapproved one hits cecypo_powerpack's own floor message directly, since with
-		invoice routing off there is no draft-save window for klik's own
-		_refuse_unapproved_price_breach to be the operative gate - see the module docstring."""
+	# Split into two independent test methods on purpose, not one with two parts: part (b)
+	# needs an explicit frappe.db.commit() to survive _abort_checkout's full rollback (see
+	# test 8), and frappe.db.commit() finalises the WHOLE current transaction, not just the
+	# row it is meant for. In one shared test method, part (a)'s still-uncommitted invoice
+	# would be permanently committed by part (b)'s commit too — which is exactly what
+	# happened during Part B of the leak fix (see task-2-report.md's fix-round-2 section).
+	# Two test methods means each gets its own setUp/tearDown, so tearDown's rollback clears
+	# part (a) before part (b)'s test ever runs.
+
+	def test_recommended_setup_approved_checkout_still_works(self):
+		"""SO routing on, SI routing off is the configuration Task 4 recommends for dev: an
+		approved held order still covers its checkout invoice (carry_over_source_approval)."""
 		frappe.set_user("Administrator")
 		self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=0)
 		frappe.set_user(CASHIER)
 		try:
-			# (a) an approved held order still checks out, stamp and all.
 			held = self._hold(rate=90)
 			order_id = held["order_name"]
 			self._approve(order_id)
@@ -427,10 +486,24 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 			self.assertEqual(invoice.powerpack_source_order, order_id)
 			self.assertEqual(invoice.powerpack_price_approved_rows, approved_rows)
 			self.assertEqual(invoice.docstatus, 1)
+		finally:
+			frappe.set_user("Administrator")
+			self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=1)
+			frappe.set_user(CASHIER)
 
-			# (b) a pending held order's checkout is still refused, and creates no invoice.
+	def test_recommended_setup_pending_checkout_still_refused(self):
+		"""Same setup as above: an unapproved held order still hits cecypo_powerpack's own
+		floor message directly, since with invoice routing off there is no draft-save window
+		for klik's own _refuse_unapproved_price_breach to be the operative gate - see the
+		module docstring."""
+		frappe.set_user("Administrator")
+		self._configure(msp_approval_sales_order=1, msp_approval_sales_invoice=0)
+		frappe.set_user(CASHIER)
+		try:
 			pending = self._hold(rate=90)
 			pending_order_id = pending["order_name"]
+			# _abort_checkout's rollback undoes the whole transaction (see test 8) - commit
+			# the hold first, as a real request boundary would, and clean it up explicitly.
 			frappe.db.commit()
 			self.addCleanup(self._delete_committed_order, pending_order_id)
 			before = frappe.db.count("Sales Invoice")
