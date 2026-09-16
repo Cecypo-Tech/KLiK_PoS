@@ -98,3 +98,34 @@ class TestReadSideFollowsTheRule(FrappeTestCase):
 			patch.object(si_api.frappe, "get_all", side_effect=spy):
 			si_api.get_customer_invoices_for_return("Walk In")
 		self.assertEqual(captured.get("owner"), frappe.session.user)
+
+
+class TestCollectingFollowsTheRule(FrappeTestCase):
+	def test_money_on_account_is_refused_when_restricted(self):
+		with _till(0):
+			result = payment.create_customer_payment_entry(customer="Walk In", amount=10, mode_of_payment="Cash")
+		self.assertFalse(result["success"])
+		self.assertIn("manager", result["error"])
+
+	def test_an_allocation_that_leaves_money_on_account_is_refused_when_restricted(self):
+		mine = frappe.db.get_value(
+			"Sales Invoice",
+			{"owner": frappe.session.user, "docstatus": 1, "outstanding_amount": [">", 20]},
+			["name", "customer"],
+			as_dict=True,
+		)
+		if not mine:
+			self.skipTest("no own invoice with 20+ outstanding")
+		with _till(0):
+			result = payment.create_customer_payment_entry(
+				customer=mine.customer, amount=20, mode_of_payment="Cash",
+				allocations=[{"sales_invoice": mine.name, "allocated_amount": 10}],
+			)
+		self.assertFalse(result["success"])
+		self.assertIn("manager", result["error"])
+
+	def test_unallocated_list_shows_only_my_receipts_when_restricted(self):
+		sql = TestReadSideFollowsTheRule()._sql_for
+		with _till(0), patch.object(payment, "get_current_pos_profile", return_value=frappe._dict(company="Dev Co")):
+			text = sql(lambda: payment.get_unallocated_customer_payment_entries(limit=1))
+		self.assertIn("pe.owner = ", text)

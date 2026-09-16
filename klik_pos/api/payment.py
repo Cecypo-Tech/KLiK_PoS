@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, nowdate
 
-from klik_pos.api.cashier_scope import restricted_to_own
+from klik_pos.api.cashier_scope import assert_may_collect, restricted_to_own
 from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.api.sql_builder import apply_sql_permissions
@@ -173,6 +173,18 @@ def create_customer_payment_entry(
 				if frappe.db.exists("Sales Invoice", name)
 			}
 			allocation_rows = _build_allocation_rows(allocations, customer, amount, allocation_invoices)
+
+		if restricted_to_own():
+			allocated_total = flt(allocated_amount or amount) if invoice_doc else sum(
+				flt(row["allocated_amount"]) for row in allocation_rows
+			)
+			if not (invoice_doc or allocation_rows) or allocated_total + 0.00001 < amount:
+				frappe.throw(
+					_("Only a manager can receive money on account. Allocate the full amount to your own invoices.")
+				)
+			assert_may_collect(
+				[invoice_doc.name] if invoice_doc else [row["reference_name"] for row in allocation_rows]
+			)
 
 		opening_entry = get_current_pos_opening_entry()
 		if not opening_entry:
@@ -379,6 +391,10 @@ def get_unallocated_customer_payment_entries(limit=100, start=0, search=""):
 			conditions.append("pe.company = %s")
 			params.append(pos_profile.company)
 
+		if restricted_to_own():
+			conditions.append("pe.owner = %s")
+			params.append(frappe.session.user)
+
 		if search and search.strip():
 			search_term = f"%{search.strip()}%"
 			conditions.append("(pe.name LIKE %s OR pe.party LIKE %s OR c.customer_name LIKE %s)")
@@ -440,6 +456,8 @@ def reconcile_payment_entry_with_invoice(payment_entry, sales_invoice, allocated
 
 		pe = frappe.get_doc("Payment Entry", payment_entry)
 		si = frappe.get_doc("Sales Invoice", sales_invoice)
+
+		assert_may_collect([sales_invoice])
 
 		if pe.docstatus != 1:
 			frappe.throw(_("Payment Entry {0} must be submitted.").format(payment_entry))
