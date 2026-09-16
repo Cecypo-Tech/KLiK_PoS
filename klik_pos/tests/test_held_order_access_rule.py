@@ -235,7 +235,7 @@ class TestCheckoutLocksTheOrder(FrappeTestCase):
 
 		with patch.object(sales_order, "_lock_held_order", side_effect=lambda name: calls.append("lock")), \
 			patch.object(sales_order, "_assert_held_order_access", side_effect=lambda doc: calls.append("access")), \
-			patch("klik_pos.api.sales_invoice.queue_sales_invoice", side_effect=lambda data: calls.append("queue") or {"success": False}):
+			patch("klik_pos.api.sales_invoice._queue_sales_invoice", side_effect=lambda data, **kwargs: calls.append("queue") or {"success": False}):
 			checkout_held_order(so.name, {})
 
 		self.assertEqual(calls, ["lock", "access", "queue"])

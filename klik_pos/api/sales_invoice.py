@@ -396,6 +396,20 @@ def _apply_klik_invoice_flags(doc, is_held=None, is_submitted=None):
 		_set_checkbox_field_value(doc, "custom_is_submitted", is_submitted)
 
 
+def _refuse_unapproved_price_breach(doc):
+	"""Stop a checkout the minimum-selling-price rule would only fail later.
+
+	PowerPack lets a breaching draft save so it can be routed for approval. A POS sale is
+	never meant to wait as a draft, and in background mode the submit would fail after the
+	cashier was told the sale went through. Called before the invoice counts as persisted,
+	so _abort_checkout rolls the whole checkout back.
+	"""
+	if not doc.meta.has_field("powerpack_price_breach"):
+		return
+	if cint(doc.get("powerpack_price_breach")) and not doc.get("powerpack_price_approved_rows"):
+		frappe.throw(_("Prices below the minimum need approval. Hold the order to request it."))
+
+
 def _apply_walkin_party_fields(doc, walkin_name=None, walkin_phone=None):
 	"""Set walk-in buyer name/phone on a selling doc when the optional custom
 	fields exist. tax_id is handled separately by the standard field path."""
@@ -1889,6 +1903,12 @@ def create_and_submit_invoice(data):
 
 @frappe.whitelist()
 def queue_sales_invoice(data):
+	return _queue_sales_invoice(data)
+
+
+def _queue_sales_invoice(data, source_order=None):
+	"""queue_sales_invoice's body. source_order is set only by checkout_held_order: a
+	client must not be able to name another order whose price approval it wants."""
 	checkout_request_id = None
 	state = _CheckoutState()
 	try:
@@ -1961,6 +1981,9 @@ def queue_sales_invoice(data):
 			shipping_rule=data.get("shipping_rule") or None,
 		)
 
+		if source_order and doc.meta.has_field("powerpack_source_order"):
+			doc.powerpack_source_order = source_order
+
 		validate_required_salesperson(doc)
 
 		paid_credit = flt(amount_paid) + flt(getattr(doc, "loyalty_amount", 0))
@@ -1979,6 +2002,7 @@ def queue_sales_invoice(data):
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
 			doc.save(ignore_permissions=True)
+			_refuse_unapproved_price_breach(doc)
 			# The document exists from here on, so the ledger must name it before anything
 			# else can fail — otherwise a retry would not find it. This also arms the
 			# savepoint that stops _abort_checkout from rolling the saved invoice away.
@@ -2037,6 +2061,7 @@ def queue_sales_invoice(data):
 			}
 		else:
 			doc.insert(ignore_permissions=True)
+			_refuse_unapproved_price_breach(doc)
 			state.mark_invoice_persisted(doc.name)
 
 			if tax_id:

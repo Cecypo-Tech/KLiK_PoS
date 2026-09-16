@@ -217,11 +217,14 @@ class TestAbortCheckoutContract(FrappeTestCase):
 	"""
 
 	def test_abort_checkout_is_the_only_exit_from_a_failed_checkout(self):
-		source = textwrap.dedent(inspect.getsource(checkout_module.queue_sales_invoice))
+		# The try/except lives in _queue_sales_invoice: queue_sales_invoice is now a thin
+		# wrapper (so checkout_held_order can name a source order through a private path
+		# a client cannot reach), but the checkout body and its failure handling are unchanged.
+		source = textwrap.dedent(inspect.getsource(checkout_module._queue_sales_invoice))
 		function = ast.parse(source).body[0]
 
 		top_level_try = [node for node in function.body if isinstance(node, ast.Try)]
-		self.assertEqual(len(top_level_try), 1, "queue_sales_invoice should have one top-level try")
+		self.assertEqual(len(top_level_try), 1, "_queue_sales_invoice should have one top-level try")
 
 		handlers = top_level_try[0].handlers
 		self.assertEqual(len(handlers), 1, "one handler, one failure path")

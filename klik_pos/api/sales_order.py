@@ -84,6 +84,102 @@ def _gone_response(order_id, message):
     return {"success": False, "code": "held_order_gone", "order_id": order_id, "message": message}
 
 
+# ---------------------------------------------------------------------------
+# Price approval (optional: cecypo_powerpack). Everything here is a no-op when the
+# fields or the Sales Order workflow are absent.
+# ---------------------------------------------------------------------------
+
+APPROVAL_STATE_FIELD = "workflow_state"
+PRICE_BREACH_FIELD = "powerpack_price_breach"
+REQUEST_APPROVAL_ACTION = "Request Price Approval"
+
+
+def _held_order_workflow():
+    from frappe.model.workflow import get_workflow_name
+
+    name = get_workflow_name("Sales Order")
+    return frappe.get_cached_doc("Workflow", name) if name else None
+
+
+def _approval_fields(so):
+    """The held order's approval state and breach flag, or null / 0 without PowerPack."""
+    meta = frappe.get_meta("Sales Order")
+    state = so.get(APPROVAL_STATE_FIELD) if meta.has_field(APPROVAL_STATE_FIELD) else None
+    breach = cint(so.get(PRICE_BREACH_FIELD)) if meta.has_field(PRICE_BREACH_FIELD) else 0
+    return {"approval_state": state or None, "price_breach": breach}
+
+
+def _held_order_transitions(so, workflow):
+    """The caller's draft-to-draft transitions from the order's current state."""
+    from frappe.model.workflow import is_transition_condition_satisfied
+
+    state = so.get(workflow.workflow_state_field) or workflow.states[0].state
+    draft_states = {s.state for s in workflow.states if cint(s.doc_status) == 0}
+    roles = set(frappe.get_roles())
+    return [
+        t
+        for t in workflow.transitions
+        if t.state == state
+        and t.allowed in roles
+        and t.next_state in draft_states
+        and is_transition_condition_satisfied(t, so)
+    ]
+
+
+def _available_held_order_actions(so):
+    workflow = _held_order_workflow()
+    if not workflow:
+        return []
+    actions = []
+    for t in _held_order_transitions(so, workflow):
+        if t.action not in actions:
+            actions.append(t.action)
+    return actions
+
+
+def _apply_held_order_action(so, action):
+    """frappe.model.workflow.apply_workflow for a held order, after klik's own access check.
+
+    Held orders are saved with ignore_permissions (a cashier need not hold Sales Order
+    write), so frappe's apply_workflow, which saves with the caller's permissions, cannot
+    be used. Only draft-to-draft transitions: the POS never submits an order this way.
+    """
+    from frappe.model.workflow import has_approval_access
+
+    workflow = _held_order_workflow()
+    if not workflow:
+        frappe.throw(_("Sales Order has no active workflow."))
+    transition = next((t for t in _held_order_transitions(so, workflow) if t.action == action), None)
+    if not transition:
+        frappe.throw(_("{0} is not available for held order {1}.").format(action, so.name))
+    # has_approval_access refuses a transition where the acting user is also the document's
+    # owner, unless the transition is marked allow_self_approval - cecypo_powerpack's workflow
+    # leaves that off on every transition. That is right for the role-gated Approve/Reject
+    # transitions (nobody should approve their own request), but a transition open to "All" is
+    # not an approval at all - Request Price Approval is exactly the cashier acting on the held
+    # order they just created, and Withdraw Approval is the same requester taking their own
+    # order back off approved. Only enforce the guard on a transition actually restricted to a
+    # role; otherwise every auto-request right after holding a breaching cart would refuse
+    # itself with "Self approval is not allowed".
+    if transition.allowed != "All" and not has_approval_access(frappe.session.user, so, transition):
+        frappe.throw(_("Self approval is not allowed"))
+    so.set(workflow.workflow_state_field, transition.next_state)
+    so.flags.ignore_permissions = True
+    so.save()
+    so.add_comment("Workflow", _(transition.next_state))
+    return transition.next_state
+
+
+def _request_approval_if_needed(so):
+    """Send a breaching held order for price approval. True when a request was made."""
+    if not cint(so.get(PRICE_BREACH_FIELD)):
+        return False
+    if REQUEST_APPROVAL_ACTION not in _available_held_order_actions(so):
+        return False
+    _apply_held_order_action(so, REQUEST_APPROVAL_ACTION)
+    return True
+
+
 def _lock_held_order(order_id):
     """Hold the order's row until this request ends, so only one checkout can invoice it.
 
@@ -322,7 +418,13 @@ def create_held_order(data):
             so = _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
             so.insert(ignore_permissions=True)
 
-        return {"success": True, "order_name": so.name}
+        approval_requested = _request_approval_if_needed(so)
+        return {
+            "success": True,
+            "order_name": so.name,
+            "approval_requested": approval_requested,
+            **_approval_fields(so),
+        }
 
     except Exception as e:
         # Roll back BEFORE logging, and never return without rolling back.
@@ -399,10 +501,39 @@ def get_held_order_details(order_id):
             "currency": so.currency,
             "discount_amount": flt(so.discount_amount or 0),
             "apply_discount_on": so.apply_discount_on or "",
+            **_approval_fields(so),
         }
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Get Held Order Details Error")
+        return {"success": False, "message": str(e)}
+
+
+@frappe.whitelist()
+def get_held_order_actions(order_id):
+    """Workflow actions the caller may take on a held order from the POS."""
+    gone = _held_order_gone(order_id)
+    if gone:
+        return _gone_response(order_id, gone)
+    so = frappe.get_doc("Sales Order", order_id)
+    _assert_held_order_access(so)
+    return {"success": True, "actions": _available_held_order_actions(so), **_approval_fields(so)}
+
+
+@frappe.whitelist()
+def apply_held_order_action(order_id, action):
+    """Apply one of get_held_order_actions' actions."""
+    try:
+        gone = _held_order_gone(order_id)
+        if gone:
+            return _gone_response(order_id, gone)
+        so = frappe.get_doc("Sales Order", order_id)
+        _assert_held_order_access(so)
+        _apply_held_order_action(so, action)
+        return {"success": True, **_approval_fields(so)}
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Held Order Workflow Action Error")
         return {"success": False, "message": str(e)}
 
 
@@ -509,15 +640,21 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 # till is one that lets its users see each other's.
                 filters["owner"] = frappe.session.user
 
+        so_fields = [
+            "name", "customer", "customer_name", "transaction_date",
+            "grand_total", "currency", "owner", "modified",
+            "custom_pos_profile", "custom_pos_opening_entry",
+        ]
+        if frappe.db.has_column("Sales Order", APPROVAL_STATE_FIELD):
+            so_fields.append(APPROVAL_STATE_FIELD)
+        if frappe.db.has_column("Sales Order", PRICE_BREACH_FIELD):
+            so_fields.append(PRICE_BREACH_FIELD)
+
         orders = frappe.get_all(
             "Sales Order",
             filters=filters,
             or_filters=or_filters,
-            fields=[
-                "name", "customer", "customer_name", "transaction_date",
-                "grand_total", "currency", "owner", "modified",
-                "custom_pos_profile", "custom_pos_opening_entry",
-            ],
+            fields=so_fields,
             order_by="modified desc",
             limit=limit,
             start=start,
@@ -563,6 +700,8 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             order["status"] = "Held"
             order["items"] = items_map.get(order.name, [])
             order["cashier"] = cashier_map.get(order.owner) or order.owner
+            order["approval_state"] = order.pop(APPROVAL_STATE_FIELD, None) or None
+            order["price_breach"] = cint(order.pop(PRICE_BREACH_FIELD, 0))
 
         return {"success": True, "data": orders, "total_count": len(orders)}
 
@@ -614,8 +753,8 @@ def checkout_held_order(order_id, data=None):
             frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
 
         # Reuse the full invoice submission pipeline
-        from klik_pos.api.sales_invoice import queue_sales_invoice
-        result = queue_sales_invoice(data)
+        from klik_pos.api.sales_invoice import _queue_sales_invoice
+        result = _queue_sales_invoice(data, source_order=order_id)
 
         if result.get("success"):
             # SO fulfilled — remove it so it doesn't clutter held orders list
