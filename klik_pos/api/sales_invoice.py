@@ -2003,6 +2003,12 @@ def queue_sales_invoice(data):
 					"invoice_id": doc.name,
 				}
 
+			if _needs_shift_check(doc):
+				# A klik POS sale still needs exactly one Open shift on its till, opened
+				# today, before it is queued - the worker skips this check when it
+				# finishes the sale, so it must be run here or never.
+				doc.validate_pos_opening_entry()
+
 			frappe.enqueue(
 				"klik_pos.api.sales_invoice.process_queued_sales_invoice",
 				queue="long",
@@ -2262,6 +2268,8 @@ def retry_failed_sales_invoice(invoice_name):
 		_update_queue_fields(doc, QUEUE_STATUSES["queued"], error_message="")
 		doc.save(ignore_permissions=True)
 
+		# No shift check here: this re-queues a sale that was already checked when it
+		# was first queued. Refusing it now, after midnight, would strand it.
 		frappe.enqueue(
 			"klik_pos.api.sales_invoice.process_queued_sales_invoice",
 			queue="long",
@@ -4126,15 +4134,22 @@ def return_sales_invoice(invoice_name):
 		return {"success": False, "message": str(e)}
 
 
+def _needs_shift_check(doc):
+	"""ERPNext's own shift check applies to klik POS sales: not returns, not credit
+	sales (is_pos=0), not invoices made outside klik, and not the worker finishing a
+	sale that was checked when it was queued."""
+	return bool(
+		doc.get("custom_is_created_from_klik")
+		and doc.pos_profile
+		and doc.is_pos
+		and not doc.is_return
+		and not frappe.flags.get("klik_processing_queued_invoice")
+	)
+
+
 class CustomSalesInvoice(SalesInvoice):
 	def before_submit(self):
-		if (
-			self.get("custom_is_created_from_klik")
-			and self.pos_profile
-			and self.is_pos
-			and not self.is_return
-			and not frappe.flags.klik_processing_queued_invoice
-		):
+		if _needs_shift_check(self):
 			# ERPNext only runs this from validate_created_using_pos, which klik never
 			# reaches (it never sets is_created_using_pos). Call it directly so a klik
 			# sale still needs exactly one Open shift on its till, opened today.
@@ -5009,6 +5024,12 @@ def submit_draft_invoice(invoice_id, data=None):
 				_update_queue_fields(invoice_doc, QUEUE_STATUSES["failed"], error_message=str(reserve_error))
 				invoice_doc.save(ignore_permissions=True)
 				return {"success": False, "error": str(reserve_error)}
+
+			if _needs_shift_check(invoice_doc):
+				# A klik POS sale still needs exactly one Open shift on its till, opened
+				# today, before it is queued - the worker skips this check when it
+				# finishes the sale, so it must be run here or never.
+				invoice_doc.validate_pos_opening_entry()
 
 			frappe.enqueue(
 				"klik_pos.api.sales_invoice.process_queued_sales_invoice",

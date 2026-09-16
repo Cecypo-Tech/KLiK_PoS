@@ -12,7 +12,11 @@ from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import shift
 from klik_pos.api.pos_entry import current_shift_state, open_pos, opening_conflict
-from klik_pos.api.sales_invoice import get_current_pos_opening_entry
+from klik_pos.api.sales_invoice import (
+	_needs_shift_check,
+	get_current_pos_opening_entry,
+	submit_draft_invoice,
+)
 from klik_pos.tests.test_opening_conflict import COMPANY, _profile, _shift, _user
 
 OPENER = "shared-shift-opener@example.com"
@@ -308,3 +312,110 @@ class TestCurrentShiftState(SharedShiftCase):
 		frappe.set_user(OPENER)
 
 		self.assertEqual(current_shift_state(), {"entry": None, "stale": False, "pos_profile": None})
+
+
+def _klik_pos_doc(till, **overrides):
+	"""An in-memory klik POS Sales Invoice, for the pure `_needs_shift_check` truth table."""
+	doc = frappe.new_doc("Sales Invoice")
+	doc.update(
+		{
+			"company": COMPANY,
+			"customer": "Walk In",
+			"pos_profile": till,
+			"is_pos": 1,
+			"custom_is_created_from_klik": 1,
+		}
+	)
+	doc.update(overrides)
+	return doc
+
+
+class TestNeedsShiftCheck(SharedShiftCase):
+	"""The five conditions `_needs_shift_check` gates on, one flipped at a time."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.flags.klik_processing_queued_invoice = False
+
+	def tearDown(self):
+		frappe.flags.klik_processing_queued_invoice = False
+		super().tearDown()
+
+	def test_a_klik_pos_sale_needs_the_check(self):
+		self.assertTrue(_needs_shift_check(_klik_pos_doc(self.till)))
+
+	def test_not_created_from_klik_is_exempt(self):
+		doc = _klik_pos_doc(self.till, custom_is_created_from_klik=0)
+		self.assertFalse(_needs_shift_check(doc))
+
+	def test_no_pos_profile_is_exempt(self):
+		doc = _klik_pos_doc(self.till, pos_profile=None)
+		self.assertFalse(_needs_shift_check(doc))
+
+	def test_not_is_pos_credit_sale_is_exempt(self):
+		doc = _klik_pos_doc(self.till, is_pos=0)
+		self.assertFalse(_needs_shift_check(doc))
+
+	def test_a_return_is_exempt(self):
+		doc = _klik_pos_doc(self.till, is_return=1)
+		self.assertFalse(_needs_shift_check(doc))
+
+	def test_the_worker_finishing_a_queued_sale_is_exempt(self):
+		doc = _klik_pos_doc(self.till)
+		frappe.flags.klik_processing_queued_invoice = True
+		self.assertFalse(_needs_shift_check(doc))
+
+
+class TestQueuePathShiftCheck(SharedShiftCase):
+	"""ERPNext's shift check must also run before a sale is queued, not only at submit."""
+
+	def setUp(self):
+		super().setUp()
+		# submit_draft_invoice runs the invoice's own validate(), which resolves the
+		# customer's receivable account - unrelated to the shift check under test, but it
+		# needs read permission on Account for a non-Administrator cashier.
+		user_doc = frappe.get_doc("User", OPENER)
+		if not any(row.role == "Sales User" for row in user_doc.roles):
+			user_doc.append("roles", {"role": "Sales User"})
+			user_doc.flags.ignore_permissions = True
+			user_doc.save()
+
+	def _draft(self, **overrides):
+		doc = frappe.new_doc("Sales Invoice")
+		doc.update(
+			{
+				"company": COMPANY,
+				"customer": "Walk In",
+				"pos_profile": self.till,
+				"is_pos": 1,
+				"custom_is_created_from_klik": 1,
+				"enable_background_invoice_submission": 1,
+			}
+		)
+		doc.append("items", {"item_code": "Consulting", "qty": 1, "rate": 100})
+		doc.update(overrides)
+		doc.flags.ignore_validate = True
+		doc.flags.ignore_mandatory = True
+		doc.insert(ignore_permissions=True)
+		return doc.name
+
+	def test_queuing_on_a_till_with_no_open_shift_is_refused(self):
+		frappe.set_user(OPENER)
+		invoice_name = self._draft()
+
+		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
+			result = submit_draft_invoice(invoice_name)
+
+		self.assertFalse(result["success"])
+		mock_enqueue.assert_not_called()
+
+	def test_queuing_with_an_open_shift_opened_today_enqueues(self):
+		_shift(self.till, OPENER)
+		frappe.set_user(OPENER)
+		invoice_name = self._draft()
+
+		with patch("klik_pos.api.sales_invoice.frappe.enqueue") as mock_enqueue:
+			result = submit_draft_invoice(invoice_name)
+
+		self.assertTrue(result["success"])
+		mock_enqueue.assert_called_once()
