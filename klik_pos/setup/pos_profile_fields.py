@@ -95,13 +95,21 @@ def install_pos_profile_feature_fields():
     ship `allow_warehouse_change` as a standard field, and creating a Custom Field
     with a colliding name raises. Returns the list of fieldnames actually created.
     Safe to run on every migrate."""
-    missing = [
-        f for f in POS_PROFILE_FEATURE_FIELDS
-        if not frappe.db.has_column("POS Profile", f["fieldname"])
-    ]
+    missing = [f for f in POS_PROFILE_FEATURE_FIELDS if not _field_is_defined(f["fieldname"])]
     if missing:
         create_custom_fields({"POS Profile": missing}, update=True)
     return [f["fieldname"] for f in missing]
+
+
+def _field_is_defined(fieldname):
+    """True when POS Profile defines the field, as a standard DocField or a Custom
+    Field record. Not a column check: deleting a Custom Field leaves its column
+    behind, and a column-only check would then never recreate the field, so the
+    checkbox stays missing from the form for good."""
+    return bool(
+        frappe.db.exists("DocField", {"parent": "POS Profile", "fieldname": fieldname})
+        or frappe.db.exists("Custom Field", {"dt": "POS Profile", "fieldname": fieldname})
+    )
 
 
 def install_pos_extra_fields_child():

@@ -57,30 +57,51 @@ class TestPosProfileFeatureFields(FrappeTestCase):
             names.index("custom_allow_viewing_other_cashiers"),
         )
 
+    # "Present" means a standard DocField or a Custom Field record exists. A bare
+    # column does not count: deleting a Custom Field leaves its column behind, and a
+    # column-only check then never recreates the field, so the checkbox vanishes.
+    ALL = [f["fieldname"] for f in POS_PROFILE_FEATURE_FIELDS]
+
     @patch("klik_pos.setup.pos_profile_fields.create_custom_fields")
-    @patch("frappe.db.has_column", return_value=False)
-    def test_creates_all_when_none_exist(self, _hc, mock_create):
+    @patch("klik_pos.setup.pos_profile_fields._field_is_defined", return_value=False)
+    def test_creates_all_when_none_exist(self, _defined, mock_create):
         result = install_pos_profile_feature_fields()
-        self.assertEqual(result, ["allow_price_list_switching", "allow_warehouse_change", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
+        self.assertEqual(result, self.ALL)
         sent = mock_create.call_args[0][0]
         self.assertEqual(sent["POS Profile"], POS_PROFILE_FEATURE_FIELDS)
         self.assertTrue(mock_create.call_args.kwargs.get("update"))
 
     @patch("klik_pos.setup.pos_profile_fields.create_custom_fields")
     def test_skips_existing_standard_field(self, mock_create):
-        # warehouse already exists (e.g. standard field), price-list and sales-lens missing
-        with patch("frappe.db.has_column", side_effect=lambda dt, fn: fn == "allow_warehouse_change"):
+        with patch(
+            "klik_pos.setup.pos_profile_fields._field_is_defined",
+            side_effect=lambda fn: fn == "allow_warehouse_change",
+        ):
             result = install_pos_profile_feature_fields()
-        self.assertEqual(result, ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
+        expected = [f for f in self.ALL if f != "allow_warehouse_change"]
+        self.assertEqual(result, expected)
         sent = mock_create.call_args[0][0]
-        self.assertEqual([f["fieldname"] for f in sent["POS Profile"]], ["allow_price_list_switching", "custom_enable_sales_lens", "custom_show_overdue_warning", "custom_allow_credit_sales_as_pos", "custom_allow_viewing_other_cashiers", "custom_enable_shipping_rule"])
+        self.assertEqual([f["fieldname"] for f in sent["POS Profile"]], expected)
 
     @patch("klik_pos.setup.pos_profile_fields.create_custom_fields")
-    @patch("frappe.db.has_column", return_value=True)
-    def test_noop_when_all_exist(self, _hc, mock_create):
+    @patch("klik_pos.setup.pos_profile_fields._field_is_defined", return_value=True)
+    def test_noop_when_all_exist(self, _defined, mock_create):
         result = install_pos_profile_feature_fields()
         self.assertEqual(result, [])
         mock_create.assert_not_called()
+
+    def test_recreates_a_field_whose_record_was_deleted_but_column_remains(self):
+        fieldname = "custom_show_overdue_warning"
+        install_pos_profile_feature_fields()
+        frappe.db.delete("Custom Field", {"dt": "POS Profile", "fieldname": fieldname})
+        frappe.clear_cache(doctype="POS Profile")
+        self.assertTrue(frappe.db.has_column("POS Profile", fieldname))
+
+        result = install_pos_profile_feature_fields()
+
+        self.assertIn(fieldname, result)
+        self.assertTrue(frappe.db.exists("Custom Field", {"dt": "POS Profile", "fieldname": fieldname}))
+        self.assertIsNotNone(frappe.get_meta("POS Profile").get_field(fieldname))
 
 
 class TestPosExtraFieldsChild(FrappeTestCase):
