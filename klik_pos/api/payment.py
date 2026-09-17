@@ -684,9 +684,9 @@ def _extract_opening_info(opening_doc):
 
 def _check_admin_privileges():
 	"""Check if current user has administrative privileges."""
-	user_roles = frappe.get_roles(frappe.session.user)
-	admin_roles = {"Administrator", "Sales Manager", "System Manager"}
-	return bool(admin_roles & set(user_roles))
+	from klik_pos.api.shift import is_shift_manager
+
+	return is_shift_manager()
 
 
 def _fetch_sales_data(pos_profile, opening_entry_name, opening_date, is_admin):

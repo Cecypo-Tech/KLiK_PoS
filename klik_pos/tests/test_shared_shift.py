@@ -11,7 +11,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import shift
-from klik_pos.api.pos_entry import current_shift_state, open_pos, opening_conflict
+from klik_pos.api.pos_entry import create_closing_entry, current_shift_state, open_pos, opening_conflict
 from klik_pos.api.sales_invoice import (
 	QUEUE_STATUSES,
 	_needs_shift_check,
@@ -120,11 +120,20 @@ class TestOneShiftPerTill(SharedShiftCase):
 		self.assertEqual(conflict["entry"], entry)
 		self.assertEqual(conflict["user"], OPENER)
 
-	def test_another_cashier_s_shift_from_yesterday_is_offered_to_join_and_close(self):
+	def test_another_cashier_s_stale_shift_tells_a_cashier_a_manager_is_needed(self):
+		"""A cashier may no longer join-and-close another cashier's stale shift themselves."""
 		_shift(self.till, OPENER, days_ago=1)
 		frappe.set_user(JOINER)
 
-		self.assertEqual(opening_conflict(self.till)["kind"], "till_stale")
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(opening_conflict(self.till)["kind"], "till_needs_manager")
+
+	def test_another_cashier_s_stale_shift_is_offered_to_a_manager_to_close(self):
+		_shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			self.assertEqual(opening_conflict(self.till)["kind"], "till_stale")
 
 	def test_a_joined_shift_on_this_till_is_continued(self):
 		entry = _shift(self.till, OPENER)
@@ -289,31 +298,43 @@ class TestCurrentShiftState(SharedShiftCase):
 		entry = _shift(self.till, OPENER)
 		frappe.set_user(OPENER)
 
-		self.assertEqual(
-			current_shift_state(), {"entry": entry, "stale": False, "pos_profile": self.till}
-		)
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(
+				current_shift_state(),
+				{"entry": entry, "stale": False, "pos_profile": self.till, "manager": False},
+			)
 
 	def test_own_shift_opened_yesterday_is_stale(self):
 		entry = _shift(self.till, OPENER, days_ago=1)
 		frappe.set_user(OPENER)
 
-		self.assertEqual(
-			current_shift_state(), {"entry": entry, "stale": True, "pos_profile": self.till}
-		)
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(
+				current_shift_state(),
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": False},
+			)
 
 	def test_a_joined_shift_opened_yesterday_is_stale(self):
+		"""A cashier can no longer join another cashier's stale shift (manager-only now);
+		a manager still can, and current_shift_state must still report it as stale for them."""
 		entry = _shift(self.till, OPENER, days_ago=1)
 		frappe.set_user(JOINER)
-		shift.join_shift(self.till)
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			shift.join_shift(self.till)
 
-		self.assertEqual(
-			current_shift_state(), {"entry": entry, "stale": True, "pos_profile": self.till}
-		)
+			self.assertEqual(
+				current_shift_state(),
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": True},
+			)
 
 	def test_no_shift_at_all(self):
 		frappe.set_user(OPENER)
 
-		self.assertEqual(current_shift_state(), {"entry": None, "stale": False, "pos_profile": None})
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(
+				current_shift_state(),
+				{"entry": None, "stale": False, "pos_profile": None, "manager": False},
+			)
 
 
 def _klik_pos_doc(till, **overrides):
@@ -455,3 +476,238 @@ class TestQueuePathShiftCheck(SharedShiftCase):
 
 		self.assertTrue(result["success"])
 		mock_enqueue.assert_called_once()
+
+
+class TestIsShiftManager(SharedShiftCase):
+	def test_true_for_each_manager_role(self):
+		for role in shift.SHIFT_MANAGER_ROLES:
+			with patch("frappe.get_roles", return_value=[role]):
+				self.assertTrue(shift.is_shift_manager())
+
+	def test_false_for_a_plain_cashier(self):
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertFalse(shift.is_shift_manager())
+
+
+class TestJoinedShiftStaleness(SharedShiftCase):
+	def test_a_stale_joined_shift_is_dropped_for_a_cashier(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.defaults.set_user_default(shift.JOINED_SHIFT_KEY, entry, JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertIsNone(shift.joined_shift(JOINER))
+
+	def test_a_stale_joined_shift_is_kept_for_a_manager(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.defaults.set_user_default(shift.JOINED_SHIFT_KEY, entry, JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			self.assertEqual(shift.joined_shift(JOINER), entry)
+
+	def test_a_joined_shift_from_today_is_kept_for_anyone(self):
+		entry = _shift(self.till, OPENER)
+		frappe.defaults.set_user_default(shift.JOINED_SHIFT_KEY, entry, JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(shift.joined_shift(JOINER), entry)
+
+
+class TestJoinShiftManagerRules(SharedShiftCase):
+	SECOND_OPENER = "shared-shift-second-opener@example.com"
+
+	def setUp(self):
+		super().setUp()
+		_user(self.SECOND_OPENER)
+
+	def test_a_cashier_on_a_stale_single_shift_till_is_refused(self):
+		_shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaisesRegex(frappe.ValidationError, "manager"):
+				shift.join_shift(self.till)
+
+	def test_a_manager_on_the_same_till_is_accepted(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			self.assertEqual(shift.join_shift(self.till), {"success": True, "entry": entry})
+
+	def test_a_cashier_on_a_till_with_two_open_shifts_is_refused(self):
+		_shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaises(frappe.ValidationError):
+				shift.join_shift(self.till)
+
+	def test_a_manager_without_entry_on_that_till_is_refused(self):
+		"""Even a manager must pick a shift with `entry` when several are open."""
+		_shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			with self.assertRaises(frappe.ValidationError):
+				shift.join_shift(self.till)
+
+	def test_a_manager_with_entry_joins_exactly_that_shift(self):
+		older = _shift(self.till, OPENER, days_ago=1)
+		_shift(self.till, self.SECOND_OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			result = shift.join_shift(self.till, entry=older)
+			self.assertEqual(result, {"success": True, "entry": older})
+			self.assertEqual(shift.joined_shift(JOINER), older)
+
+	def test_a_cashier_passing_entry_gets_permission_error(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaises(frappe.PermissionError):
+				shift.join_shift(self.till, entry=entry)
+
+	def test_entry_not_on_the_till_is_a_validation_error(self):
+		other_till = _profile()
+		_assign(other_till, JOINER)
+		elsewhere = _shift(other_till, OPENER)
+		_shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			with self.assertRaises(frappe.ValidationError):
+				shift.join_shift(self.till, entry=elsewhere)
+
+	def test_entry_not_open_is_a_validation_error(self):
+		entry = _shift(self.till, OPENER, status="Closed")
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			with self.assertRaises(frappe.ValidationError):
+				shift.join_shift(self.till, entry=entry)
+
+	def test_a_today_single_shift_is_joined_by_a_cashier(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertEqual(shift.join_shift(self.till), {"success": True, "entry": entry})
+
+
+class TestOpeningConflictManagerTable(SharedShiftCase):
+	SECOND_OPENER = "shared-shift-conflict-second@example.com"
+
+	def setUp(self):
+		super().setUp()
+		_user(self.SECOND_OPENER)
+
+	def test_multiple_open_shifts_cashier_sees_till_needs_manager(self):
+		older = _shift(self.till, OPENER, days_ago=1)
+		newer = _shift(self.till, self.SECOND_OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			conflict = opening_conflict(self.till)
+
+		self.assertEqual(conflict["kind"], "till_needs_manager")
+		self.assertFalse(conflict["manager"])
+		self.assertEqual([row["entry"] for row in conflict["open_shifts"]], [older, newer])
+
+	def test_multiple_open_shifts_manager_sees_till_multiple(self):
+		older = _shift(self.till, OPENER, days_ago=1)
+		newer = _shift(self.till, self.SECOND_OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			conflict = opening_conflict(self.till)
+
+		self.assertEqual(conflict["kind"], "till_multiple")
+		self.assertTrue(conflict["manager"])
+		self.assertEqual([row["entry"] for row in conflict["open_shifts"]], [older, newer])
+
+	def test_single_stale_shift_cashier_sees_till_needs_manager(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			conflict = opening_conflict(self.till)
+
+		self.assertEqual(conflict["kind"], "till_needs_manager")
+		self.assertFalse(conflict["manager"])
+		self.assertEqual(conflict["open_shifts"][0]["entry"], entry)
+
+	def test_single_stale_shift_manager_sees_till_stale(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			conflict = opening_conflict(self.till)
+
+		self.assertEqual(conflict["kind"], "till_stale")
+		self.assertTrue(conflict["manager"])
+		self.assertEqual(conflict["entry"], entry)
+
+	def test_single_open_shift_today_is_till_open_for_both(self):
+		_shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			cashier_conflict = opening_conflict(self.till)
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			manager_conflict = opening_conflict(self.till)
+
+		self.assertEqual(cashier_conflict["kind"], "till_open")
+		self.assertEqual(manager_conflict["kind"], "till_open")
+
+
+class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
+	def _entry_row(self, entry):
+		return frappe.db.get_value(
+			"POS Opening Entry",
+			entry,
+			["name", "pos_profile", "company", "period_start_date", "user"],
+			as_dict=True,
+		)
+
+	def test_a_cashier_cannot_close_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		row = self._entry_row(entry)
+		frappe.set_user(JOINER)
+
+		with (
+			patch("frappe.get_roles", return_value=["Sales User"]),
+			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
+		):
+			with self.assertRaises((frappe.ValidationError, frappe.PermissionError)):
+				create_closing_entry()
+
+	def test_a_manager_can_close_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		row = self._entry_row(entry)
+		frappe.set_user(JOINER)
+
+		with (
+			patch("frappe.get_roles", return_value=["Sales Manager"]),
+			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
+			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
+			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+		):
+			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
+			result = create_closing_entry()
+
+		self.assertEqual(result["name"], "POS-CLO-FAKE")
+
+
+class TestCurrentShiftStateManagerField(SharedShiftCase):
+	def test_it_carries_manager(self):
+		_shift(self.till, OPENER)
+		frappe.set_user(OPENER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			self.assertTrue(current_shift_state()["manager"])
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			self.assertFalse(current_shift_state()["manager"])

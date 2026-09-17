@@ -28,15 +28,22 @@ def current_shift_state():
 	Closing Shift instead of the checkout screen."""
 	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
+	from klik_pos.api.shift import is_shift_manager
+
 	entry = get_current_pos_opening_entry()
 	if not entry:
-		return {"entry": None, "stale": False, "pos_profile": None}
+		return {"entry": None, "stale": False, "pos_profile": None, "manager": is_shift_manager()}
 
 	row = frappe.db.get_value(
 		"POS Opening Entry", entry, ["pos_profile", "period_start_date"], as_dict=True
 	)
 	stale = bool(row) and frappe.utils.get_date_str(row.period_start_date) != today()
-	return {"entry": entry, "stale": stale, "pos_profile": row.pos_profile if row else None}
+	return {
+		"entry": entry,
+		"stale": stale,
+		"pos_profile": row.pos_profile if row else None,
+		"manager": is_shift_manager(),
+	}
 
 
 @frappe.whitelist()
@@ -133,10 +140,11 @@ def opening_conflict(pos_profile):
 	before today must be closed first (ERPNext's daily shifts); for someone else's that
 	means joining it and then closing it.
 	"""
-	from klik_pos.api.shift import joined_shift, open_shift_on_till
+	from klik_pos.api.shift import is_shift_manager, joined_shift, open_shifts_on_till
 
 	user = frappe.session.user
 	today_date = frappe.utils.getdate(today())
+	manager = is_shift_manager(user)
 
 	def _describe(kind, row, profile):
 		return {
@@ -146,10 +154,23 @@ def opening_conflict(pos_profile):
 			"period_start_date": row.period_start_date,
 			"user": row.user,
 			"user_name": frappe.db.get_value("User", row.user, "full_name") or row.user,
+			"manager": manager,
 		}
 
 	def _stale(row):
 		return frappe.utils.getdate(row.period_start_date) != today_date
+
+	def _shifts_payload(shifts):
+		return [
+			{
+				"entry": s.name,
+				"user": s.user,
+				"user_name": frappe.db.get_value("User", s.user, "full_name") or s.user,
+				"period_start_date": s.period_start_date,
+				"stale": _stale(s),
+			}
+			for s in shifts
+		]
 
 	own = frappe.get_all(
 		"POS Opening Entry",
@@ -163,15 +184,52 @@ def opening_conflict(pos_profile):
 			return _describe("own_other_profile", row, row.pos_profile)
 		return _describe("own_stale" if _stale(row) else "own_open", row, pos_profile)
 
-	till_shift = open_shift_on_till(pos_profile)
-	if not till_shift:
+	shifts = open_shifts_on_till(pos_profile)
+	if not shifts:
 		return None
-	if joined_shift(user) == till_shift.name:
-		return _describe("own_stale" if _stale(till_shift) else "own_open", till_shift, pos_profile)
-	return _describe("till_stale" if _stale(till_shift) else "till_open", till_shift, pos_profile)
+
+	joined = joined_shift(user)
+	if joined:
+		joined_row = next((s for s in shifts if s.name == joined), None)
+		if joined_row:
+			return _describe("own_stale" if _stale(joined_row) else "own_open", joined_row, pos_profile)
+
+	if len(shifts) > 1:
+		oldest = shifts[0]
+		kind = "till_multiple" if manager else "till_needs_manager"
+		conflict = _describe(kind, oldest, pos_profile)
+		conflict["open_shifts"] = _shifts_payload(shifts)
+		return conflict
+
+	shift_row = shifts[0]
+	if _stale(shift_row):
+		kind = "till_stale" if manager else "till_needs_manager"
+		conflict = _describe(kind, shift_row, pos_profile)
+		if kind == "till_needs_manager":
+			conflict["open_shifts"] = _shifts_payload(shifts)
+		return conflict
+
+	return _describe("till_open", shift_row, pos_profile)
 
 
 def _conflict_message(conflict):
+	if conflict["kind"] == "till_needs_manager":
+		if len(conflict.get("open_shifts") or []) > 1:
+			return _("Till {0} has {1} open shifts. A manager must close the extra shifts first.").format(
+				conflict["pos_profile"], len(conflict["open_shifts"])
+			)
+		return _(
+			"Shift {0} on {1} was opened on {2} by {3}. A manager must close it before this till can sell."
+		).format(
+			conflict["entry"],
+			conflict["pos_profile"],
+			frappe.utils.get_date_str(conflict["period_start_date"]),
+			conflict["user_name"],
+		)
+	if conflict["kind"] == "till_multiple":
+		return _("Till {0} has {1} open shifts. Close each one before opening a new shift.").format(
+			conflict["pos_profile"], len(conflict.get("open_shifts") or [])
+		)
 	if conflict["kind"] == "till_open":
 		return _("{0} already has shift {1} open on {2}. Join it instead of opening another.").format(
 			conflict["user_name"], conflict["entry"], conflict["pos_profile"]
@@ -223,6 +281,7 @@ def create_closing_entry():
 		frappe.logger().info(f"POS Closing Entry Data Received: {data}")
 
 		opening_entry = _get_open_pos_entry(user)
+		_ensure_may_close(opening_entry, user)
 		payment_data = _calculate_payment_reconciliation(opening_entry, data)
 
 		doc = _create_and_submit_closing_doc(opening_entry, data, payment_data, user)
@@ -269,9 +328,29 @@ def _get_open_pos_entry(user):
 	return frappe.db.get_value(
 		"POS Opening Entry",
 		entry,
-		["name", "pos_profile", "company", "period_start_date"],
+		["name", "pos_profile", "company", "period_start_date", "user"],
 		as_dict=True,
 	)
+
+
+def _ensure_may_close(opening_entry, user):
+	"""Refuse to close someone else's shift once it has gone stale, unless the caller is a
+	manager. Their own shift, and any shift still on today's date, stays open to whoever is
+	in it - see the module docstring in shift.py for why "in it" already means "today or a
+	manager"."""
+	from klik_pos.api.shift import is_shift_manager
+
+	if opening_entry.user == user:
+		return
+	stale = frappe.utils.get_date_str(opening_entry.period_start_date) != today()
+	if stale and not is_shift_manager(user):
+		raise frappe.PermissionError(
+			_("Only a manager can close {0}, opened on {1} by {2}.").format(
+				opening_entry.name,
+				frappe.utils.get_date_str(opening_entry.period_start_date),
+				frappe.db.get_value("User", opening_entry.user, "full_name") or opening_entry.user,
+			)
+		)
 
 
 def _calculate_payment_reconciliation(opening_entry, data):
