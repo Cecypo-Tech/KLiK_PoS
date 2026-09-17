@@ -17,6 +17,7 @@ import {
   type OpeningSuggestion,
 } from '../utils/openingBalances';
 import { clearAllCache } from '../utils/clearCache';
+import { selectAllOnFocus } from '../utils/selectAllOnFocus';
 import { formatCurrencyWithSymbol } from '../utils/currency';
 import { usePOSProfileStore } from '../stores/posProfileStore';
 
@@ -88,11 +89,11 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   const getPaymentIcon = (type: string) => {
     switch (type.toLowerCase()) {
       case 'cash':
-        return <Banknote className="w-5 h-5 text-green-600" />;
+        return <Banknote className="w-4 h-4 shrink-0 text-green-600" />;
       case 'bank':
-        return <CreditCard className="w-5 h-5 text-blue-600" />;
+        return <CreditCard className="w-4 h-4 shrink-0 text-blue-600" />;
       default:
-        return <Wallet className="w-5 h-5 text-gray-600" />;
+        return <Wallet className="w-4 h-4 shrink-0 text-gray-600" />;
     }
   };
 
@@ -285,7 +286,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
           </button>
         </div>
 
-        <div className="p-6 relative">
+        <div className="p-6 relative overflow-y-auto max-h-[calc(90vh-3.5rem)]">
           {step === 'form' && (
             <div className="space-y-6">
               <div>
@@ -330,73 +331,82 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
 
               {!isLoadingPaymentModes && paymentMethods.length > 0 && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Opening Balances
                   </label>
-                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                  {/* One line per mode, so a till with many modes fits without scrolling. */}
+                  <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100">
                     {paymentMethods.map((method, index) => {
                       const drift = variance(method);
                       const wantsReason = needsReason(method);
+                      const currency = posDetails?.currency || 'USD';
+                      const meta = method.carriesFloat
+                        ? method.hasHistory
+                          ? `last closed ${formatCurrencyWithSymbol(method.previousClosing, currency)}`
+                          : 'no previous closing'
+                        : 'no float';
                       return (
-                      <div key={method.mode_of_payment} className="p-3 bg-gray-50 rounded-lg space-y-2">
-                        <div className="flex items-center space-x-3">
+                      <div key={method.mode_of_payment} className="px-3 py-1">
+                        <div className="flex items-center gap-2 min-h-7">
                           {getPaymentIcon(method.type)}
-                          <div className="flex-1">
-                            <div className="font-medium text-sm text-gray-900">
+                          <div className="flex-1 min-w-0 flex items-baseline gap-2">
+                            <span className="truncate font-medium text-sm text-gray-900" title={method.mode_of_payment}>
                               {method.mode_of_payment}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {method.carriesFloat
-                                ? method.hasHistory
-                                  ? `${method.type} \u00b7 last closed at ${formatCurrencyWithSymbol(method.previousClosing, posDetails?.currency || 'USD')}`
-                                  : `${method.type} \u00b7 no previous closing`
-                                : `${method.type} \u00b7 goes to its account, no float`}
-                            </div>
+                            </span>
+                            <span
+                              className="truncate text-xs text-gray-500"
+                              title={method.carriesFloat ? `${method.type}` : `${method.type} · goes to its account, no float`}
+                            >
+                              {meta}
+                            </span>
                           </div>
                           {method.carriesFloat ? (
                             <input
                               type="number"
                               min="0"
                               step="0.01"
+                              inputMode="decimal"
+                              aria-label={`Opening ${method.mode_of_payment}`}
                               value={method.amount || ''}
                               onChange={(e) => updatePaymentAmount(index, parseFloat(e.target.value) || 0)}
-                              className="w-24 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-600"
+                              {...selectAllOnFocus}
+                              className="h-7 w-28 px-2 border border-gray-300 rounded-md text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 text-sm"
                               placeholder="0.00"
                               disabled={profilesLoading}
                             />
                           ) : (
-                            <span className="w-24 px-2 py-1 text-right text-gray-400" title="Only cash is counted into the drawer">
+                            <span className="w-28 px-2 text-right tabular-nums text-sm text-gray-400" title="Only cash is counted into the drawer">
                               0.00
                             </span>
                           )}
                         </div>
 
                         {drift !== 0 && (
-                          <div className="text-xs text-amber-700">
-                            {drift > 0 ? 'Over' : 'Short'} by{' '}
-                            {formatCurrencyWithSymbol(Math.abs(drift), posDetails?.currency || 'USD')} against the last closing.
+                          <div className="mt-1 pl-6 space-y-1">
+                            <div className="text-xs text-amber-700">
+                              {drift > 0 ? 'Over' : 'Short'} by{' '}
+                              {formatCurrencyWithSymbol(Math.abs(drift), currency)} against the last closing.
+                            </div>
+                            <input
+                              type="text"
+                              value={method.reason}
+                              onChange={(e) => updateVarianceReason(index, e.target.value)}
+                              placeholder="Why is it different? e.g. 500 banked overnight, slip 4471"
+                              aria-label={`Reason for the ${method.mode_of_payment} difference`}
+                              className={`h-8 w-full px-2 text-sm border rounded-md text-gray-700 focus:outline-none focus:ring-1 ${
+                                wantsReason
+                                  ? 'border-amber-400 focus:ring-amber-500'
+                                  : 'border-gray-300 focus:ring-blue-500'
+                              }`}
+                            />
                           </div>
-                        )}
-
-                        {drift !== 0 && (
-                          <textarea
-                            value={method.reason}
-                            onChange={(e) => updateVarianceReason(index, e.target.value)}
-                            rows={2}
-                            placeholder="Why is it different? e.g. 500 banked overnight, slip 4471"
-                            className={`w-full px-2 py-1 text-sm border rounded text-gray-700 focus:outline-none focus:ring-1 ${
-                              wantsReason
-                                ? 'border-amber-400 focus:ring-amber-500'
-                                : 'border-gray-300 focus:ring-blue-500'
-                            }`}
-                          />
                         )}
                       </div>
                       );
                     })}
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-gray-200">
+                  <div className="mt-3 pt-2 border-t border-gray-200">
                     <div className="flex justify-between items-center font-semibold text-gray-700">
                       <span>Total Opening Balance:</span>
                       <span className="text-green-600">
