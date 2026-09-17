@@ -241,6 +241,20 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
     }
   };
 
+  // A manager picking one of several open shifts to close: join exactly that entry, then go
+  // straight to Closing Shift, same as join_close does for a single stale shift.
+  const closeChosenShift = async (entry: string) => {
+    setJoining(true);
+    const joined = await joinShift(conflict!.pos_profile, entry);
+    setJoining(false);
+    if (!joined.ok) {
+      setError(joined.error);
+      return;
+    }
+    onSuccess();
+    navigate('/closing_shift');
+  };
+
   useEffect(() => {
     if (success && step === 'creating') {
       setStep('success');
@@ -422,16 +436,47 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                   <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div className="flex-1 space-y-2">
                     <div>{notice.message}</div>
-                    <button
-                      type="button"
-                      onClick={() => void resolveConflict()}
-                      disabled={joining}
-                      className="px-3 py-1.5 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      {joining
-                        ? 'Joining...'
-                        : { continue: 'Continue to POS', close: 'Go to Closing Shift', join: 'Join shift', join_close: 'Join and close shift' }[notice.action]}
-                    </button>
+
+                    {notice.action === 'close_each' && (
+                      <div className="space-y-1">
+                        {(conflict?.open_shifts ?? []).map((row) => (
+                          <div
+                            key={row.entry}
+                            className="flex items-center justify-between gap-2 text-xs bg-white border border-amber-200 rounded-md px-2 py-1"
+                          >
+                            <span className="truncate">
+                              {row.entry} · {row.user_name} · {row.period_start_date}
+                              {row.stale && (
+                                <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
+                                  stale
+                                </span>
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void closeChosenShift(row.entry)}
+                              disabled={joining}
+                              className="shrink-0 px-2 py-1 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            >
+                              {joining ? 'Closing...' : 'Close'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {notice.action !== 'none' && notice.action !== 'close_each' && (
+                      <button
+                        type="button"
+                        onClick={() => void resolveConflict()}
+                        disabled={joining}
+                        className="px-3 py-1.5 rounded-md bg-beveren-700 text-white hover:bg-beveren-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {joining
+                          ? 'Joining...'
+                          : { continue: 'Continue to POS', close: 'Go to Closing Shift', join: 'Join shift', join_close: 'Close shift' }[notice.action]}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

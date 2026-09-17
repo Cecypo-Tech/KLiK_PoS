@@ -72,13 +72,22 @@ export async function fetchCurrentShiftState(): Promise<CurrentShiftState | null
   }
 }
 
-/** Joins the shift already open on `posProfile`, so a second cashier can sell on that till. */
-export async function joinShift(posProfile: string): Promise<{ ok: true } | { ok: false; error: string }> {
+/**
+ * Joins the shift open on `posProfile`, so a second cashier can sell on that till. `entry`
+ * is how a manager picks which of several open shifts to join, when the till has more than
+ * one - omitted, the caller joins the till's single open shift.
+ */
+export async function joinShift(
+  posProfile: string,
+  entry?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    const body: { pos_profile: string; entry?: string } = { pos_profile: posProfile };
+    if (entry) body.entry = entry;
     const res = await fetch("/api/method/klik_pos.api.shift.join_shift", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": window.csrf_token },
-      body: JSON.stringify({ pos_profile: posProfile }),
+      body: JSON.stringify(body),
       credentials: "include",
     });
     const data = await res.json().catch(() => null);

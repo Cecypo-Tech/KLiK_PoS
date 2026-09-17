@@ -91,4 +91,12 @@ describe("joinShift", () => {
     vi.stubGlobal("fetch", respond(403, { _server_messages: JSON.stringify([msg]) }));
     expect(await joinShift("Till A")).toEqual({ ok: false, error: "You are not assigned to POS Profile Till A." });
   });
+
+  it("sends the chosen entry when a manager picks which shift to close", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const fetchMock = respond(200, { message: { success: true, entry: "POS-OPE-1" } });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await joinShift("Till A", "POS-OPE-1")).toEqual({ ok: true });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body)).toEqual({ pos_profile: "Till A", entry: "POS-OPE-1" });
+  });
 });

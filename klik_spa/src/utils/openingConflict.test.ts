@@ -38,4 +38,72 @@ describe("conflictNotice", () => {
   it("offers to join and close a shift left open from an earlier day", () => {
     expect(conflictNotice(conflict("till_stale")).action).toBe("join_close");
   });
+
+  it("tells a cashier a manager is needed for a single stale shift, naming it", () => {
+    const notice = conflictNotice({
+      ...conflict("till_needs_manager"),
+      manager: false,
+      open_shifts: [
+        {
+          entry: "POS-OPE-2026-00024",
+          user: "cashier@example.com",
+          user_name: "Cashier",
+          period_start_date: "2026-09-14 22:17:56",
+          stale: true,
+        },
+      ],
+    });
+    expect(notice.action).toBe("none");
+    expect(notice.message).toContain("POS-OPE-2026-00024");
+    expect(notice.message).toContain("Cashier");
+  });
+
+  it("tells a cashier a manager is needed for several open shifts, naming the count", () => {
+    const notice = conflictNotice({
+      ...conflict("till_needs_manager"),
+      manager: false,
+      open_shifts: [
+        {
+          entry: "POS-OPE-2026-00024",
+          user: "cashier@example.com",
+          user_name: "Cashier",
+          period_start_date: "2026-09-14 22:17:56",
+          stale: true,
+        },
+        {
+          entry: "POS-OPE-2026-00025",
+          user: "other@example.com",
+          user_name: "Other",
+          period_start_date: "2026-09-17 08:00:00",
+          stale: false,
+        },
+      ],
+    });
+    expect(notice.action).toBe("none");
+    expect(notice.message).toContain("2");
+  });
+
+  it("offers a manager the extra shifts to close, one by one", () => {
+    const notice = conflictNotice({
+      ...conflict("till_multiple"),
+      manager: true,
+      open_shifts: [
+        {
+          entry: "POS-OPE-2026-00024",
+          user: "cashier@example.com",
+          user_name: "Cashier",
+          period_start_date: "2026-09-14 22:17:56",
+          stale: true,
+        },
+        {
+          entry: "POS-OPE-2026-00025",
+          user: "other@example.com",
+          user_name: "Other",
+          period_start_date: "2026-09-17 08:00:00",
+          stale: false,
+        },
+      ],
+    });
+    expect(notice.action).toBe("close_each");
+  });
 });
