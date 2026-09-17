@@ -140,10 +140,9 @@ def opening_conflict(pos_profile):
 	before today must be closed first (ERPNext's daily shifts); for someone else's that
 	means joining it and then closing it.
 	"""
-	from klik_pos.api.shift import is_shift_manager, joined_shift, open_shifts_on_till
+	from klik_pos.api.shift import _is_stale, is_shift_manager, joined_shift, open_shifts_on_till
 
 	user = frappe.session.user
-	today_date = frappe.utils.getdate(today())
 	manager = is_shift_manager(user)
 
 	def _describe(kind, row, profile):
@@ -157,8 +156,7 @@ def opening_conflict(pos_profile):
 			"manager": manager,
 		}
 
-	def _stale(row):
-		return frappe.utils.getdate(row.period_start_date) != today_date
+	_stale = _is_stale
 
 	def _shifts_payload(shifts):
 		return [
@@ -270,6 +268,24 @@ def validate_opening_entry(doc, method):
 		frappe.throw(_("Cashier {0} already has an open entry: {1}").format(cashier_name, exists))
 
 
+def validate_closing_entry(doc, method):
+	"""Hold every POS Closing Entry to the manager rule, not only the ones create_closing_entry
+	builds. On this site a cashier (Express Sales) can create and submit a POS Closing Entry
+	straight from the desk, bypassing create_closing_entry's own _ensure_may_close call."""
+	if frappe.flags.in_install or frappe.flags.in_patch:
+		return
+
+	row = frappe.db.get_value(
+		"POS Opening Entry",
+		doc.pos_opening_entry,
+		["name", "user", "pos_profile", "period_start_date"],
+		as_dict=True,
+	)
+	if not row:
+		return
+	_ensure_may_close(row, frappe.session.user)
+
+
 @frappe.whitelist()
 def create_closing_entry():
 	"""
@@ -291,6 +307,10 @@ def create_closing_entry():
 			"message": _("POS Closing Entry created successfully."),
 		}
 
+	except (frappe.PermissionError, frappe.ValidationError):
+		# Already worded for the cashier; wrapping it again showed every message twice, and
+		# a refusal is not a bug worth an Error Log.
+		raise
 	except Exception as e:
 		frappe.log_error(message=traceback.format_exc(), title="POS Closing Entry Creation Failed")
 		frappe.throw(_("Failed to create POS Closing Entry: {0}").format(str(e)))
@@ -334,21 +354,33 @@ def _get_open_pos_entry(user):
 
 
 def _ensure_may_close(opening_entry, user):
-	"""Refuse to close someone else's shift once it has gone stale, unless the caller is a
-	manager. Their own shift, and any shift still on today's date, stays open to whoever is
-	in it - see the module docstring in shift.py for why "in it" already means "today or a
-	manager"."""
-	from klik_pos.api.shift import is_shift_manager
+	"""Refuse to close someone else's shift unless the caller is a manager, either because
+	it has gone stale or because it is one of several open on the till. Their own shift, and
+	any shift still on today's date on a till with exactly one open shift, stays open to
+	whoever is in it - see the module docstring in shift.py for why "in it" already means
+	"today or a manager"."""
+	from klik_pos.api.shift import is_shift_manager, open_shifts_on_till
 
 	if opening_entry.user == user:
 		return
+	if is_shift_manager(user):
+		return
+
 	stale = frappe.utils.get_date_str(opening_entry.period_start_date) != today()
-	if stale and not is_shift_manager(user):
+	if stale:
 		raise frappe.PermissionError(
 			_("Only a manager can close {0}, opened on {1} by {2}.").format(
 				opening_entry.name,
 				frappe.utils.get_date_str(opening_entry.period_start_date),
 				frappe.db.get_value("User", opening_entry.user, "full_name") or opening_entry.user,
+			)
+		)
+
+	shifts = open_shifts_on_till(opening_entry.pos_profile)
+	if len(shifts) > 1:
+		raise frappe.PermissionError(
+			_("Till {0} has {1} open shifts. Only a manager can close {2}.").format(
+				opening_entry.pos_profile, len(shifts), opening_entry.name
 			)
 		)
 

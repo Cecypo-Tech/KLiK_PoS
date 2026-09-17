@@ -11,7 +11,14 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import shift
-from klik_pos.api.pos_entry import create_closing_entry, current_shift_state, open_pos, opening_conflict
+from klik_pos.api.pos_entry import (
+	_ensure_may_close,
+	create_closing_entry,
+	current_shift_state,
+	open_pos,
+	opening_conflict,
+	validate_closing_entry,
+)
 from klik_pos.api.sales_invoice import (
 	QUEUE_STATUSES,
 	_needs_shift_check,
@@ -665,6 +672,13 @@ class TestOpeningConflictManagerTable(SharedShiftCase):
 
 
 class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
+	SECOND_OPENER = "shared-shift-closing-second-opener@example.com"
+
+	def setUp(self):
+		super().setUp()
+		_user(self.SECOND_OPENER)
+		_assign(self.till, self.SECOND_OPENER)
+
 	def _entry_row(self, entry):
 		return frappe.db.get_value(
 			"POS Opening Entry",
@@ -673,7 +687,52 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 			as_dict=True,
 		)
 
+	# _ensure_may_close, tested directly so a wrapper that never called it could not pass.
+
+	def test_ensure_may_close_refuses_a_cashier_closing_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		row = self._entry_row(entry)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaisesRegex(frappe.PermissionError, "Only a manager"):
+				_ensure_may_close(row, JOINER)
+
+	def test_ensure_may_close_allows_a_manager_closing_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		row = self._entry_row(entry)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			_ensure_may_close(row, JOINER)  # must not raise
+
+	def test_ensure_may_close_allows_a_cashier_closing_their_own_stale_shift(self):
+		entry = _shift(self.till, JOINER, days_ago=1)
+		row = self._entry_row(entry)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			_ensure_may_close(row, JOINER)  # must not raise
+
+	def test_ensure_may_close_allows_a_cashier_closing_another_s_shift_opened_today_alone_on_the_till(self):
+		entry = _shift(self.till, OPENER)
+		row = self._entry_row(entry)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			_ensure_may_close(row, JOINER)  # must not raise
+
+	def test_ensure_may_close_refuses_a_cashier_closing_one_of_several_open_shifts(self):
+		"""Even opened today, a shift on a till with more than one open shift is manager-only
+		to close unless it is the caller's own."""
+		entry = _shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		row = self._entry_row(entry)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaisesRegex(
+				frappe.PermissionError, "Till .* has 2 open shifts. Only a manager can close"
+			):
+				_ensure_may_close(row, JOINER)
+
 	def test_a_cashier_cannot_close_someone_elses_stale_shift(self):
+		"""The create path: the guard must be what stops it, not some other failure."""
 		entry = _shift(self.till, OPENER, days_ago=1)
 		row = self._entry_row(entry)
 		frappe.set_user(JOINER)
@@ -681,9 +740,14 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 		with (
 			patch("frappe.get_roles", return_value=["Sales User"]),
 			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
+			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
+			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
 		):
-			with self.assertRaises((frappe.ValidationError, frappe.PermissionError)):
+			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
+			with self.assertRaisesRegex((frappe.PermissionError, frappe.ValidationError), "Only a manager"):
 				create_closing_entry()
+
+		mock_create.assert_not_called()
 
 	def test_a_manager_can_close_someone_elses_stale_shift(self):
 		entry = _shift(self.till, OPENER, days_ago=1)
@@ -700,6 +764,74 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 			result = create_closing_entry()
 
 		self.assertEqual(result["name"], "POS-CLO-FAKE")
+
+	def test_a_cashier_closes_their_own_stale_shift(self):
+		entry = _shift(self.till, JOINER, days_ago=1)
+		row = self._entry_row(entry)
+		frappe.set_user(JOINER)
+
+		with (
+			patch("frappe.get_roles", return_value=["Sales User"]),
+			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
+			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
+			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+		):
+			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
+			result = create_closing_entry()
+
+		self.assertEqual(result["name"], "POS-CLO-FAKE")
+
+	def test_a_cashier_closes_another_s_shift_opened_today_alone_on_the_till(self):
+		entry = _shift(self.till, OPENER)
+		row = self._entry_row(entry)
+		frappe.set_user(JOINER)
+
+		with (
+			patch("frappe.get_roles", return_value=["Sales User"]),
+			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
+			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
+			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+		):
+			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
+			result = create_closing_entry()
+
+		self.assertEqual(result["name"], "POS-CLO-FAKE")
+
+
+class TestValidateClosingEntryHook(SharedShiftCase):
+	"""The desk (or any REST caller) can create and submit a POS Closing Entry directly, so the
+	manager rule must also run from the doctype's own validate hook, not only from
+	create_closing_entry."""
+
+	def _closing_doc(self, entry):
+		doc = frappe.new_doc("POS Closing Entry")
+		doc.pos_opening_entry = entry
+		return doc
+
+	def test_a_cashier_cannot_validate_a_closing_entry_for_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		doc = self._closing_doc(entry)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaisesRegex(frappe.PermissionError, "Only a manager"):
+				validate_closing_entry(doc, "validate")
+
+	def test_a_manager_can_validate_a_closing_entry_for_someone_elses_stale_shift(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		doc = self._closing_doc(entry)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			validate_closing_entry(doc, "validate")  # must not raise
+
+	def test_a_cashier_closing_their_own_shift_passes_validation(self):
+		entry = _shift(self.till, JOINER, days_ago=1)
+		doc = self._closing_doc(entry)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			validate_closing_entry(doc, "validate")  # must not raise
 
 
 class TestCurrentShiftStateManagerField(SharedShiftCase):

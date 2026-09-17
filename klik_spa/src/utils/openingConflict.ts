@@ -72,7 +72,7 @@ export function conflictNotice(conflict: OpeningConflict): ConflictNotice {
         };
       }
       return {
-        message: `Shift ${entry} on ${pos_profile} was opened on ${conflict.period_start_date} by ${conflict.user_name}. A manager must close it before this till can sell.`,
+        message: `Shift ${entry} on ${pos_profile} was opened on ${String(conflict.period_start_date).slice(0, 10)} by ${conflict.user_name}. A manager must close it before this till can sell.`,
         action: "none",
       };
     }

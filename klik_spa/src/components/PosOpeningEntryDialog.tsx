@@ -249,6 +249,8 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
     setJoining(false);
     if (!joined.ok) {
       setError(joined.error);
+      // Another manager may have just closed this shift; refresh so it drops off the list.
+      fetchOpeningConflict(profileForPaymentModes).then(setConflict);
       return;
     }
     onSuccess();
@@ -445,7 +447,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                             className="flex items-center justify-between gap-2 text-xs bg-white border border-amber-200 rounded-md px-2 py-1"
                           >
                             <span className="truncate">
-                              {row.entry} · {row.user_name} · {row.period_start_date}
+                              {row.entry} · {row.user_name} · {String(row.period_start_date).slice(0, 10)}
                               {row.stale && (
                                 <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
                                   stale

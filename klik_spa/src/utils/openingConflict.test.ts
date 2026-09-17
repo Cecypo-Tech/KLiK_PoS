@@ -58,6 +58,24 @@ describe("conflictNotice", () => {
     expect(notice.message).toContain("Cashier");
   });
 
+  it("shows only the date a single stale shift was opened, not the time", () => {
+    const notice = conflictNotice({
+      ...conflict("till_needs_manager"),
+      manager: false,
+      open_shifts: [
+        {
+          entry: "POS-OPE-2026-00024",
+          user: "cashier@example.com",
+          user_name: "Cashier",
+          period_start_date: "2026-09-14 22:17:56",
+          stale: true,
+        },
+      ],
+    });
+    expect(notice.message).toContain("2026-09-14");
+    expect(notice.message).not.toContain("22:17:56");
+  });
+
   it("tells a cashier a manager is needed for several open shifts, naming the count", () => {
     const notice = conflictNotice({
       ...conflict("till_needs_manager"),

@@ -25,24 +25,14 @@ def _is_stale(row):
 	return frappe.utils.get_date_str(row.period_start_date) != frappe.utils.today()
 
 
-def open_shift_on_till(pos_profile):
-	rows = frappe.get_all(
-		"POS Opening Entry",
-		filters={"pos_profile": pos_profile, "docstatus": 1, "status": "Open"},
-		fields=["name", "user", "period_start_date"],
-		order_by="period_start_date desc",
-		limit=1,
-	)
-	return rows[0] if rows else None
-
-
 def open_shifts_on_till(pos_profile):
-	"""Every Open shift on `pos_profile`, oldest first."""
+	"""Every Open shift on `pos_profile`, oldest first. The name tie-breaks shifts opened in
+	the same instant, so callers that pick "the oldest" get a stable answer."""
 	return frappe.get_all(
 		"POS Opening Entry",
 		filters={"pos_profile": pos_profile, "docstatus": 1, "status": "Open"},
 		fields=["name", "user", "period_start_date"],
-		order_by="period_start_date asc",
+		order_by="period_start_date asc, name asc",
 	)
 
 
