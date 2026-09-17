@@ -495,6 +495,44 @@ class TestIsShiftManager(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertFalse(shift.is_shift_manager())
 
+	def test_express_admin_may_close_shifts(self):
+		"""ERPNext Express managers hold only Express Admin, which can't carry a standard role."""
+		with patch("frappe.get_roles", return_value=["Express Admin"]):
+			self.assertTrue(shift.is_shift_manager())
+
+	def test_express_admin_does_not_widen_the_payment_summary(self):
+		"""Closing someone's shift and seeing every till's day are different rights: the
+		payment summary keeps the data-scope roles (klik_pos.api.user.ADMIN_ROLES)."""
+		from klik_pos.api.payment import _check_admin_privileges
+
+		with patch("frappe.get_roles", return_value=["Express Admin"]):
+			self.assertFalse(_check_admin_privileges())
+		with patch("frappe.get_roles", return_value=["Sales Manager"]):
+			self.assertTrue(_check_admin_privileges())
+
+
+class TestJoinRefusalsCarryTheirReason(SharedShiftCase):
+	"""A bare PermissionError reaches the desk as a generic "not permitted" popup."""
+
+	def test_not_assigned_to_the_till(self):
+		outsider = _user("shared-shift-outsider@example.com")
+		frappe.set_user(outsider)
+		frappe.clear_messages()
+		with self.assertRaises(frappe.PermissionError):
+			shift.join_shift(self.till)
+		self.assertTrue(any("not assigned" in m.get("message", "") for m in frappe.get_message_log()))
+
+	def test_a_cashier_choosing_a_shift(self):
+		entry = _shift(self.till, OPENER)
+		frappe.set_user(JOINER)
+		frappe.clear_messages()
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaises(frappe.PermissionError):
+				shift.join_shift(self.till, entry=entry)
+		self.assertTrue(
+			any("Only a manager" in m.get("message", "") for m in frappe.get_message_log())
+		)
+
 
 class TestJoinedShiftStaleness(SharedShiftCase):
 	def test_a_stale_joined_shift_is_dropped_for_a_cashier(self):

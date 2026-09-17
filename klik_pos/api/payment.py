@@ -683,10 +683,12 @@ def _extract_opening_info(opening_doc):
 
 
 def _check_admin_privileges():
-	"""Check if current user has administrative privileges."""
-	from klik_pos.api.shift import is_shift_manager
+	"""Whether the caller sees the whole till's day in the payment summary: the data-scope
+	admins (klik_pos.api.user.ADMIN_ROLES). Shift managers are a wider set - see
+	klik_pos.api.shift.SHIFT_MANAGER_ROLES - because closing a till is a different right."""
+	from klik_pos.api.user import ADMIN_ROLES
 
-	return is_shift_manager()
+	return bool(set(ADMIN_ROLES) & set(frappe.get_roles(frappe.session.user)))
 
 
 def _fetch_sales_data(pos_profile, opening_entry_name, opening_date, is_admin):

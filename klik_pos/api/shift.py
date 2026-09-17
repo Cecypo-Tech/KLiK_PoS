@@ -11,10 +11,13 @@ from frappe import _
 
 JOINED_SHIFT_KEY = "klik_pos_joined_shift"
 
-# The set of roles that may close a shift that isn't theirs, when it is stale or one of
-# several open on a till. klik_pos.api.payment._check_admin_privileges uses the same set,
-# via is_shift_manager, so the two can't drift apart.
-SHIFT_MANAGER_ROLES = {"Administrator", "System Manager", "Sales Manager"}
+from klik_pos.api.user import ADMIN_ROLES
+
+# Roles that may close a shift that isn't theirs, when it is stale or one of several open on
+# a till. The data-scope admins, plus Express Admin: an ERPNext Express manager holds only
+# that role and can't be given a standard one. Closing a till is not a licence to see every
+# till's figures, so the payment summary keeps ADMIN_ROLES alone.
+SHIFT_MANAGER_ROLES = {*ADMIN_ROLES, "Express Admin"}
 
 
 def is_shift_manager(user=None):
@@ -67,7 +70,9 @@ def join_shift(pos_profile, entry=None):
 	"""
 	user = frappe.session.user
 	if not frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": user}):
-		raise frappe.PermissionError(_("You are not assigned to POS Profile {0}.").format(pos_profile))
+		frappe.throw(
+			_("You are not assigned to POS Profile {0}.").format(pos_profile), frappe.PermissionError
+		)
 
 	own_shift = frappe.db.exists(
 		"POS Opening Entry", {"user": user, "docstatus": 1, "status": "Open"}
@@ -82,7 +87,7 @@ def join_shift(pos_profile, entry=None):
 
 	if entry:
 		if not is_shift_manager(user):
-			raise frappe.PermissionError(_("Only a manager can choose which shift to close."))
+			frappe.throw(_("Only a manager can choose which shift to close."), frappe.PermissionError)
 		chosen = next((row for row in shifts if row.name == entry), None)
 		if not chosen:
 			frappe.throw(_("{0} is not an open shift on {1}.").format(entry, pos_profile))
