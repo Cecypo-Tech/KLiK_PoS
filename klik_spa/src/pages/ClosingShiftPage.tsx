@@ -461,8 +461,11 @@ export default function ClosingShiftPage() {
         closing_amount: closing_amount || 0
       }));
 
-            // @ts-expect-error just ignore for now
-      await createClosingEntry(closingBalanceArray);
+      const result = await createClosingEntry(closingBalanceArray);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
       setShowCloseModal(false);
 
       // Clear frontend caches

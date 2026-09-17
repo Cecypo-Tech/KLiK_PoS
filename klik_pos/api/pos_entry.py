@@ -368,20 +368,22 @@ def _ensure_may_close(opening_entry, user):
 
 	stale = frappe.utils.get_date_str(opening_entry.period_start_date) != today()
 	if stale:
-		raise frappe.PermissionError(
+		frappe.throw(
 			_("Only a manager can close {0}, opened on {1} by {2}.").format(
 				opening_entry.name,
 				frappe.utils.get_date_str(opening_entry.period_start_date),
 				frappe.db.get_value("User", opening_entry.user, "full_name") or opening_entry.user,
-			)
+			),
+			frappe.PermissionError,
 		)
 
 	shifts = open_shifts_on_till(opening_entry.pos_profile)
 	if len(shifts) > 1:
-		raise frappe.PermissionError(
+		frappe.throw(
 			_("Till {0} has {1} open shifts. Only a manager can close {2}.").format(
 				opening_entry.pos_profile, len(shifts), opening_entry.name
-			)
+			),
+			frappe.PermissionError,
 		)
 
 

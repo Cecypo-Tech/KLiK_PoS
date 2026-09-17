@@ -803,6 +803,13 @@ class TestValidateClosingEntryHook(SharedShiftCase):
 	manager rule must also run from the doctype's own validate hook, not only from
 	create_closing_entry."""
 
+	SECOND_OPENER = "shared-shift-hook-second-opener@example.com"
+
+	def setUp(self):
+		super().setUp()
+		_user(self.SECOND_OPENER)
+		_assign(self.till, self.SECOND_OPENER)
+
 	def _closing_doc(self, entry):
 		doc = frappe.new_doc("POS Closing Entry")
 		doc.pos_opening_entry = entry
@@ -832,6 +839,40 @@ class TestValidateClosingEntryHook(SharedShiftCase):
 
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			validate_closing_entry(doc, "validate")  # must not raise
+
+	def test_the_hook_is_registered_for_pos_closing_entry_validate(self):
+		hooks = frappe.get_hooks("doc_events")["POS Closing Entry"]["validate"]
+		if isinstance(hooks, str):
+			hooks = [hooks]
+		self.assertIn("klik_pos.api.pos_entry.validate_closing_entry", hooks)
+
+	def test_the_owner_of_one_of_two_open_shifts_is_allowed(self):
+		entry = _shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		doc = self._closing_doc(entry)
+		frappe.set_user(OPENER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			validate_closing_entry(doc, "validate")  # must not raise
+
+	def test_a_manager_is_allowed_on_a_till_with_two_open_shifts(self):
+		entry = _shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		doc = self._closing_doc(entry)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["System Manager"]):
+			validate_closing_entry(doc, "validate")  # must not raise
+
+	def test_a_non_owner_cashier_is_refused_on_a_till_with_two_open_shifts(self):
+		entry = _shift(self.till, OPENER)
+		_shift(self.till, self.SECOND_OPENER)
+		doc = self._closing_doc(entry)
+		frappe.set_user(JOINER)
+
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			with self.assertRaisesRegex(frappe.PermissionError, "open shifts"):
+				validate_closing_entry(doc, "validate")
 
 
 class TestCurrentShiftStateManagerField(SharedShiftCase):
