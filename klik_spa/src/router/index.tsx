@@ -1,9 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 import LoginPage from "../pages/LoginPage";
 import POSPage from "../pages/POSPage";
-import DashboardPage from "../pages/DashboardPage";
-import DashboardV2Page from "../pages/dashboard/DashboardPage";
-import { DASHBOARD_V2_ENABLED } from "../utils/featureFlags";
+import DashboardPage from "../pages/dashboard/DashboardPage";
 import ClosingShiftPage from "../pages/ClosingShiftPage";
 import SettingsPage from "../components/SettingsPage";
 import PaymentPage from "../pages/PaymentPage";
@@ -39,9 +37,7 @@ const router = createBrowserRouter([
       },
       {
         path: "dashboard",
-        element: (
-          <ProtectedRoute element={DASHBOARD_V2_ENABLED ? <DashboardV2Page /> : <DashboardPage />} />
-        ),
+        element: <ProtectedRoute element={<DashboardPage />} />,
       },
       {
         path: "closing_shift",
