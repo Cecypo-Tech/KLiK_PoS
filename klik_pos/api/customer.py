@@ -7,6 +7,7 @@ from frappe import _
 
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.api.loyalty import get_customer_loyalty_summary
+from klik_pos.api.customer_summary import last_visit_sql, total_orders_sql, total_spent_sql
 from .sql_builder import apply_sql_permissions
 
 
@@ -99,7 +100,7 @@ def get_customers(limit: int = 100, start: int = 0, search: str = ""):
         total_count = total_count_result[0]["total"] if total_count_result else 0
         
         data_query = f"""
-            SELECT 
+            SELECT
                 c.name,
                 c.customer_name,
                 c.customer_type,
@@ -110,36 +111,9 @@ def get_customers(limit: int = 100, start: int = 0, search: str = ""):
                 c.mobile_no,
                 c.tax_id,
                 c.custom_is_walkin as is_walkin,
-                COALESCE((
-                    SELECT COUNT(*)
-                    FROM `tabSales Invoice` si
-                    WHERE si.customer = c.name
-                    AND si.docstatus = 1
-                    AND si.is_return = 0
-                    AND si.status != 'Cancelled'
-                    AND si.custom_pos_opening_entry IS NOT NULL
-                    AND si.custom_pos_opening_entry != ''
-                ), 0) as custom_total_orders,
-                COALESCE((
-                    SELECT SUM(si.grand_total)
-                    FROM `tabSales Invoice` si
-                    WHERE si.customer = c.name
-                    AND si.docstatus = 1
-                    AND si.is_return = 0
-                    AND si.status != 'Cancelled'
-                    AND si.custom_pos_opening_entry IS NOT NULL
-                    AND si.custom_pos_opening_entry != ''
-                ), 0) as custom_total_spent,
-                (
-                    SELECT MAX(si.posting_date)
-                    FROM `tabSales Invoice` si
-                    WHERE si.customer = c.name
-                    AND si.docstatus = 1
-                    AND si.is_return = 0
-                    AND si.status != 'Cancelled'
-                    AND si.custom_pos_opening_entry IS NOT NULL
-                    AND si.custom_pos_opening_entry != ''
-                ) as custom_last_visit
+                COALESCE(({total_orders_sql("c.name")}), 0) as custom_total_orders,
+                COALESCE(({total_spent_sql("c.name")}), 0) as custom_total_spent,
+                ({last_visit_sql("c.name")}) as custom_last_visit
             FROM `tabCustomer` c
             WHERE {where_clause}
             ORDER BY c.creation DESC
@@ -786,32 +760,22 @@ def update_customer(customer_id, customer_data):
 
 @frappe.whitelist()
 def get_customer_statistics(customer_id):
-    """Get customer statistics including total orders and total spent"""
+    """Get customer statistics including total orders and total spent.
+
+    total_spent shares total_spent_sql with get_customers's list view and
+    get_customer_account_summary's cards, so all three agree.
+    """
     try:
-        # Get total invoices (orders) for the customer
-        total_orders = frappe.db.count(
-            "Sales Invoice",
-            filters={
-                "customer": customer_id,
-                "docstatus": 1,
-                "is_return": 0,
-                "status": ["!=", "Cancelled"],
-                "custom_pos_opening_entry": ["!=", ""],  # Only POS-created invoices
-            },
+        total_orders_result = frappe.db.sql(
+            f"SELECT ({total_orders_sql('%s')}) as total_orders",
+            (customer_id,),
+            as_dict=True,
         )
+        total_orders = total_orders_result[0].total_orders if total_orders_result else 0
 
         # Get total amount spent by the customer
         total_spent_result = frappe.db.sql(
-            """
-            SELECT COALESCE(SUM(grand_total), 0) as total_spent
-            FROM `tabSales Invoice`
-            WHERE customer = %s
-            AND docstatus = 1
-            AND is_return = 0
-            AND status != 'Cancelled'
-            AND custom_pos_opening_entry IS NOT NULL
-            AND custom_pos_opening_entry != ''
-        """,
+            f"SELECT COALESCE(({total_spent_sql('%s')}), 0) as total_spent",
             (customer_id,),
             as_dict=True,
         )
@@ -820,16 +784,7 @@ def get_customer_statistics(customer_id):
 
         # Get last visit date (most recent invoice date)
         last_visit_result = frappe.db.sql(
-            """
-            SELECT MAX(posting_date) as last_visit
-            FROM `tabSales Invoice`
-            WHERE customer = %s
-            AND docstatus = 1
-            AND is_return = 0
-            AND status != 'Cancelled'
-            AND custom_pos_opening_entry IS NOT NULL
-            AND custom_pos_opening_entry != ''
-        """,
+            f"SELECT ({last_visit_sql('%s')}) as last_visit",
             (customer_id,),
             as_dict=True,
         )

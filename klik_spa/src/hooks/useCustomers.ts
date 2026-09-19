@@ -18,6 +18,9 @@ interface ERPCustomer {
   custom_last_visit?: string;
   is_walkin?: number;
   tax_id?: string;
+  loyalty?: {
+    loyalty_points?: number;
+  };
   contact?: {
     first_name?: string;
     last_name?: string;
@@ -389,7 +392,7 @@ export function useCustomers(searchQuery?: string) {
           },
           dateOfBirth: "",
           gender: "other",
-          loyaltyPoints: 0,
+          loyaltyPoints: customer.loyalty?.loyalty_points || 0,
           totalSpent: customer.custom_total_spent || 0,
           totalOrders: customer.custom_total_orders || 0,
           preferredPaymentMethod: "Cash",
@@ -490,7 +493,7 @@ export function useCustomerDetails(customerId: string | null) {
           },
           dateOfBirth: "",
           gender: "other",
-          loyaltyPoints: 0,
+          loyaltyPoints: apiCustomer.loyalty?.loyalty_points || 0,
           totalSpent: 0,
           totalOrders: 0,
           preferredPaymentMethod: apiCustomer.payment_method || "Cash",

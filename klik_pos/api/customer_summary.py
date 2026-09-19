@@ -101,3 +101,58 @@ def get_customer_account_summary(customer):
 		"outstanding": outstanding,
 		"currency": frappe.get_cached_value("Company", company, "default_currency") if company else None,
 	}
+
+
+def total_spent_sql(customer_expr, alias="si"):
+	"""SQL fragment for a customer's net revenue.
+
+	base_grand_total (company currency, never grand_total, which is transaction currency
+	and mixes units for a customer invoiced in more than one currency), summed over every
+	submitted, non-cancelled invoice regardless of channel (POS or back-office) — the same
+	AR-wide scope as get_customer_account_summary above, never narrowed to
+	custom_pos_opening_entry, which under-reports any customer who also has back-office
+	invoices. A return's base_grand_total is already negative, so summing it in nets it
+	without a separate subtraction.
+
+	This is the one place every "total spent" figure in the app must read from so they
+	cannot disagree; customer_expr is the caller's reference to the customer (a bound
+	`%s` placeholder for a standalone query, or a correlated column like `c.name` inside
+	a per-row subquery).
+	"""
+	return f"""
+		SELECT COALESCE(SUM({alias}.base_grand_total), 0)
+		FROM `tabSales Invoice` {alias}
+		WHERE {alias}.customer = {customer_expr}
+		AND {alias}.docstatus = 1
+		AND {alias}.status != 'Cancelled'
+	"""
+
+
+def total_orders_sql(customer_expr, alias="si"):
+	"""SQL fragment counting a customer's orders: submitted, non-cancelled, not a return.
+
+	Same AR-wide scope as total_spent_sql — see its docstring.
+	"""
+	return f"""
+		SELECT COUNT(*)
+		FROM `tabSales Invoice` {alias}
+		WHERE {alias}.customer = {customer_expr}
+		AND {alias}.docstatus = 1
+		AND {alias}.is_return = 0
+		AND {alias}.status != 'Cancelled'
+	"""
+
+
+def last_visit_sql(customer_expr, alias="si"):
+	"""SQL fragment for a customer's most recent order date.
+
+	Same AR-wide scope as total_spent_sql — see its docstring.
+	"""
+	return f"""
+		SELECT MAX({alias}.posting_date)
+		FROM `tabSales Invoice` {alias}
+		WHERE {alias}.customer = {customer_expr}
+		AND {alias}.docstatus = 1
+		AND {alias}.is_return = 0
+		AND {alias}.status != 'Cancelled'
+	"""
