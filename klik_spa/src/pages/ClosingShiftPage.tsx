@@ -27,6 +27,7 @@ import { getHeldOrders, deleteHeldOrder } from "../services/salesOrder";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatCurrencyWithSymbol } from "../utils/currency";
+import { computePaymentStats } from "../utils/paymentStats";
 import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
 import { clearAllCache } from "../utils/clearCache";
 import { useTableSort } from "../hooks/useTableSort";
@@ -199,73 +200,10 @@ export default function ClosingShiftPage() {
   );
 
   // Payment Stats Calculation - Calculate from filtered invoices
-  const paymentStats = useMemo(() => {
-    const stats: Record<string, {
-      name: string;
-      openingAmount: number;
-      amount: number;
-      transactions: number;
-    }> = {};
-
-    const ensurePaymentStat = (modeName?: string, openingAmount = 0) => {
-      if (!modeName) return null;
-
-      if (!stats[modeName]) {
-        stats[modeName] = {
-          name: modeName,
-          openingAmount,
-          amount: 0,
-          transactions: 0
-        };
-      } else if (openingAmount) {
-        stats[modeName].openingAmount = openingAmount;
-      }
-
-      return stats[modeName];
-    };
-
-    (modes || []).forEach((mode) => {
-      const modeName = mode.name || mode.mode_of_payment;
-      const openingAmount = Number(mode.openingAmount || mode.amount || 0);
-      ensurePaymentStat(modeName, openingAmount);
-    });
-
-    // Calculate amounts and transactions from filtered invoices
-    filteredInvoices.forEach(invoice => {
-      // Check if invoice has multiple payment methods
-      if (invoice.payment_methods && Array.isArray(invoice.payment_methods)) {
-        //eslint-disable-next-line @typescript-eslint/no-explicit-any
-        invoice.payment_methods.forEach((payment: any) => {
-          const stat = ensurePaymentStat(payment.mode_of_payment);
-          if (!stat) return;
-
-          const isReturn = invoice.status === "Return";
-          const amount = isReturn ? -Math.abs(payment.amount || 0) : (payment.amount || 0);
-          stat.amount += amount;
-
-          if (invoice.payment_methods.indexOf(payment) === 0) {
-            stat.transactions += 1;
-          }
-        });
-      } else {
-        const stat = ensurePaymentStat(invoice.paymentMethod);
-        if (!stat) return;
-
-        // For return invoices, ensure the amount is subtracted (negative)
-        const isReturn = invoice.status === "Return";
-        const amount = isReturn ? -Math.abs(invoice.totalAmount || 0) : (invoice.totalAmount || 0);
-        stat.amount += amount;
-        stat.transactions += 1;
-      }
-    });
-
-    // Add opening amounts to the total amounts for each payment method
-    Object.keys(stats).forEach(methodName => {
-      stats[methodName].amount += stats[methodName].openingAmount;
-    });
-
-    return stats;
-  }, [modes, filteredInvoices]);
+  const paymentStats = useMemo(
+    () => computePaymentStats(modes, filteredInvoices),
+    [modes, filteredInvoices]
+  );
   const total = Object.values(paymentStats).reduce((sum, stat) => sum + stat.amount, 0);
   const hasPaymentStats = Object.keys(paymentStats).length > 0;
 
