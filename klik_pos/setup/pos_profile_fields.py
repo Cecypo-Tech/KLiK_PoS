@@ -93,8 +93,11 @@ POS_PROFILE_FEATURE_FIELDS = [
         "insert_after": "custom_enable_shipping_rule",
         "description": (
             "Replace the item name with the item code as the primary label in the item list, "
-            "cart, and checkout preview. Different from 'Show Item Code In Product List', which "
-            "adds the code as a secondary subtitle alongside the name."
+            "cart, and checkout preview. Different from the 'Show Item Code' checkbox (POS "
+            "Configurations tab), which adds the code as a secondary line alongside the name "
+            "rather than replacing it - turning both on shows the code as the primary label "
+            "and the name as the secondary line. The printed receipt is unaffected either way; "
+            "it comes from the selected Print Format, not this display."
         ),
         "default": "0",
         "module": "KLiK PoS",

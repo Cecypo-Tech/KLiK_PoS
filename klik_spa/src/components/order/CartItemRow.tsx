@@ -446,7 +446,7 @@ export const CartItemRow = ({
                 </p>
                 {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
                   <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
-                    {item.item_code || item.id}
+                    {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
                   </p>
                 )}
               </div>

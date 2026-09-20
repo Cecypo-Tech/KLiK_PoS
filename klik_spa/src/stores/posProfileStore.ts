@@ -44,6 +44,7 @@ export interface POSProfile {
   custom_cart_item_insertion_position?: "Top" | "Bottom";
   hide_images?: boolean | number;
   custom_show_item_code_in_product_list?: boolean | number;
+  custom_use_item_code_as_display_name?: boolean | number;
   custom_enhanced_search?: boolean | number;
   custom_scale_barcodes_start_with?: string;
   is_tax_included_in_basic_rate?: boolean | number | string;

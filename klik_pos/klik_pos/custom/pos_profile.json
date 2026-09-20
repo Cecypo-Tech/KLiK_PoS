@@ -2656,7 +2656,7 @@
    "creation": "2026-04-30 21:28:30.715952",
    "default": "1",
    "depends_on": null,
-   "description": null,
+   "description": "Show the item code as a secondary line alongside the item name in the item list and cart. Different from 'Show Item Code Instead Of Item Name' (POS Item Details), which replaces the name with the code instead of adding a line beneath it.",
    "docstatus": 0,
    "dt": "POS Profile",
    "fetch_from": null,

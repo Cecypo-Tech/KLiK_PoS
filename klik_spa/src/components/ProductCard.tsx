@@ -209,7 +209,7 @@ export default function ProductCard({
             </h3>
             {showItemCode && (
               <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
-                {item.item_code || item.id}
+                {useItemCodeAsName ? item.name : (item.item_code || item.id)}
               </p>
             )}
             {item.is_product_bundle && (

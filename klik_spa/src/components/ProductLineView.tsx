@@ -179,7 +179,7 @@ export default function ProductLineView({
                       </div>
                       {showItemCode && (
                         <p className={`text-gray-600 dark:text-gray-300 break-words ${isMobile ? "text-xs leading-tight" : "text-xs"} ${isDisabled ? "opacity-60" : ""}`}>
-                          {item.item_code || item.id}
+                          {useItemCodeAsName ? item.name : (item.item_code || item.id)}
                         </p>
                       )}
                       <div className={`flex flex-wrap items-center gap-1 mt-0.5 ${isDisabled ? "opacity-60" : ""}`}>
