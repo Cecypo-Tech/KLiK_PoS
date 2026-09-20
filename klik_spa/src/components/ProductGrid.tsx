@@ -36,7 +36,7 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem } = useCartStore();
+  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -212,8 +212,17 @@ export default function ProductGrid({
           void updateQuantity(cartItem.id, cartItem.quantity - step);
         }
       }
+    } else if (e.key === '.') {
+      // No match: leave the key unbound (no preventDefault) rather than swallow it.
+      const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
+      if (!cartItem) return;
+
+      e.preventDefault();
+      setQuantityBuffer('');
+      toggleItemExpansion(cartItem.id);
+      document.querySelector<HTMLElement>(`[data-cart-item-id="${cartItem.id}"][tabindex]`)?.focus();
     }
-  }, [cartItems, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, updateQuantity]);
+  }, [cartItems, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;

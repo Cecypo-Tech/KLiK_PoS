@@ -57,6 +57,8 @@ export default function OrderSummary({
     removeItem,
     clearCart,
     updateItemDescription,
+    expandedCartItemId,
+    toggleItemExpansion,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -64,7 +66,6 @@ export default function OrderSummary({
   const [isValidatingCheckout, setIsValidatingCheckout] = useState(false);
   const [isRecoveringCheckout, setIsRecoveringCheckout] = useState(false);
   const [isHoldingOrder, setIsHoldingOrder] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [pendingSalespersonAction, setPendingSalespersonAction] = useState<
     "checkout" | "hold" | null
   >(null);
@@ -251,32 +252,25 @@ export default function OrderSummary({
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
-      setExpandedItems((prev) => {
-        if (prev.size === 0) return prev;
+      const currentId = useCartStore.getState().expandedCartItemId;
+      if (!currentId) return;
 
-        const target = event.target as HTMLElement | null;
-        if (!target) return prev;
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
 
-        const clickedRow = target.closest("[data-cart-item-id]") as HTMLElement | null;
-        const clickedItemId = clickedRow?.dataset.cartItemId;
-        const activeElement = document.activeElement as HTMLElement | null;
-        const activeRow = activeElement?.closest("[data-cart-item-id]") as HTMLElement | null;
-        const activeItemId = activeRow?.dataset.cartItemId;
-        const itemToKeepOpen =
-          (clickedItemId && prev.has(clickedItemId) && clickedItemId) ||
-          (activeItemId && prev.has(activeItemId) && activeItemId) ||
-          null;
+      const clickedRow = target.closest("[data-cart-item-id]") as HTMLElement | null;
+      const clickedItemId = clickedRow?.dataset.cartItemId;
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeRow = activeElement?.closest("[data-cart-item-id]") as HTMLElement | null;
+      const activeItemId = activeRow?.dataset.cartItemId;
+      const itemToKeepOpen =
+        (clickedItemId === currentId && clickedItemId) ||
+        (activeItemId === currentId && activeItemId) ||
+        null;
 
-        if (!itemToKeepOpen) {
-          return new Set();
-        }
-
-        if (prev.size === 1) {
-          return prev;
-        }
-
-        return new Set([itemToKeepOpen]);
-      });
+      if (!itemToKeepOpen) {
+        useCartStore.setState({ expandedCartItemId: null });
+      }
     };
 
     document.addEventListener("click", handleDocumentClick, true);
@@ -595,16 +589,6 @@ export default function OrderSummary({
     }
   };
 
-  const toggleItemExpansion = (itemId: string) => {
-    setExpandedItems((prev) => {
-      if (prev.has(itemId)) {
-        return new Set();
-      }
-
-      return new Set([itemId]);
-    });
-  };
-
   return (
     <div
       className={`${
@@ -670,7 +654,7 @@ export default function OrderSummary({
                   key={item.id}
                   item={item}
                   itemId={item.id}
-                  isExpanded={expandedItems.has(item.id)}
+                  isExpanded={expandedCartItemId === item.id}
                   onToggleExpand={() => toggleItemExpansion(item.id)}
                   itemDiscount={itemDiscount}
                   onUpdateQuantity={handleUpdateQuantity}

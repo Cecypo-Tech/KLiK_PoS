@@ -8,6 +8,7 @@ import { clearDraftInvoiceCache } from '../utils/draftInvoiceCache'
 import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
+import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -146,6 +147,11 @@ interface CartState {
   shippingRule: string | null
   setShippingRule: (rule: string | null) => void
   updateItemDescription: (id: string, description: string) => void
+  /** Which cart line's details panel is open. At most one at a time (opening a
+   * second line closes the first). Deliberately not persisted: it's transient UI
+   * state, not part of the cart itself. */
+  expandedCartItemId: string | null
+  toggleItemExpansion: (id: string) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -183,6 +189,10 @@ export const useCartStore = create<CartState>()(
       isPricingLoading: false,
       pricingError: null,
       shippingRule: null,
+      expandedCartItemId: null,
+      toggleItemExpansion: (id) => set((s) => ({
+        expandedCartItemId: nextExpandedCartItemId(s.expandedCartItemId, id),
+      })),
 
       refreshCartPricing: async () => {
         const state = get();
@@ -576,7 +586,13 @@ export const useCartStore = create<CartState>()(
       },
     }),
     {
-      name: 'beveren-cart-storage'
+      name: 'beveren-cart-storage',
+      // expandedCartItemId is transient UI state, not cart data - and a stale
+      // expanded row reappearing after a reload would be surprising.
+      partialize: (state) => {
+        const { expandedCartItemId: _expandedCartItemId, ...rest } = state;
+        return rest;
+      },
     }
   )
 )

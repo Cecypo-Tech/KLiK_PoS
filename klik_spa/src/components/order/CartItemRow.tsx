@@ -423,8 +423,19 @@ export const CartItemRow = ({
         className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/40 ${glowing ? "cart-item-glow" : ""}`}
       >
         <div
-          className={`${isMobile ? "px-3 py-2" : "px-3 py-1.5"} cursor-pointer`}
+          data-cart-item-id={itemId}
+          tabIndex={0}
+          className={`${isMobile ? "px-3 py-2" : "px-3 py-1.5"} cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-beveren-400/50`}
           onClick={onToggleExpand}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && isExpanded) {
+              e.preventDefault();
+              onToggleExpand();
+              const el = document.getElementById("pos-search-input") as HTMLInputElement | null;
+              el?.focus();
+              el?.select();
+            }
+          }}
         >
           <div className={CART_ROW_GRID}>
             {/* Item: chevron, name, code, actions */}
