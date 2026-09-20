@@ -14,6 +14,7 @@ import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
+import { getItemDisplayName } from "../../utils/itemDisplayName";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -441,7 +442,7 @@ export const CartItemRow = ({
               </svg>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium leading-tight text-gray-900 dark:text-white line-clamp-2 break-words" title={item.name}>
-                  {item.name}
+                  {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
                 </p>
                 {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
                   <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">

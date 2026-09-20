@@ -49,6 +49,7 @@ export default function ProductGrid({
   const defaultView = posDetails?.custom_default_view || "Grid View";
   const viewMode = propViewMode || (defaultView === "List View" ? "list" : "grid");
   const showItemCode = !!posDetails?.custom_show_item_code_in_product_list;
+  const useItemCodeAsName = !!posDetails?.custom_use_item_code_as_display_name;
   const hideImages = !!posDetails?.hide_images;
   const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
   const isSalespersonLockActive = requiresSalespersonPin && !activeSalesperson && !isRestoring;
@@ -291,6 +292,7 @@ export default function ProductGrid({
           onAddToCart={handleAddToCart}
           isMobile={isMobile}
           showItemCode={showItemCode}
+          useItemCodeAsName={useItemCodeAsName}
           scannerOnly={scannerOnly}
           hideImages={hideImages}
           focusedIndex={focusedIndex}
@@ -409,6 +411,7 @@ export default function ProductGrid({
             onAddToCart={handleAddToCart}
             isMobile={isMobile}
             showItemCode={showItemCode}
+            useItemCodeAsName={useItemCodeAsName}
             scannerOnly={scannerOnly}
             productIndex={i}
             isFocused={focusedIndex === i}

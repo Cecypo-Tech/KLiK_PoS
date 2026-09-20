@@ -7,6 +7,7 @@ import ProductDetailsModal from "./ProductDetailsModal";
 import { formatCurrencyWithSymbol } from "../utils/currency";
 import { isItemOutOfStock } from "../utils/stock";
 import { formatAvailability } from "../utils/availability";
+import { getItemDisplayName } from "../utils/itemDisplayName";
 
 interface ProductCardProps {
   item: MenuItem;
@@ -14,6 +15,7 @@ interface ProductCardProps {
   isMobile?: boolean;
   scannerOnly?: boolean;
   showItemCode?: boolean;
+  useItemCodeAsName?: boolean;
   productIndex?: number;
   isFocused?: boolean;
   onFocused?: () => void;
@@ -28,6 +30,7 @@ export default function ProductCard({
   isMobile = false,
   scannerOnly = false,
   showItemCode = false,
+  useItemCodeAsName = false,
   productIndex,
   isFocused = false,
   onFocused,
@@ -202,7 +205,7 @@ export default function ProductCard({
             <h3
               className={`font-semibold text-gray-900 dark:text-white ${isMobile ? "text-xs leading-tight break-words whitespace-normal" : "text-sm truncate"}`}
             >
-              {item.name}
+              {getItemDisplayName(item, useItemCodeAsName)}
             </h3>
             {showItemCode && (
               <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">

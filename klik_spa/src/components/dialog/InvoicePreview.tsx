@@ -6,6 +6,8 @@ import { formatTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
 import type { Calculations, PaymentAmount } from "./types";
 import type { CartItem } from "../../../types";
 import DisplayPrintPreview from "../../utils/invoicePrint";
+import { getItemDisplayName } from "../../utils/itemDisplayName";
+import { usePOSProfileStore } from "../../stores/posProfileStore";
 
 interface InvoicePreviewProps {
   invoiceSubmitted: boolean;
@@ -71,6 +73,9 @@ export default function InvoicePreview({
   taxBreakdown = [],
   shippingAmount = 0,
 }: InvoicePreviewProps) {
+  const { posDetails } = usePOSProfileStore();
+  const useItemCodeAsName = !!posDetails?.custom_use_item_code_as_display_name;
+
   if (invoiceSubmitted && invoiceData) {
     return (
       <div className="mb-4"> 
@@ -133,7 +138,7 @@ export default function InvoicePreview({
             return (
             <div key={index} className="flex justify-between text-sm">
               <div className="flex-1">
-                <p className="font-medium text-gray-900 dark:text-white">{item.name}</p>
+                <p className="font-medium text-gray-900 dark:text-white">{getItemDisplayName(item, useItemCodeAsName)}</p>
                 <p className="text-gray-600 dark:text-gray-400">
                   {item.quantity} x {formatCurrencyWithSymbol(lineRate, displayCurrencySymbol)}
                 </p>

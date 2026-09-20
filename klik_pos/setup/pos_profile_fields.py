@@ -86,6 +86,19 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "0",
         "module": "KLiK PoS",
     },
+    {
+        "fieldname": "custom_use_item_code_as_display_name",
+        "label": "Show Item Code Instead Of Item Name",
+        "fieldtype": "Check",
+        "insert_after": "custom_enable_shipping_rule",
+        "description": (
+            "Replace the item name with the item code as the primary label in the item list, "
+            "cart, and checkout preview. Different from 'Show Item Code In Product List', which "
+            "adds the code as a secondary subtitle alongside the name."
+        ),
+        "default": "0",
+        "module": "KLiK PoS",
+    },
 ]
 
 

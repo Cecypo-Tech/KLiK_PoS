@@ -8,6 +8,7 @@ import ProductDetailsModal from "./ProductDetailsModal"
 import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isItemOutOfStock } from "../utils/stock"
 import { formatAvailability } from "../utils/availability"
+import { getItemDisplayName } from "../utils/itemDisplayName"
 
 interface ProductLineViewProps {
   items: MenuItem[]
@@ -15,6 +16,7 @@ interface ProductLineViewProps {
   isMobile?: boolean
   scannerOnly?: boolean
   showItemCode?: boolean
+  useItemCodeAsName?: boolean
   hideImages?: boolean
   focusedIndex?: number
   onItemFocus?: (index: number) => void
@@ -29,6 +31,7 @@ export default function ProductLineView({
   isMobile = false,
   scannerOnly = false,
   showItemCode = false,
+  useItemCodeAsName = false,
   hideImages = false,
   focusedIndex = -1,
   onItemFocus,
@@ -149,7 +152,7 @@ export default function ProductLineView({
                     <div className="flex-1 min-w-0 relative">
                       <div className="flex items-start gap-1">
                         <h3 className={`font-medium text-gray-900 dark:text-white break-words ${isMobile ? "text-xs leading-tight" : "text-sm"} ${isDisabled ? "opacity-60" : ""}`}>
-                          {item.name}
+                          {getItemDisplayName(item, useItemCodeAsName)}
                         </h3>
                         <div
                           className="relative inline-block flex-shrink-0 mt-px"

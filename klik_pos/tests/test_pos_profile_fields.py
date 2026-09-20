@@ -57,6 +57,14 @@ class TestPosProfileFeatureFields(FrappeTestCase):
             names.index("custom_allow_viewing_other_cashiers"),
         )
 
+    def test_spec_includes_item_code_display_name_toggle(self):
+        names = [f["fieldname"] for f in POS_PROFILE_FEATURE_FIELDS]
+        self.assertIn("custom_use_item_code_as_display_name", names)
+        f = next(x for x in POS_PROFILE_FEATURE_FIELDS if x["fieldname"] == "custom_use_item_code_as_display_name")
+        self.assertEqual(f["fieldtype"], "Check")
+        self.assertEqual(f["default"], "0")
+        self.assertEqual(f["module"], "KLiK PoS")
+
     # "Present" means a standard DocField or a Custom Field record exists. A bare
     # column does not count: deleting a Custom Field leaves its column behind, and a
     # column-only check then never recreates the field, so the checkbox vanishes.
@@ -166,6 +174,6 @@ class TestPosProfileFormLayout(FrappeTestCase):
         table = order.index("custom_pos_extra_fields")
         self.assertLess(start, column)
         self.assertLess(column, table)
-        # Seven checkboxes, 4 | 3, with the Extra Fields table closing the second column.
-        self.assertEqual(len(order[start + 1:column]), 4)
+        # Eight checkboxes, 5 | 3, with the Extra Fields table closing the second column.
+        self.assertEqual(len(order[start + 1:column]), 5)
         self.assertEqual(len(order[column + 1:table]), 3)
