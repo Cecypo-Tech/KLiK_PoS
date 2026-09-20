@@ -510,7 +510,11 @@ export const useCartStore = create<CartState>()(
 
       removeItem: (id) => {
         set((state) => ({
-          cartItems: state.cartItems.filter((item) => item.id !== id)
+          cartItems: state.cartItems.filter((item) => item.id !== id),
+          // A removed line's id can be reused by a later add (addToCart takes it
+          // straight off the item), so a stale expanded id left pointing at it
+          // would silently attach to whatever line lands on that id next.
+          expandedCartItemId: state.expandedCartItemId === id ? null : state.expandedCartItemId,
         }));
         get().refreshCartPricing();
       },
@@ -527,6 +531,7 @@ export const useCartStore = create<CartState>()(
           extraFields: {},
           selectedPriceList: null,
           shippingRule: null,
+          expandedCartItemId: null,
         }));
       },
 
@@ -590,7 +595,8 @@ export const useCartStore = create<CartState>()(
       // expandedCartItemId is transient UI state, not cart data - and a stale
       // expanded row reappearing after a reload would be surprising.
       partialize: (state) => {
-        const { expandedCartItemId: _expandedCartItemId, ...rest } = state;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { expandedCartItemId, ...rest } = state;
         return rest;
       },
     }
