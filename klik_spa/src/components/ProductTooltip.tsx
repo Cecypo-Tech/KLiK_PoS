@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
 import type { MenuItem } from "../../types";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../utils/currency";
+import { getCostMargin, getInclusiveTaxRate } from "../utils/costMargin";
 
 interface Batch {
   batch_id: string;
@@ -99,16 +100,21 @@ export default function ProductTooltip({
     });
   }, [isLoading]);
 
-  const costPrice = data?.valuation_rate || data?.standard_rate || item.cost_price || 0;
-  // costPrice (valuation_rate) never includes sales tax. When the sell price does (Price
-  // List/tax template marks it inclusive), gross the cost up by the same tax rate before
-  // comparing to the (tax-inclusive) sell price, so margin reflects what the till actually
-  // collects vs. what covering this sale actually costs, VAT included.
-  const taxRate = Number(item.tax_info?.total_tax_rate || 0);
-  const isInclusiveTax = !!item.tax_info?.is_inclusive && taxRate > 0;
-  const costInclTax = isInclusiveTax ? costPrice * (1 + taxRate / 100) : costPrice;
-  const margin = item.price - costInclTax;
-  const marginPercentage = costInclTax > 0 ? (margin / item.price) * 100 : 0;
+  // valuation_rate/standard_rate come back per stock UOM; item.cost_price is already per
+  // selling UOM. Valuation never includes sales tax, so the cost is grossed up by whatever
+  // tax is baked into the sell price before the two are compared.
+  const conversionFactor = Number(item.conversion_factor) > 0 ? Number(item.conversion_factor) : 1;
+  const stockUomCost = data?.valuation_rate || data?.standard_rate || 0;
+  const costPrice = stockUomCost ? stockUomCost * conversionFactor : item.cost_price || 0;
+  const inclusiveTaxRate = getInclusiveTaxRate(item.tax_info);
+  const isInclusiveTax = inclusiveTaxRate > 0;
+  const { costInclTax, margin } = getCostMargin({
+    sellPrice: item.price,
+    costPerStockUom: costPrice,
+    inclusiveTaxRate,
+  });
+  const marginPercentage = costInclTax > 0 && item.price > 0 ? (margin / item.price) * 100 : 0;
+  const isLoss = margin < 0;
   const bundleComponents = item.bundle_items ?? [];
 
   const handleClick = (e: React.MouseEvent) => {
@@ -328,29 +334,35 @@ export default function ProductTooltip({
             </div>
           )}
 
-          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 p-3 rounded-lg">
+          <div
+            className={`p-3 rounded-lg bg-gradient-to-r ${
+              isLoss
+                ? "from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20"
+                : "from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20"
+            }`}
+          >
             <div className="flex justify-between items-baseline">
               <div>
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold tracking-wide">
-                  Profit Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}
+                <p className={`text-[10px] uppercase font-semibold tracking-wide ${isLoss ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                  {isLoss ? "Loss" : "Profit Margin"}{isInclusiveTax ? " (cost incl. VAT)" : ""}
                 </p>
-                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
+                <p className={`text-2xl font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
                   {formatCurrencyWithSymbol(margin, item.currency_symbol)}
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold tracking-wide">
+                <p className={`text-[10px] uppercase font-semibold tracking-wide ${isLoss ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                   Markup
                 </p>
-                <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
+                <p className={`text-lg font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
                   {marginPercentage.toFixed(1)}%
                 </p>
               </div>
             </div>
-            <div className="mt-2 h-1.5 bg-emerald-200 dark:bg-emerald-800 rounded-full overflow-hidden">
+            <div className={`mt-2 h-1.5 rounded-full overflow-hidden ${isLoss ? "bg-red-200 dark:bg-red-800" : "bg-emerald-200 dark:bg-emerald-800"}`}>
               <div
                 className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full"
-                style={{ width: `${Math.min(marginPercentage, 100)}%` }}
+                style={{ width: `${Math.max(0, Math.min(marginPercentage, 100))}%` }}
               />
             </div>
           </div>

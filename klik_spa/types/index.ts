@@ -118,7 +118,10 @@ export interface MenuItem {
   currency_symbol?: string
   tax_info?: ItemTaxInfo
   barcode?: string
+  /** Per selling UOM (the UOM `price` is quoted in). */
   cost_price?: number
+  /** Stock UOMs per selling UOM. */
+  conversion_factor?: number
   price_lists?: PriceListRate[]
   item_group?: string // Item group reference
   is_product_bundle?: boolean

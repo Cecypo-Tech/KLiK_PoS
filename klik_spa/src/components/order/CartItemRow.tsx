@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye, Pencil } from "lucide-react";
 import { toast } from "react-toastify";
-import type { BundleEntry, CartItem } from "../../../types";
+import type { BundleEntry, CartItem, ItemTaxInfo } from "../../../types";
 import { QuantityInput } from "./QuantityInput";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { UOMSelectField } from "./UOMSelectField";
@@ -15,6 +15,7 @@ import { CART_ROW_GRID } from "./cartTableLayout";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
+import { getCostMargin, getInclusiveTaxRate } from "../../utils/costMargin";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -406,18 +407,27 @@ export const CartItemRow = ({
   const currentWarehouseStock = fullItemData?.warehouse_stock?.find(wh => wh.warehouse === warehouse);
   const availableStock = currentWarehouseStock?.bal_qty || 0;
   const valuationRate = typeof currentWarehouseStock?.val_rate === "number" ? currentWarehouseStock.val_rate : null;
-  // valuationRate never includes sales tax. discountedPrice does when the item's tax is
-  // inclusive-only (baked into the price, not added on top) - gross the cost up by the same
-  // tax rate before comparing to the (tax-inclusive) sell price, so margin reflects what the
-  // till actually collects vs. what covering this sale actually costs, VAT included.
-  const isInclusiveTax = !hasExclusiveTax && totalTaxRate > 0;
-  const valuationRateInclTax = valuationRate !== null && isInclusiveTax ? valuationRate * (1 + totalTaxRate / 100) : valuationRate;
-  const hasValidValuationRate = valuationRateInclTax !== null && valuationRateInclTax > 0;
-  const isNegativeMargin = hasValidValuationRate ? discountedPrice < valuationRateInclTax! : false;
-  const marginAmount = hasValidValuationRate ? discountedPrice - valuationRateInclTax! : 0;
-  const marginPercentage = hasValidValuationRate ? (marginAmount / valuationRateInclTax!) * 100 : 0;
+  // val_rate is per stock UOM and never includes sales tax; discountedPrice is per the line's
+  // UOM and includes whatever tax is baked into the rate. The list's tax_info (carried onto the
+  // cart item) knows the POS Profile's tax template too; a line restored without it falls back
+  // to the cart's own tax fields, which only see an Item Tax Template.
+  const listTaxInfo = (item as CartItem & { tax_info?: ItemTaxInfo }).tax_info;
+  const inclusiveTaxRate = listTaxInfo
+    ? getInclusiveTaxRate(listTaxInfo)
+    : !hasExclusiveTax ? totalTaxRate : 0;
+  const isInclusiveTax = inclusiveTaxRate > 0;
+  const hasValidValuationRate = valuationRate !== null && valuationRate > 0;
+  const { costInclTax: valuationRateInclTax, margin: lineMargin } = getCostMargin({
+    sellPrice: discountedPrice,
+    costPerStockUom: valuationRate ?? 0,
+    inclusiveTaxRate,
+    conversionFactor: item.conversion_factor,
+  });
+  const isNegativeMargin = hasValidValuationRate ? lineMargin < 0 : false;
+  const marginAmount = hasValidValuationRate ? lineMargin : 0;
+  const marginPercentage = hasValidValuationRate ? (marginAmount / valuationRateInclTax) * 100 : 0;
 
-  const showPositiveMarginWarning = !restrictCostVisibility && hasValidValuationRate && !isNegativeMargin && discountedPrice > valuationRateInclTax!;
+  const showPositiveMarginWarning = !restrictCostVisibility && hasValidValuationRate && lineMargin > 0;
   const showNegativeMarginWarning = !restrictCostVisibility && hasValidValuationRate && isNegativeMargin && discountedPrice > 0;
   const showStockWarning = item.quantity > availableStock && availableStock > 0;
   const showNoStockWarning = availableStock === 0;
