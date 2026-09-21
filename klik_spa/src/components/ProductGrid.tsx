@@ -36,7 +36,7 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion } = useCartStore();
+  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -219,10 +219,16 @@ export default function ProductGrid({
 
       e.preventDefault();
       setQuantityBuffer('');
+      const wasExpanded = expandedCartItemId === cartItem.id;
       toggleItemExpansion(cartItem.id);
-      document.querySelector<HTMLElement>(`[data-cart-item-id="${cartItem.id}"][tabindex]`)?.focus();
+      // Opening moves focus onto the cart line so it can be worked on there;
+      // collapsing an already-open line leaves focus on the item list, where
+      // this keypress originated, instead of jumping it to a row that just closed.
+      if (!wasExpanded) {
+        document.querySelector<HTMLElement>(`[data-cart-item-id="${cartItem.id}"][tabindex]`)?.focus();
+      }
     }
-  }, [cartItems, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [cartItems, expandedCartItemId, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;

@@ -59,6 +59,7 @@ docs/superpowers/
 .codeium/
 .continue/
 .gstack/
+.playwright-mcp/
 
 # klik_spa build output (Frappe Cloud rebuilds this fresh on every deploy
 # via the root package.json's "build" script; run `yarn build` locally
