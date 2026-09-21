@@ -109,7 +109,7 @@ export default function KeyboardShortcutsPanel({ isOpen, onClose }: KeyboardShor
 
       {/* Panel */}
       <div
-        className="relative z-10 w-[420px] max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700"
+        className="relative z-10 w-[640px] max-w-[90vw] max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -129,10 +129,12 @@ export default function KeyboardShortcutsPanel({ isOpen, onClose }: KeyboardShor
           </button>
         </div>
 
-        {/* Groups */}
-        <div className="px-5 py-4 space-y-5">
+        {/* Groups - two columns, auto-balanced by the browser so a group added later
+            doesn't need its column assignment hand-picked. break-inside-avoid keeps
+            one group's rows from splitting across the column break. */}
+        <div className="px-5 py-4 columns-2 gap-x-8">
           {GROUPS.map((group) => (
-            <div key={group.label}>
+            <div key={group.label} className="break-inside-avoid mb-5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-2">
                 {group.label}
               </p>
