@@ -970,37 +970,39 @@ export const CartItemRow = ({
                 ) : null}
 
                 {currentWarehouseStock && (
-                  <div className={`grid gap-3 ${(showPositiveMarginWarning || showNegativeMarginWarning) ? "grid-cols-3" : "grid-cols-2"}`}>
-                    <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-3 border border-gray-200 dark:border-gray-600">
+                  <div className={`grid gap-2 ${(showPositiveMarginWarning || showNegativeMarginWarning) ? "grid-cols-3" : "grid-cols-2"}`}>
+                    <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
                       <p className="text-[10px] text-gray-400 uppercase font-semibold">Stock Balance</p>
                       <p className="text-base font-bold text-gray-900 dark:text-white">
                         {currentWarehouseStock.bal_qty.toLocaleString()} {fullItemData?.uom}
                       </p>
-                      <p className="text-[10px] text-gray-500 mt-1">in {warehouse}</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">in {warehouse}</p>
                     </div>
                     {!restrictCostVisibility && (
-                      <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-3 border border-gray-200 dark:border-gray-600">
-                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate{isInclusiveTax ? " (incl. VAT)" : ""}</p>
-                        <p className="text-base font-bold text-gray-900 dark:text-white">
+                      <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
+                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate</p>
+                        <p className="whitespace-nowrap text-base font-bold text-gray-900 dark:text-white">
                           {formatCurrencyWithSymbol(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate, currency_symbol)}
+                          {isInclusiveTax && <span className="ml-1 text-[9px] font-medium text-gray-500">(incl. VAT)</span>}
                         </p>
-                        <p className="text-[10px] text-gray-500 mt-1">
-                          per {item.uom || fullItemData?.uom}
-                          {isInclusiveTax ? ` · ${formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)} excl. VAT per ${fullItemData?.uom}` : ""}
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          {isInclusiveTax
+                            ? `${formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)} (excl. VAT)`
+                            : `per ${item.uom || fullItemData?.uom}`}
                         </p>
                       </div>
                     )}
                     {showPositiveMarginWarning && (
-                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md p-3 border border-blue-200 dark:border-blue-800">
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md px-3 pt-2 pb-1.5 border border-blue-200 dark:border-blue-800">
                         <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin</p>
                         <p className="text-base font-bold text-green-600 dark:text-green-400">
                           +{formatCurrencyWithSymbol(marginAmount, currency_symbol)}
                         </p>
-                        <p className="text-[10px] text-green-600 dark:text-green-400 mt-1">{marginPercentage.toFixed(1)}%</p>
+                        <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">{marginPercentage.toFixed(1)}%</p>
                       </div>
                     )}
                     {showNegativeMarginWarning && (
-                      <div className="bg-red-50 dark:bg-red-900/20 rounded-md p-3 border border-red-200 dark:border-red-800">
+                      <div className="bg-red-50 dark:bg-red-900/20 rounded-md px-3 pt-2 pb-1.5 border border-red-200 dark:border-red-800">
                         <p className="text-[10px] text-red-500 dark:text-red-400 uppercase font-semibold flex items-center gap-1">
                           <AlertTriangle size={9} />
                           Margin
@@ -1008,7 +1010,7 @@ export const CartItemRow = ({
                         <p className="text-base font-bold text-red-600 dark:text-red-400">
                           {formatCurrencyWithSymbol(marginAmount, currency_symbol)}
                         </p>
-                        <p className="text-[10px] text-red-500 dark:text-red-400 mt-1">{marginPercentage.toFixed(1)}% · below cost</p>
+                        <p className="text-[10px] text-red-500 dark:text-red-400 mt-0.5">{marginPercentage.toFixed(1)}% · below cost</p>
                       </div>
                     )}
                   </div>
