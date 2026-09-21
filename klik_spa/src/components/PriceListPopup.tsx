@@ -27,6 +27,7 @@ export default function PriceListPopup({
   return createPortal(
     <div
       data-price-popup
+      role="listbox"
       style={{
         position: "fixed",
         left: position.left,
@@ -41,11 +42,13 @@ export default function PriceListPopup({
         return (
           <div
             key={`${option.label}-${index}`}
+            role="option"
+            aria-selected={isSelected}
             // mousedown, not click: the opener keeps focus, so its key handling keeps working.
             onMouseDown={onSelect ? (e) => { e.preventDefault(); e.stopPropagation(); onSelect(index); } : undefined}
             className={`flex items-center justify-between px-3 py-2 text-sm ${
-              onSelect ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 " : ""
-            }${
+              onSelect ? "cursor-pointer " : ""
+            }${onSelect && !isSelected ? "hover:bg-gray-50 dark:hover:bg-gray-800 " : ""}${
               isSelected
                 ? "bg-beveren-50 dark:bg-beveren-900/30 text-beveren-700 dark:text-beveren-300"
                 : "text-gray-700 dark:text-gray-200"

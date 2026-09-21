@@ -392,14 +392,16 @@ export const CartItemRow = ({
     setLocalDiscountPct(item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0);
   };
 
-  const handleLinePriceListChange = (priceListName: string) => {
+  // `entry` pins the exact row picked: one price list can have several Item Prices (per UOM,
+  // per customer), and looking it up again by name alone would apply whichever comes first.
+  const handleLinePriceListChange = (priceListName: string, entry?: PriceListEntry) => {
     onDiscountChange(item.id, "selectedPriceList", priceListName);
     if (!priceListName) {
       handleRateChange(undefined);
       return;
     }
 
-    const matchingPrice = fullItemData?.price_lists?.find((priceList) =>
+    const matchingPrice = entry || fullItemData?.price_lists?.find((priceList) =>
       priceList.price_list === priceListName
       && (!priceList.uom || priceList.uom === item.uom)
     ) || fullItemData?.price_lists?.find((priceList) => priceList.price_list === priceListName);
@@ -415,9 +417,12 @@ export const CartItemRow = ({
     (priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0
   );
   const linePriceOptions = buildPriceOptions(linePriceLists, false, 0);
-  const activeLinePriceList = linePriceLists.find(
+  const selectedLinePriceLists = linePriceLists.filter(
     (priceList) => priceList.price_list === itemDiscount.selectedPriceList
   );
+  const activeLinePriceList =
+    selectedLinePriceLists.find((priceList) => Number(priceList.rate) === Number(itemDiscount.customRate))
+    || selectedLinePriceLists[0];
 
   const openLinePricePopup = () => {
     const rect = priceTriggerRef.current?.getBoundingClientRect();
@@ -435,20 +440,30 @@ export const CartItemRow = ({
   const commitLinePriceOption = (index: number) => {
     const option = linePriceOptions[index];
     setLinePricePopup(null);
-    if (option) handleLinePriceListChange(option.label);
+    if (option) handleLinePriceListChange(option.label, linePriceLists[index]);
   };
 
   const handlePriceTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
-    // Never let these reach the row (Escape collapses it) or the POS-wide shortcuts.
+    const isActivate = e.key === "Enter" || e.key === " ";
+    if (!linePricePopup) {
+      // Closed: only opening is ours. Everything else (F3, Backspace-to-search, Escape to
+      // collapse the line) must still reach the row and the POS-wide shortcuts.
+      if (isActivate) {
+        e.preventDefault();
+        e.stopPropagation();
+        openLinePricePopup();
+      }
+      return;
+    }
+    // Open: keep navigation keys away from the row and the POS-wide shortcuts.
     e.stopPropagation();
-    if (!linePricePopup) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const direction = e.key === "ArrowDown" ? 1 : -1;
       setLinePricePopup((p) =>
         p ? { ...p, selectedIndex: cyclePriceOptionIndex(p.selectedIndex, linePriceOptions.length, direction) } : p
       );
-    } else if (e.key === "Enter" || e.key === " ") {
+    } else if (isActivate) {
       e.preventDefault();
       commitLinePriceOption(linePricePopup.selectedIndex);
     } else if (e.key === "Escape" || e.key === "Tab") {
@@ -597,7 +612,15 @@ export const CartItemRow = ({
                   aria-expanded={!!linePricePopup}
                   onClick={(e) => { e.stopPropagation(); if (linePricePopup) setLinePricePopup(null); else openLinePricePopup(); }}
                   onKeyDown={handlePriceTriggerKeyDown}
-                  title="Switch price list for this line"
+                  // Firefox clicks a button on Space keyup even when keydown was prevented,
+                  // which would reopen the popup straight after a Space commit.
+                  onKeyUp={(e) => { if (e.key === " ") e.preventDefault(); }}
+                  onBlur={() => setLinePricePopup(null)}
+                  title={
+                    activeLinePriceList
+                      ? `${activeLinePriceList.price_list}: ${formatCurrencyWithSymbol(Number(activeLinePriceList.rate || 0), currency_symbol)} - switch price list`
+                      : "Switch price list for this line"
+                  }
                   className={`max-w-full inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
                     activeLinePriceList
                       ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
@@ -1029,7 +1052,7 @@ export const CartItemRow = ({
         />
       </div>
 
-      {linePricePopup && (
+      {linePricePopup && linePriceOptions.length > 0 && (
         <PriceListPopup
           options={linePriceOptions}
           selectedIndex={linePricePopup.selectedIndex}
