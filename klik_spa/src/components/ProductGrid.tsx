@@ -18,6 +18,7 @@ import PriceListPopup from "./PriceListPopup";
 interface PriceListEntry {
   price_list: string;
   rate: number;
+  uom?: string;
 }
 
 
@@ -79,9 +80,20 @@ export default function ProductGrid({
     options: PriceOption[];
     selectedIndex: number;
     customValue: string;
-    anchorRect: { top: number; left: number; bottom: number } | null;
+    position: { left: number; top?: number; bottom?: number };
   } | null>(null);
   const allowRateChange = !!posDetails?.allow_rate_change;
+  // The price-list entries themselves need BOTH flags, mirroring the cart's own
+  // price-list <select> (CartItemRow.tsx): rendered under allow_price_list_switching,
+  // but disabled unless allow_rate_change is also on. allowRateChange alone still
+  // gates the separate "Custom Price" entry, the same way it alone gates the Rate
+  // field - a till with only allow_rate_change on can still type a custom price
+  // without being handed every price list to switch between.
+  const allowPriceListOptions = allowRateChange && !!posDetails?.allow_price_list_switching;
+  const isTaxIncludedInBasicRate =
+    posDetails?.is_tax_included_in_basic_rate === 1
+    || posDetails?.is_tax_included_in_basic_rate === "1"
+    || posDetails?.is_tax_included_in_basic_rate === true;
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
@@ -113,6 +125,25 @@ export default function ProductGrid({
   // this never fires mid-buffer. The price popup gets the same guarantee for the
   // same reason.
   useEffect(() => { setQuantityBuffer(''); setPricePopup(null); }, [focusedIndex]);
+
+  // The popup only auto-closes on a focus/item-set change (above) or Escape -
+  // neither fires for a click on the search box, the cart, or anywhere else
+  // that never takes row focus, so without this it would sit on screen
+  // (position: fixed, high z-index) eating clicks meant for whatever's under it.
+  useEffect(() => {
+    if (!pricePopup) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const popupEl = document.querySelector('[data-price-popup]');
+      if (popupEl?.contains(target)) return;
+      const rowEl = document.querySelector(`[data-product-index="${pricePopup.rowIndex}"]`);
+      if (rowEl?.contains(target)) return;
+      setPricePopup(null);
+    };
+    document.addEventListener('mousedown', handlePointerDown, true);
+    return () => document.removeEventListener('mousedown', handlePointerDown, true);
+  }, [pricePopup]);
 
   useEffect(() => {
     if (requiresSalespersonPin) {
@@ -176,35 +207,76 @@ export default function ProductGrid({
         `/api/method/klik_pos.api.item.item_details.get_full_pricing_and_batch_details?item_code=${encodeURIComponent(item.item_code || item.id)}&warehouse=${encodeURIComponent(warehouse)}`
       );
       const data = await response.json();
-      const priceLists: PriceListEntry[] = data?.message?.price_lists || [];
-      const options = buildPriceOptions(priceLists, allowRateChange, Number(item.price) || 0);
+
+      // The focused row may have changed while this request was in flight
+      // (arrow-key navigation doesn't wait for it) - opening anchored to a row
+      // that's no longer focused would leave an orphaned popup nothing can
+      // reach, since key handling is gated on the popup's own rowIndex.
+      const stillFocused = document.activeElement?.getAttribute("data-product-index") === String(rowIndex);
+      if (!stillFocused) return;
+
+      const allPriceLists: PriceListEntry[] = data?.message?.price_lists || [];
+      // Same filter the cart's own price-list UI applies (CartItemRow.tsx): a
+      // price list quoted in a different UOM isn't a valid rate for this line,
+      // and a 0 rate is "not priced here", not a real option.
+      const priceLists = allPriceLists.filter(
+        (p) => (!p.uom || p.uom === item.uom) && Number(p.rate || 0) > 0
+      );
+      const options = buildPriceOptions(allowPriceListOptions ? priceLists : [], allowRateChange, Number(item.price) || 0);
       if (options.length === 0) return;
 
-      const rect = document.querySelector<HTMLElement>(`[data-product-index="${rowIndex}"]`)?.getBoundingClientRect();
+      const rowEl = document.querySelector<HTMLElement>(`[data-product-index="${rowIndex}"]`);
+      const rect = rowEl?.getBoundingClientRect();
+      if (!rect) return;
+
+      const customOption = options.find((o) => o.isCustom);
+      const popupWidth = 224;
+      const estimatedHeight = options.length * 40 + 16;
+      const openBelow = rect.bottom + estimatedHeight <= window.innerHeight;
+
       setPricePopup({
         rowIndex,
         item,
         options,
         selectedIndex: 0,
-        customValue: String(options[0]?.rate ?? ""),
-        anchorRect: rect ? { top: rect.top, left: rect.left, bottom: rect.bottom } : null,
+        customValue: customOption ? String(customOption.rate) : "",
+        position: {
+          left: Math.min(rect.left, Math.max(8, window.innerWidth - popupWidth - 8)),
+          ...(openBelow ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }),
+        },
       });
     } catch (error) {
       console.error("Failed to load price list options:", error);
     }
-  }, [posDetails, allowRateChange]);
+  }, [posDetails, allowRateChange, allowPriceListOptions]);
 
   // Reuses the exact add-to-cart path '+' already uses (new line or bump an
   // existing one by `quantity`), then layers the chosen rate on top via the
   // store's rate-override request - see cartStore's requestCustomRate and
   // OrderSummary's handling of it for why this doesn't set the rate directly.
-  const commitPriceSelection = useCallback(async (item: MenuItem, quantity: number, rate: number) => {
+  //
+  // `rate: null` means "no override" (an empty/invalid typed custom price) -
+  // still adds/bumps the line, just without touching its price.
+  //
+  // handleAddToCart has several silent decline paths (out of stock, scanner-only,
+  // a stock cap inside addToCartWithQuantity, a pending salesperson PIN) - it
+  // does not throw, so success can't be read from whether the await resolved.
+  // highlightNonce only advances when the store actually wrote a line
+  // (cartStore.ts's addToCart/addToCartWithQuantity), so comparing it before and
+  // after is what tells a decline apart from a real add, and highlightItemId
+  // names the exact line that was touched - the one this rate belongs on, even
+  // if a duplicate line (same item_code, different id) exists.
+  const commitPriceSelection = useCallback(async (item: MenuItem, quantity: number, rate: number | null, includesTax: boolean) => {
+    if (rate === null) {
+      await handleAddToCart(item, quantity);
+      return;
+    }
+
+    const nonceBefore = useCartStore.getState().highlightNonce;
     await handleAddToCart(item, quantity);
-    const freshCartItems = useCartStore.getState().cartItems;
-    const targetId = freshCartItems.find(
-      (ci) => (ci.item_code || ci.id) === (item.item_code || item.id)
-    )?.id ?? item.id;
-    requestCustomRate(targetId, rate, false);
+    const { highlightNonce, highlightItemId } = useCartStore.getState();
+    if (highlightNonce === nonceBefore || !highlightItemId) return;
+    requestCustomRate(highlightItemId, rate, includesTax);
   }, [handleAddToCart, requestCustomRate]);
 
   const handleItemKeyDown = useCallback((index: number, item: MenuItem, e: React.KeyboardEvent) => {
@@ -220,7 +292,19 @@ export default function ProductGrid({
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const direction = e.key === 'ArrowDown' ? 1 : -1;
-        setPricePopup((p) => p && ({ ...p, selectedIndex: cyclePriceOptionIndex(p.selectedIndex, p.options.length, direction) }));
+        setPricePopup((p) => {
+          if (!p) return p;
+          const nextIndex = cyclePriceOptionIndex(p.selectedIndex, p.options.length, direction);
+          const nextOption = p.options[nextIndex];
+          // Re-seed on arrival so the field always shows this option's own
+          // rate, not whatever was last typed while a different option (or
+          // none) was selected.
+          return {
+            ...p,
+            selectedIndex: nextIndex,
+            customValue: nextOption?.isCustom ? String(nextOption.rate) : p.customValue,
+          };
+        });
         return;
       }
       if (e.key === 'Escape') {
@@ -230,11 +314,20 @@ export default function ProductGrid({
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const rate = currentOption?.isCustom ? (parseFloat(pricePopup.customValue) || 0) : (currentOption?.rate ?? 0);
         const quantity = bufferToQuantity(quantityBuffer);
         setQuantityBuffer('');
         setPricePopup(null);
-        void commitPriceSelection(item, quantity, rate);
+        if (currentOption?.isCustom) {
+          const parsed = parseFloat(pricePopup.customValue);
+          // An empty or invalid custom value isn't "free" - it means the
+          // cashier didn't actually set a price, so the line keeps whatever
+          // rate it already has (mirrors the cart's own Rate field: clearing
+          // it removes the override rather than zeroing the price).
+          const rate = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+          void commitPriceSelection(item, quantity, rate, isTaxIncludedInBasicRate);
+        } else {
+          void commitPriceSelection(item, quantity, currentOption?.rate ?? null, false);
+        }
         return;
       }
       if (currentOption?.isCustom) {
@@ -340,7 +433,7 @@ export default function ProductGrid({
       e.preventDefault();
       void openPricePopup(index, item);
     }
-  }, [cartItems, expandedCartItemId, handleAddToCart, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [cartItems, expandedCartItemId, handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
@@ -475,7 +568,7 @@ export default function ProductGrid({
             options={pricePopup.options}
             selectedIndex={pricePopup.selectedIndex}
             customValue={pricePopup.customValue}
-            anchorRect={pricePopup.anchorRect}
+            position={pricePopup.position}
             currencySymbol={posDetails?.currency_symbol}
           />
         )}
@@ -613,7 +706,7 @@ export default function ProductGrid({
           options={pricePopup.options}
           selectedIndex={pricePopup.selectedIndex}
           customValue={pricePopup.customValue}
-          anchorRect={pricePopup.anchorRect}
+          position={pricePopup.position}
           currencySymbol={posDetails?.currency_symbol}
         />
       )}

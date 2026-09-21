@@ -8,7 +8,7 @@ interface PriceListPopupProps {
   options: PriceOption[];
   selectedIndex: number;
   customValue: string;
-  anchorRect: { top: number; left: number; bottom: number } | null;
+  position: { left: number; top?: number; bottom?: number };
   currencySymbol?: string;
 }
 
@@ -16,17 +16,19 @@ export default function PriceListPopup({
   options,
   selectedIndex,
   customValue,
-  anchorRect,
+  position,
   currencySymbol,
 }: PriceListPopupProps) {
-  if (typeof window === "undefined" || !anchorRect) return null;
+  if (typeof window === "undefined") return null;
 
   return createPortal(
     <div
+      data-price-popup
       style={{
         position: "fixed",
-        top: anchorRect.bottom + 6,
-        left: anchorRect.left,
+        left: position.left,
+        top: position.top,
+        bottom: position.bottom,
         zIndex: 999999,
       }}
       className="w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-2xl overflow-hidden py-1"
@@ -35,7 +37,7 @@ export default function PriceListPopup({
         const isSelected = index === selectedIndex;
         return (
           <div
-            key={option.label}
+            key={`${option.label}-${index}`}
             className={`flex items-center justify-between px-3 py-2 text-sm ${
               isSelected
                 ? "bg-beveren-50 dark:bg-beveren-900/30 text-beveren-700 dark:text-beveren-300"
@@ -44,12 +46,15 @@ export default function PriceListPopup({
           >
             <span className="truncate">{option.label}</span>
             {option.isCustom && isSelected ? (
-              <input
-                readOnly
-                value={customValue}
-                className="w-20 text-right bg-transparent outline-none font-semibold"
-                aria-label="Custom price"
-              />
+              <span className="flex items-center gap-1 font-semibold">
+                {currencySymbol}
+                <input
+                  readOnly
+                  value={customValue}
+                  className="w-16 text-right bg-transparent outline-none"
+                  aria-label="Custom price"
+                />
+              </span>
             ) : (
               <span className="font-semibold tabular-nums">
                 {formatCurrencyWithSymbol(option.rate, currencySymbol)}
