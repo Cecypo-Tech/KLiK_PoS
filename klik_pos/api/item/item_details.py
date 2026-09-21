@@ -180,6 +180,17 @@ def get_serial_nos_for_item(item_code: str):
         return []
 
 
+def _current_valuation_rate(warehouse_map, fallback):
+    """Current valuation per stock UOM: each warehouse's latest ledger rate, weighted by the
+    stock it holds. Summing stock_value_difference instead drifts from the real stock value
+    once a Stock Reconciliation is in the history."""
+    stocked = [row for row in warehouse_map.values() if flt(row.get("bal_qty")) > 0]
+    total_qty = sum(flt(row.get("bal_qty")) for row in stocked)
+    if not total_qty:
+        return flt(fallback)
+    return sum(flt(row.get("bal_qty")) * flt(row.get("val_rate")) for row in stocked) / total_qty
+
+
 @frappe.whitelist()
 def get_full_pricing_and_batch_details(
     item_code, warehouse=None, customer=None
@@ -369,11 +380,7 @@ def get_full_pricing_and_batch_details(
     total_bal_qty = sum(v["bal_qty"] for v in warehouse_map.values())
     total_bal_val = sum(v["bal_val"] for v in warehouse_map.values())
 
-    effective_val_rate = (
-        flt(total_bal_val) / flt(total_bal_qty)
-        if flt(total_bal_qty)
-        else latest_valuation_rate
-    )
+    effective_val_rate = _current_valuation_rate(warehouse_map, latest_valuation_rate)
 
     batch_map = {}
     result_batches = []

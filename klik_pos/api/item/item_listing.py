@@ -251,7 +251,9 @@ def get_items(
                 barcode_map[row.parent] = row.barcode
 
         stock_map = _fetch_batch_stock(item_codes, warehouse)
-        cost_price_map = _fetch_batch_cost_price(item_codes, warehouse)
+        # "Hide Cost Price" keeps the figure off the wire, not just off the screen.
+        hide_cost_price = cint(getattr(pos_doc, "restrict_cost_visibility_in_tooltip", 0) or 0) == 1
+        cost_price_map = {} if hide_cost_price else _fetch_batch_cost_price(item_codes, warehouse)
         product_bundle_map = _fetch_product_bundle_map(item_codes, warehouse)
         variant_count_map = _fetch_variant_count_map(item_codes)
 
@@ -368,7 +370,9 @@ def get_items(
                     "barcode": barcode_map.get(item_code),
                     "has_batch_no": item.has_batch_no,
                     "has_serial_no": item.has_serial_no,
-                    "cost_price": cost_price_map.get(item_code, 0),
+                    # Bin values stock per stock UOM; quote the cost in the UOM the rate is in.
+                    "cost_price": flt(cost_price_map.get(item_code, 0))
+                    * ((flt(conversion_factor) or 1) if item.stock_uom != item_uom else 1),
                 }
             )
 
