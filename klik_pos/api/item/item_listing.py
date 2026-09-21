@@ -494,6 +494,7 @@ def _fetch_item_tax_info_map(item_codes, pos_doc, current_date, customer=None, p
         item_tax_rows,
         customer_tax_category,
         price_by_item,
+        allowed_templates=_fetch_usable_tax_templates(item_tax_rows, getattr(pos_doc, "company", None)),
     )
     template_names = sorted({
         template
@@ -573,6 +574,77 @@ def _fetch_pos_sales_tax_rows(pos_doc):
 
 
 def _fetch_item_tax_rows(item_codes, current_date):
+    """Item Tax rows per item, tagged with `level`: 0 for the Item's own rows, then 1, 2, ...
+    for its Item Group and each ancestor. ERPNext bills with the first level that yields a
+    usable template, so an item with no template of its own is taxed through its group."""
+    own_rows = _fetch_own_item_tax_rows(item_codes)
+    for row in own_rows:
+        row["level"] = 0
+    return own_rows + _fetch_item_group_tax_rows(item_codes)
+
+
+def _fetch_item_group_tax_rows(item_codes):
+    from frappe.utils.nestedset import get_ancestors_of
+
+    try:
+        group_by_item = dict(
+            frappe.get_all(
+                "Item",
+                filters={"name": ["in", item_codes]},
+                fields=["name", "item_group"],
+                as_list=True,
+            )
+        )
+        lineage_by_group = {
+            group: [group, *get_ancestors_of("Item Group", group)]
+            for group in {g for g in group_by_item.values() if g}
+        }
+        all_groups = sorted({g for lineage in lineage_by_group.values() for g in lineage})
+        if not all_groups:
+            return []
+
+        rows_by_group = {}
+        for row in frappe.get_all(
+            "Item Tax",
+            filters={"parent": ["in", all_groups], "parenttype": "Item Group"},
+            fields=[
+                "parent",
+                "item_tax_template",
+                "tax_category",
+                "valid_from",
+                "minimum_net_rate",
+                "maximum_net_rate",
+            ],
+            order_by="idx asc",
+        ):
+            rows_by_group.setdefault(row.parent, []).append(row)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Fetch Item Group Tax Rows Error")
+        return []
+
+    inherited = []
+    for item_code, group in group_by_item.items():
+        for level, ancestor in enumerate(lineage_by_group.get(group, []), start=1):
+            for row in rows_by_group.get(ancestor, []):
+                inherited.append({**row, "parent": item_code, "level": level})
+    return inherited
+
+
+def _fetch_usable_tax_templates(item_tax_rows, company):
+    """Enabled templates that belong to the till's company - the only ones ERPNext would bill."""
+    names = sorted({row.get("item_tax_template") for row in item_tax_rows if row.get("item_tax_template")})
+    if not names:
+        return set()
+    filters = {"name": ["in", names], "disabled": 0}
+    if company:
+        filters["company"] = company
+    try:
+        return set(frappe.get_all("Item Tax Template", filters=filters, pluck="name"))
+    except Exception:
+        return set(names)
+
+
+def _fetch_own_item_tax_rows(item_codes):
     try:
         return frappe.get_all(
             "Item Tax",
@@ -604,15 +676,24 @@ def _get_customer_tax_category(customer):
         return None
 
 
-def _select_item_tax_templates(item_tax_rows, customer_tax_category=None, price_by_item=None):
+def _select_item_tax_templates(
+    item_tax_rows, customer_tax_category=None, price_by_item=None, allowed_templates=None
+):
     price_by_item = price_by_item or {}
     current_date = getdate(frappe.utils.today())
     selected = {}
 
-    for row in item_tax_rows:
+    # Nearest level first: once a level has produced a template, farther ancestors are ignored.
+    for row in sorted(item_tax_rows, key=lambda r: r.get("level") or 0):
         item_code = row.get("parent")
         template = row.get("item_tax_template")
         if not item_code or not template:
+            continue
+        if allowed_templates is not None and template not in allowed_templates:
+            continue
+
+        level = row.get("level") or 0
+        if item_code in selected and selected[item_code]["level"] < level:
             continue
 
         tax_category = row.get("tax_category")
@@ -634,7 +715,7 @@ def _select_item_tax_templates(item_tax_rows, customer_tax_category=None, price_
         current_rank = selected.get(item_code, {}).get("rank", -1)
         rank = 1 if tax_category and tax_category == customer_tax_category else 0
         if rank >= current_rank:
-            selected[item_code] = {"template": template, "rank": rank}
+            selected[item_code] = {"template": template, "rank": rank, "level": level}
 
     return {item_code: data["template"] for item_code, data in selected.items()}
 
