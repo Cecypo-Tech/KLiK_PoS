@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
@@ -59,6 +59,7 @@ export default function OrderSummary({
     updateItemDescription,
     expandedCartItemId,
     toggleItemExpansion,
+    pendingRateOverride,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -397,6 +398,22 @@ export default function OrderSummary({
       }
     }));
   };
+
+  // Fulfills a rate-override request made from outside the cart (the item
+  // list's '*' shortcut) through the exact same path a cashier editing the
+  // Rate field in the cart itself would take - no separate rate-setting logic
+  // to keep in sync with checkout totals, persistence, or the discount reset.
+  const lastAppliedRateOverrideNonce = useRef(0);
+  useEffect(() => {
+    if (!pendingRateOverride || pendingRateOverride.nonce === lastAppliedRateOverrideNonce.current) {
+      return;
+    }
+    lastAppliedRateOverrideNonce.current = pendingRateOverride.nonce;
+    const target = cartItems.find((ci) => ci.id === pendingRateOverride.itemId);
+    if (target) {
+      handleCustomRateChange(target, pendingRateOverride.rate, pendingRateOverride.includesTax);
+    }
+  }, [pendingRateOverride, cartItems]);
 
   const handleBundleUpdate = (itemId: string, bundleId: string, entries: any[]) => {
     updateItemDiscount(itemId, "serial_batch_bundle", bundleId);

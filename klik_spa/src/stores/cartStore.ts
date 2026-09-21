@@ -152,6 +152,17 @@ interface CartState {
    * state, not part of the cart itself. */
   expandedCartItemId: string | null
   toggleItemExpansion: (id: string) => void
+  /** A rate-override request from outside the cart UI (the item list's '*'
+   * shortcut). OrderSummary owns the actual rate/discount machinery
+   * (itemDiscounts, checkout totals, persistence) and applies this via its
+   * own existing handleCustomRateChange - this is a request to do that, not
+   * a second place that sets a line's rate. Deliberately not persisted: a
+   * leftover request must never replay after a reload. nonce lets the same
+   * {itemId, rate} be requested twice in a row without being ignored as a
+   * no-op change.
+   */
+  pendingRateOverride: { itemId: string; rate: number; includesTax: boolean; nonce: number } | null
+  requestCustomRate: (itemId: string, rate: number, includesTax?: boolean) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -192,6 +203,15 @@ export const useCartStore = create<CartState>()(
       expandedCartItemId: null,
       toggleItemExpansion: (id) => set((s) => ({
         expandedCartItemId: nextExpandedCartItemId(s.expandedCartItemId, id),
+      })),
+      pendingRateOverride: null,
+      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => ({
+        pendingRateOverride: {
+          itemId,
+          rate,
+          includesTax,
+          nonce: (s.pendingRateOverride?.nonce ?? 0) + 1,
+        },
       })),
 
       refreshCartPricing: async () => {
@@ -596,7 +616,7 @@ export const useCartStore = create<CartState>()(
       // expanded row reappearing after a reload would be surprising.
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { expandedCartItemId, ...rest } = state;
+        const { expandedCartItemId, pendingRateOverride, ...rest } = state;
         return rest;
       },
     }

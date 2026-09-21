@@ -12,6 +12,13 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
+import { buildPriceOptions, cyclePriceOptionIndex, type PriceOption } from "../utils/priceOptions";
+import PriceListPopup from "./PriceListPopup";
+
+interface PriceListEntry {
+  price_list: string;
+  rate: number;
+}
 
 
 interface ProductGridProps {
@@ -36,7 +43,7 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId } = useCartStore();
+  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -66,6 +73,16 @@ export default function ProductGrid({
   // never a quantity, so the shortcut is switched off entirely.
   const quantityShortcutEnabled = !scannerOnly;
 
+  const [pricePopup, setPricePopup] = useState<{
+    rowIndex: number;
+    item: MenuItem;
+    options: PriceOption[];
+    selectedIndex: number;
+    customValue: string;
+    anchorRect: { top: number; left: number; bottom: number } | null;
+  } | null>(null);
+  const allowRateChange = !!posDetails?.allow_rate_change;
+
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Mirrors the backend's stand-down: when stock could not be read every balance is 0, so
@@ -88,13 +105,14 @@ export default function ProductGrid({
   // pagination change still resets both, while a stock-value-only refresh leaves them
   // alone.
   const itemsSignature = useMemo(() => inStockItems.map((item) => item.id).join('|'), [inStockItems]);
-  useEffect(() => { setFocusedIndex(-1); setQuantityBuffer(""); }, [itemsSignature]);
+  useEffect(() => { setFocusedIndex(-1); setQuantityBuffer(""); setPricePopup(null); }, [itemsSignature]);
 
   // Structural guarantee that the buffer never survives a focus change, however it
   // happens: arrow keys, Tab/Shift+Tab, a click on another row, or MenuGrid's F3 ->
   // ArrowDown jump straight to index 0. Typing a digit never changes focusedIndex, so
-  // this never fires mid-buffer.
-  useEffect(() => { setQuantityBuffer(''); }, [focusedIndex]);
+  // this never fires mid-buffer. The price popup gets the same guarantee for the
+  // same reason.
+  useEffect(() => { setQuantityBuffer(''); setPricePopup(null); }, [focusedIndex]);
 
   useEffect(() => {
     if (requiresSalespersonPin) {
@@ -151,7 +169,98 @@ export default function ProductGrid({
     await addItemToCart(item, quantity);
   }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable]);
 
+  const openPricePopup = useCallback(async (rowIndex: number, item: MenuItem) => {
+    const warehouse = posDetails?.warehouse || "";
+    try {
+      const response = await fetch(
+        `/api/method/klik_pos.api.item.item_details.get_full_pricing_and_batch_details?item_code=${encodeURIComponent(item.item_code || item.id)}&warehouse=${encodeURIComponent(warehouse)}`
+      );
+      const data = await response.json();
+      const priceLists: PriceListEntry[] = data?.message?.price_lists || [];
+      const options = buildPriceOptions(priceLists, allowRateChange, Number(item.price) || 0);
+      if (options.length === 0) return;
+
+      const rect = document.querySelector<HTMLElement>(`[data-product-index="${rowIndex}"]`)?.getBoundingClientRect();
+      setPricePopup({
+        rowIndex,
+        item,
+        options,
+        selectedIndex: 0,
+        customValue: String(options[0]?.rate ?? ""),
+        anchorRect: rect ? { top: rect.top, left: rect.left, bottom: rect.bottom } : null,
+      });
+    } catch (error) {
+      console.error("Failed to load price list options:", error);
+    }
+  }, [posDetails, allowRateChange]);
+
+  // Reuses the exact add-to-cart path '+' already uses (new line or bump an
+  // existing one by `quantity`), then layers the chosen rate on top via the
+  // store's rate-override request - see cartStore's requestCustomRate and
+  // OrderSummary's handling of it for why this doesn't set the rate directly.
+  const commitPriceSelection = useCallback(async (item: MenuItem, quantity: number, rate: number) => {
+    await handleAddToCart(item, quantity);
+    const freshCartItems = useCartStore.getState().cartItems;
+    const targetId = freshCartItems.find(
+      (ci) => (ci.item_code || ci.id) === (item.item_code || item.id)
+    )?.id ?? item.id;
+    requestCustomRate(targetId, rate, false);
+  }, [handleAddToCart, requestCustomRate]);
+
   const handleItemKeyDown = useCallback((index: number, item: MenuItem, e: React.KeyboardEvent) => {
+    if (pricePopup && pricePopup.rowIndex === index) {
+      // Several keys here (Backspace, Escape, digits) are also bound by
+      // document-level global shortcuts (e.g. Backspace -> jump to search).
+      // preventDefault alone only blocks the browser's own default action, not
+      // other addEventListener('keydown', ...) listeners further up the DOM -
+      // stopPropagation is what actually keeps this modal-like popup from
+      // leaking keys to them.
+      e.stopPropagation();
+      const currentOption = pricePopup.options[pricePopup.selectedIndex];
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const direction = e.key === 'ArrowDown' ? 1 : -1;
+        setPricePopup((p) => p && ({ ...p, selectedIndex: cyclePriceOptionIndex(p.selectedIndex, p.options.length, direction) }));
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setPricePopup(null);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const rate = currentOption?.isCustom ? (parseFloat(pricePopup.customValue) || 0) : (currentOption?.rate ?? 0);
+        const quantity = bufferToQuantity(quantityBuffer);
+        setQuantityBuffer('');
+        setPricePopup(null);
+        void commitPriceSelection(item, quantity, rate);
+        return;
+      }
+      if (currentOption?.isCustom) {
+        if (/^[0-9.]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setPricePopup((p) => {
+            if (!p) return p;
+            // A single leading zero reads as "still typing the first digit", not a value.
+            const base = p.customValue === "0" ? "" : p.customValue;
+            if (e.key === '.' && base.includes('.')) return p;
+            return { ...p, customValue: base + e.key };
+          });
+          return;
+        }
+        if (e.key === 'Backspace') {
+          e.preventDefault();
+          setPricePopup((p) => p && ({ ...p, customValue: p.customValue.slice(0, -1) }));
+          return;
+        }
+      }
+      // Any other key while the popup is open is swallowed rather than falling
+      // through to the quantity-buffer/navigation handling below.
+      e.preventDefault();
+      return;
+    }
+
     if (quantityShortcutEnabled) {
       // Ctrl/Cmd/Alt+digit are browser and OS bindings (switch tab, reset zoom, ...),
       // never a typed quantity — let them fall through untouched rather than
@@ -227,8 +336,11 @@ export default function ProductGrid({
       if (!wasExpanded) {
         document.querySelector<HTMLElement>(`[data-cart-item-id="${cartItem.id}"][tabindex]`)?.focus();
       }
+    } else if (e.key === '*') {
+      e.preventDefault();
+      void openPricePopup(index, item);
     }
-  }, [cartItems, expandedCartItemId, handleAddToCart, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [cartItems, expandedCartItemId, handleAddToCart, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
@@ -358,6 +470,15 @@ export default function ProductGrid({
             onSelectVariant={handleVariantSelected}
           />
         )}
+        {pricePopup && (
+          <PriceListPopup
+            options={pricePopup.options}
+            selectedIndex={pricePopup.selectedIndex}
+            customValue={pricePopup.customValue}
+            anchorRect={pricePopup.anchorRect}
+            currencySymbol={posDetails?.currency_symbol}
+          />
+        )}
       </>
     );
   }
@@ -485,6 +606,15 @@ export default function ProductGrid({
           customerId={selectedCustomer?.id}
           onClose={() => setVariantTemplateItem(null)}
           onSelectVariant={handleVariantSelected}
+        />
+      )}
+      {pricePopup && (
+        <PriceListPopup
+          options={pricePopup.options}
+          selectedIndex={pricePopup.selectedIndex}
+          customValue={pricePopup.customValue}
+          anchorRect={pricePopup.anchorRect}
+          currencySymbol={posDetails?.currency_symbol}
         />
       )}
     </>
