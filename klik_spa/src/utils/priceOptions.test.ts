@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPriceOptions, cyclePriceOptionIndex } from "./priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex } from "./priceOptions";
 
 describe("buildPriceOptions", () => {
   it("maps each price list entry to an option", () => {
@@ -58,5 +58,29 @@ describe("cyclePriceOptionIndex", () => {
 
   it("returns 0 for an empty option list rather than dividing by zero", () => {
     expect(cyclePriceOptionIndex(0, 0, 1)).toBe(0);
+  });
+});
+
+describe("computePricePopupPosition", () => {
+  const viewport = { width: 1280, height: 720 };
+
+  it("opens below the anchor when there is room", () => {
+    const pos = computePricePopupPosition({ left: 100, top: 200, bottom: 220 }, 3, viewport);
+    expect(pos).toEqual({ left: 100, top: 226 });
+  });
+
+  it("flips above the anchor when the popup would run off the bottom", () => {
+    const pos = computePricePopupPosition({ left: 100, top: 650, bottom: 670 }, 3, viewport);
+    expect(pos).toEqual({ left: 100, bottom: 76 });
+  });
+
+  it("keeps the popup inside the right edge of the viewport", () => {
+    const pos = computePricePopupPosition({ left: 1200, top: 200, bottom: 220 }, 1, viewport);
+    expect(pos.left).toBe(1280 - 224 - 8);
+  });
+
+  it("never positions left of the viewport gutter on a narrow screen", () => {
+    const pos = computePricePopupPosition({ left: 50, top: 10, bottom: 30 }, 1, { width: 200, height: 720 });
+    expect(pos.left).toBe(8);
   });
 });
