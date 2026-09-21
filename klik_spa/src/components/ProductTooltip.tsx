@@ -100,8 +100,15 @@ export default function ProductTooltip({
   }, [isLoading]);
 
   const costPrice = data?.valuation_rate || data?.standard_rate || item.cost_price || 0;
-  const margin = item.price - costPrice;
-  const marginPercentage = costPrice > 0 ? (margin / item.price) * 100 : 0;
+  // costPrice (valuation_rate) never includes sales tax. When the sell price does (Price
+  // List/tax template marks it inclusive), gross the cost up by the same tax rate before
+  // comparing to the (tax-inclusive) sell price, so margin reflects what the till actually
+  // collects vs. what covering this sale actually costs, VAT included.
+  const taxRate = Number(item.tax_info?.total_tax_rate || 0);
+  const isInclusiveTax = !!item.tax_info?.is_inclusive && taxRate > 0;
+  const costInclTax = isInclusiveTax ? costPrice * (1 + taxRate / 100) : costPrice;
+  const margin = item.price - costInclTax;
+  const marginPercentage = costInclTax > 0 ? (margin / item.price) * 100 : 0;
   const bundleComponents = item.bundle_items ?? [];
 
   const handleClick = (e: React.MouseEvent) => {
@@ -285,7 +292,7 @@ export default function ProductTooltip({
 
             <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg">
               <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">
-                Our Cost
+                Our Cost{isInclusiveTax ? " (excl. VAT)" : ""}
               </p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">
                 {formatCurrencyWithSymbol(costPrice, item.currency_symbol)}
@@ -325,7 +332,7 @@ export default function ProductTooltip({
             <div className="flex justify-between items-baseline">
               <div>
                 <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold tracking-wide">
-                  Profit Margin
+                  Profit Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}
                 </p>
                 <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
                   {formatCurrencyWithSymbol(margin, item.currency_symbol)}

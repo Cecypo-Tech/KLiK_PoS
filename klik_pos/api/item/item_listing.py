@@ -251,6 +251,7 @@ def get_items(
                 barcode_map[row.parent] = row.barcode
 
         stock_map = _fetch_batch_stock(item_codes, warehouse)
+        cost_price_map = _fetch_batch_cost_price(item_codes, warehouse)
         product_bundle_map = _fetch_product_bundle_map(item_codes, warehouse)
         variant_count_map = _fetch_variant_count_map(item_codes)
 
@@ -367,6 +368,7 @@ def get_items(
                     "barcode": barcode_map.get(item_code),
                     "has_batch_no": item.has_batch_no,
                     "has_serial_no": item.has_serial_no,
+                    "cost_price": cost_price_map.get(item_code, 0),
                 }
             )
 
@@ -987,6 +989,43 @@ def _fetch_batch_stock(item_codes, warehouse):
             stock_map[code] = fetch_item_balance(code, warehouse)
 
     return stock_map
+
+
+def _fetch_batch_cost_price(item_codes, warehouse):
+    """Warehouse-scoped current valuation rate per item, for the list-view cost price column.
+
+    Uses Bin.valuation_rate (the rate Frappe stock already maintains per warehouse) rather
+    than the tooltip's weighted-average-over-SLEs calc, since that's too heavy to run for
+    every item in a paginated list.
+    """
+    if not item_codes or not warehouse:
+        return {}
+
+    cost_map = {}
+
+    try:
+        placeholders = ", ".join(["%s"] * len(item_codes))
+
+        cost_sql = f"""
+            SELECT item_code, valuation_rate
+            FROM `tabBin`
+            WHERE item_code IN ({placeholders}) AND warehouse = %s
+        """
+        cost_sql = apply_sql_permissions(cost_sql)
+
+        results = frappe.db.sql(
+            cost_sql,
+            (*item_codes, warehouse),
+            as_dict=True,
+        )
+
+        for row in results:
+            cost_map[row["item_code"]] = flt(row["valuation_rate"])
+
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Fetch Batch Cost Price Error")
+
+    return cost_map
 
 
 def _fetch_product_bundle_map(item_codes, warehouse):
