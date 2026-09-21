@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye, Pencil } from "lucide-react";
 import { toast } from "react-toastify";
 import type { BundleEntry, CartItem, ItemTaxInfo } from "../../../types";
@@ -16,6 +16,13 @@ import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForIt
 import { roundCurrency } from "../../utils/currencyMath";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { getCostMargin, getInclusiveTaxRate } from "../../utils/costMargin";
+import PriceListPopup from "../PriceListPopup";
+import {
+  buildPriceOptions,
+  computePricePopupPosition,
+  cyclePriceOptionIndex,
+  type PricePopupPosition,
+} from "../../utils/priceOptions";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -149,6 +156,8 @@ export const CartItemRow = ({
   const [modalEntries, setModalEntries] = useState<BundleEntry[]>([]);
   const [modalQty, setModalQty] = useState(item.quantity);
   const [localQty, setLocalQty] = useState(item.quantity);
+  const [linePricePopup, setLinePricePopup] = useState<{ selectedIndex: number; position: PricePopupPosition } | null>(null);
+  const priceTriggerRef = useRef<HTMLButtonElement>(null);
   const [isRateEditing, setIsRateEditing] = useState(false);
   const [rateInputValue, setRateInputValue] = useState("");
 
@@ -197,6 +206,29 @@ export const CartItemRow = ({
       fetchFullItemDetails();
     }
   }, [isExpanded, quickSwitchPrice, warehouse, fetchFullItemDetails]);
+
+  // The popup is position: fixed, so it would stay put while the cart scrolls out from under
+  // it, and it sits above everything else - close it on any outside press, scroll or resize.
+  const isLinePricePopupOpen = !!linePricePopup;
+  useEffect(() => {
+    if (!isLinePricePopupOpen) return;
+    const close = () => setLinePricePopup(null);
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (priceTriggerRef.current?.contains(target)) return;
+      if (document.querySelector("[data-price-popup]")?.contains(target)) return;
+      close();
+    };
+    document.addEventListener("mousedown", handlePointerDown, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [isLinePricePopupOpen]);
 
   const saveToCart = useCallback((entries: BundleEntry[]) => {
     const validEntries = entries.map(({ selected, ...e }) => e);
@@ -379,6 +411,51 @@ export const CartItemRow = ({
     }
   };
 
+  const linePriceLists = (quickSwitchPrice ? fullItemData?.price_lists ?? [] : []).filter(
+    (priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0
+  );
+  const linePriceOptions = buildPriceOptions(linePriceLists, false, 0);
+  const activeLinePriceList = linePriceLists.find(
+    (priceList) => priceList.price_list === itemDiscount.selectedPriceList
+  );
+
+  const openLinePricePopup = () => {
+    const rect = priceTriggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const activeIndex = activeLinePriceList ? linePriceLists.indexOf(activeLinePriceList) : 0;
+    setLinePricePopup({
+      selectedIndex: Math.max(0, activeIndex),
+      position: computePricePopupPosition(rect, linePriceOptions.length, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
+    });
+  };
+
+  const commitLinePriceOption = (index: number) => {
+    const option = linePriceOptions[index];
+    setLinePricePopup(null);
+    if (option) handleLinePriceListChange(option.label);
+  };
+
+  const handlePriceTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    // Never let these reach the row (Escape collapses it) or the POS-wide shortcuts.
+    e.stopPropagation();
+    if (!linePricePopup) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const direction = e.key === "ArrowDown" ? 1 : -1;
+      setLinePricePopup((p) =>
+        p ? { ...p, selectedIndex: cyclePriceOptionIndex(p.selectedIndex, linePriceOptions.length, direction) } : p
+      );
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      commitLinePriceOption(linePricePopup.selectedIndex);
+    } else if (e.key === "Escape" || e.key === "Tab") {
+      setLinePricePopup(null);
+    }
+  };
+
   const discountedPrice = getEffectiveItemRate(item, {
     itemDiscounts: { [item.id]: itemDiscount },
     isTaxIncludedInBasicRate,
@@ -453,57 +530,87 @@ export const CartItemRow = ({
             }
           }}
         >
-          <div className={CART_ROW_GRID}>
-            {/* Item: chevron, name, code, actions */}
-            {/* The actions sit under the name: beside it they left a narrow cart no room for it. */}
-            <div className="min-w-0 grid grid-cols-[0.75rem_minmax(0,1fr)] items-start gap-x-1">
-              <svg
-                className={`flex-shrink-0 w-3 h-3 mt-1 text-gray-400 dark:text-gray-500 transform transition-transform duration-200 ${
-                  isExpanded ? "rotate-90" : ""
-                }`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium leading-tight text-gray-900 dark:text-white line-clamp-2 break-words" title={item.name}>
-                  {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
+          {/* Row A: chevron + name, given the full row width so it stops wrapping early.
+              Line actions (edit/details/remove) sit at the right of this same row instead of
+              stacked under the total, since they no longer need to share width with it. */}
+          <div className="flex items-start gap-1">
+            <svg
+              className={`flex-shrink-0 w-3 h-3 mt-1 text-gray-400 dark:text-gray-500 transform transition-transform duration-200 ${
+                isExpanded ? "rotate-90" : ""
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium leading-tight text-gray-900 dark:text-white line-clamp-2 break-words" title={item.name}>
+                {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
+              </p>
+              {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
+                  {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
                 </p>
-                {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
-                  <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
-                    {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
-                  </p>
-                )}
-              </div>
-              {/* Quick Switch Price: per-line price-list pills, under the name */}
-              {quickSwitchPrice && fullItemData?.price_lists?.length ? (
-                <div className="col-start-2 mt-1 flex flex-wrap items-center gap-1">
-                  {fullItemData.price_lists
-                    .filter((priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0)
-                    .map((priceList) => {
-                      const active = itemDiscount.selectedPriceList === priceList.price_list;
-                      const shortName =
-                        priceList.price_list.length > 8
-                          ? priceList.price_list.slice(0, 8)
-                          : priceList.price_list;
-                      return (
-                        <button
-                          key={`${priceList.price_list}-${priceList.uom || ""}-${priceList.rate}`}
-                          onClick={(e) => { e.stopPropagation(); handleLinePriceListChange(priceList.price_list); }}
-                          title={`${priceList.price_list}: ${formatCurrencyWithSymbol(Number(priceList.rate || 0), currency_symbol)}`}
-                          className={`flex-shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                            active
-                              ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
-                              : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
-                          }`}
-                        >
-                          <span className="font-mono">{shortName} {Number(priceList.rate || 0).toFixed(2)}</span>
-                        </button>
-                      );
-                    })}
-                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0 flex items-center gap-0.5">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowDescriptionDialog(true); }}
+                className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
+                title="Edit description"
+                aria-label="Edit description"
+              >
+                <Pencil size={isMobile ? 13 : 11} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowProductModal(true); }}
+                className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
+                title="View full details"
+                aria-label="View full details"
+              >
+                <Eye size={isMobile ? 14 : 12} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onRemoveItem?.(item.id); }}
+                className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors`}
+                title="Remove item"
+                aria-label="Remove item"
+              >
+                <X size={isMobile ? 15 : 13} />
+              </button>
+            </div>
+          </div>
+
+          {/* Row B: price-list quick-switcher on the left, qty/rate/total on one line to the
+              right - reuses CART_ROW_GRID so this row still lines up under the cart header's
+              Qty/Rate/Total columns. */}
+          <div className={`${CART_ROW_GRID} mt-1`}>
+            {/* Quick Switch Price: one compact trigger; the choices drop down in the same popup
+                the item list's '*' shortcut uses, instead of a pill per price list. */}
+            <div className="min-w-0">
+              {linePriceOptions.length > 0 ? (
+                <button
+                  ref={priceTriggerRef}
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded={!!linePricePopup}
+                  onClick={(e) => { e.stopPropagation(); if (linePricePopup) setLinePricePopup(null); else openLinePricePopup(); }}
+                  onKeyDown={handlePriceTriggerKeyDown}
+                  title="Switch price list for this line"
+                  className={`max-w-full inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    activeLinePriceList
+                      ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
+                      : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
+                  }`}
+                >
+                  <span className="truncate font-mono">
+                    {activeLinePriceList
+                      ? `${activeLinePriceList.price_list} ${Number(activeLinePriceList.rate || 0).toFixed(2)}`
+                      : "Price list"}
+                  </span>
+                  <ChevronDown size={10} className="flex-shrink-0" />
+                </button>
               ) : null}
             </div>
 
@@ -578,33 +685,6 @@ export const CartItemRow = ({
               >
                 {formatCurrencyWithSymbol(discountedTotal !== originalTotal ? discountedTotal : amount, currency_symbol)}
               </p>
-              {/* Line actions, far right under the total: edit description, details, remove. */}
-              <div className="mt-0.5 -mr-1 flex items-center justify-end">
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowDescriptionDialog(true); }}
-                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
-                  title="Edit description"
-                  aria-label="Edit description"
-                >
-                  <Pencil size={isMobile ? 13 : 11} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowProductModal(true); }}
-                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
-                  title="View full details"
-                  aria-label="View full details"
-                >
-                  <Eye size={isMobile ? 14 : 12} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRemoveItem?.(item.id); }}
-                  className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors`}
-                  title="Remove item"
-                  aria-label="Remove item"
-                >
-                  <X size={isMobile ? 15 : 13} />
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -948,6 +1028,17 @@ export const CartItemRow = ({
           autoFetchBatch={autoFetchBatch}
         />
       </div>
+
+      {linePricePopup && (
+        <PriceListPopup
+          options={linePriceOptions}
+          selectedIndex={linePricePopup.selectedIndex}
+          customValue=""
+          position={linePricePopup.position}
+          currencySymbol={currency_symbol}
+          onSelect={commitLinePriceOption}
+        />
+      )}
 
       <DescriptionDialog
         isOpen={showDescriptionDialog}

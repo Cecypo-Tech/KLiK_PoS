@@ -27,3 +27,28 @@ export function cyclePriceOptionIndex(current: number, length: number, direction
   if (length <= 0) return 0;
   return (current + direction + length) % length;
 }
+
+export const PRICE_POPUP_WIDTH = 224;
+
+export interface PricePopupPosition {
+  left: number;
+  top?: number;
+  bottom?: number;
+}
+
+/**
+ * Where to pin the (position: fixed) price popup for an anchor rect: below it when the
+ * estimated height fits, above it otherwise, and never past the viewport's right edge.
+ */
+export function computePricePopupPosition(
+  anchor: { left: number; top: number; bottom: number },
+  optionCount: number,
+  viewport: { width: number; height: number }
+): PricePopupPosition {
+  const estimatedHeight = optionCount * 40 + 16;
+  const openBelow = anchor.bottom + estimatedHeight <= viewport.height;
+  return {
+    left: Math.min(anchor.left, Math.max(8, viewport.width - PRICE_POPUP_WIDTH - 8)),
+    ...(openBelow ? { top: anchor.bottom + 6 } : { bottom: viewport.height - anchor.top + 6 }),
+  };
+}

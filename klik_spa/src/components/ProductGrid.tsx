@@ -12,7 +12,7 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
-import { buildPriceOptions, cyclePriceOptionIndex, type PriceOption } from "../utils/priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption } from "../utils/priceOptions";
 import PriceListPopup from "./PriceListPopup";
 
 interface PriceListEntry {
@@ -230,9 +230,6 @@ export default function ProductGrid({
       if (!rect) return;
 
       const customOption = options.find((o) => o.isCustom);
-      const popupWidth = 224;
-      const estimatedHeight = options.length * 40 + 16;
-      const openBelow = rect.bottom + estimatedHeight <= window.innerHeight;
 
       setPricePopup({
         rowIndex,
@@ -240,10 +237,10 @@ export default function ProductGrid({
         options,
         selectedIndex: 0,
         customValue: customOption ? String(customOption.rate) : "",
-        position: {
-          left: Math.min(rect.left, Math.max(8, window.innerWidth - popupWidth - 8)),
-          ...(openBelow ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }),
-        },
+        position: computePricePopupPosition(rect, options.length, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }),
       });
     } catch (error) {
       console.error("Failed to load price list options:", error);
