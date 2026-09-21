@@ -406,12 +406,18 @@ export const CartItemRow = ({
   const currentWarehouseStock = fullItemData?.warehouse_stock?.find(wh => wh.warehouse === warehouse);
   const availableStock = currentWarehouseStock?.bal_qty || 0;
   const valuationRate = typeof currentWarehouseStock?.val_rate === "number" ? currentWarehouseStock.val_rate : null;
-  const hasValidValuationRate = valuationRate !== null && valuationRate > 0;
-  const isNegativeMargin = hasValidValuationRate ? discountedPrice < valuationRate : false;
-  const marginAmount = hasValidValuationRate ? discountedPrice - valuationRate : 0;
-  const marginPercentage = hasValidValuationRate ? (marginAmount / valuationRate) * 100 : 0;
+  // valuationRate never includes sales tax. discountedPrice does when the item's tax is
+  // inclusive-only (baked into the price, not added on top) - gross the cost up by the same
+  // tax rate before comparing to the (tax-inclusive) sell price, so margin reflects what the
+  // till actually collects vs. what covering this sale actually costs, VAT included.
+  const isInclusiveTax = !hasExclusiveTax && totalTaxRate > 0;
+  const valuationRateInclTax = valuationRate !== null && isInclusiveTax ? valuationRate * (1 + totalTaxRate / 100) : valuationRate;
+  const hasValidValuationRate = valuationRateInclTax !== null && valuationRateInclTax > 0;
+  const isNegativeMargin = hasValidValuationRate ? discountedPrice < valuationRateInclTax! : false;
+  const marginAmount = hasValidValuationRate ? discountedPrice - valuationRateInclTax! : 0;
+  const marginPercentage = hasValidValuationRate ? (marginAmount / valuationRateInclTax!) * 100 : 0;
 
-  const showPositiveMarginWarning = !restrictCostVisibility && hasValidValuationRate && !isNegativeMargin && discountedPrice > valuationRate;
+  const showPositiveMarginWarning = !restrictCostVisibility && hasValidValuationRate && !isNegativeMargin && discountedPrice > valuationRateInclTax!;
   const showNegativeMarginWarning = !restrictCostVisibility && hasValidValuationRate && isNegativeMargin && discountedPrice > 0;
   const showStockWarning = item.quantity > availableStock && availableStock > 0;
   const showNoStockWarning = availableStock === 0;
@@ -850,7 +856,7 @@ export const CartItemRow = ({
                     </div>
                     {!restrictCostVisibility && (
                       <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-3 border border-gray-200 dark:border-gray-600">
-                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate</p>
+                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate{isInclusiveTax ? " (excl. VAT)" : ""}</p>
                         <p className="text-base font-bold text-gray-900 dark:text-white">
                           {formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)}
                         </p>
@@ -859,7 +865,7 @@ export const CartItemRow = ({
                     )}
                     {showPositiveMarginWarning && (
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md p-3 border border-blue-200 dark:border-blue-800">
-                        <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin</p>
+                        <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}</p>
                         <p className="text-base font-bold text-green-600 dark:text-green-400">
                           +{formatCurrencyWithSymbol(marginAmount, currency_symbol)}
                         </p>
@@ -870,7 +876,7 @@ export const CartItemRow = ({
                       <div className="bg-red-50 dark:bg-red-900/20 rounded-md p-3 border border-red-200 dark:border-red-800">
                         <p className="text-[10px] text-red-500 dark:text-red-400 uppercase font-semibold flex items-center gap-1">
                           <AlertTriangle size={9} />
-                          Margin
+                          Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}
                         </p>
                         <p className="text-base font-bold text-red-600 dark:text-red-400">
                           {formatCurrencyWithSymbol(marginAmount, currency_symbol)}
