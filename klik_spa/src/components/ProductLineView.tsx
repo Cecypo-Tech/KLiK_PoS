@@ -4,6 +4,7 @@ import { useState } from "react"
 import type { MenuItem } from "../../types"
 import ProductTooltip from "./ProductTooltip"
 import ProductDetailsModal from "./ProductDetailsModal"
+import { usePOSProfileStore } from "../stores/posProfileStore"
 
 import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isItemOutOfStock } from "../utils/stock"
@@ -44,6 +45,10 @@ export default function ProductLineView({
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
 
+  const { posDetails } = usePOSProfileStore()
+  const showCostColumn = !(posDetails?.restrict_cost_visibility_in_tooltip ?? true)
+  const productColSpan = showCostColumn ? "col-span-5" : "col-span-6"
+
   const handleInfoClick = (item: MenuItem) => {
     setSelectedItem(item)
     setShowDetailsModal(true)
@@ -78,9 +83,12 @@ export default function ProductLineView({
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mb-2 overflow-visible">
           {!isMobile && (
             <div className="grid grid-cols-12 gap-3 px-3 py-2 bg-gray-50 dark:bg-gray-700 border-b">
-              <div className="col-span-6 text-xs font-semibold text-gray-900 dark:text-white">Product</div>
-              <div className="col-span-2 text-xs font-semibold text-center text-gray-900 dark:text-white">Rate</div>
-              <div className="col-span-2 text-xs font-semibold text-center text-gray-900 dark:text-white">Qty</div>
+              <div className={`${productColSpan} text-xs font-semibold text-gray-900 dark:text-white`}>Product</div>
+              {showCostColumn && (
+                <div className="col-span-1 text-xs font-semibold text-right text-gray-400 dark:text-gray-500">Cost</div>
+              )}
+              <div className="col-span-2 text-xs font-semibold text-right text-gray-900 dark:text-white">Rate</div>
+              <div className="col-span-2 text-xs font-semibold text-right text-gray-900 dark:text-white">Qty</div>
               <div className="col-span-1 text-xs font-semibold text-center text-gray-900 dark:text-white">UOM</div>
               <div className="col-span-1 text-xs font-semibold text-center text-gray-900 dark:text-white">Action</div>
             </div>
@@ -107,6 +115,8 @@ export default function ProductLineView({
                 : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-700/50 dark:text-gray-300 dark:border-gray-600"
               const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0
               const variantCount = item.is_variant_template ? item.variant_count || 0 : 0
+              const costPrice = Number(item.cost_price || 0)
+              const formattedCostPrice = costPrice > 0 ? formatCurrencyWithSymbol(costPrice, item.currency_symbol) : "—"
 
               const isRowFocused = focusedIndex === rowIndex;
               return (
@@ -131,7 +141,7 @@ export default function ProductLineView({
                       </div>
                     </div>
                   )}
-                  <div className={`${isMobile ? "flex items-center gap-2" : "col-span-6 flex items-center gap-2"}`}>
+                  <div className={`${isMobile ? "flex items-center gap-2" : `${productColSpan} flex items-center gap-2`}`}>
                     {!hideImages && (
                       item.image ? (
                         <div
@@ -261,8 +271,16 @@ export default function ProductLineView({
                     </div>
                   ) : (
                     <>
-                      <div className={`col-span-2 flex items-center justify-center ${isDisabled ? "opacity-60" : ""}`}>
-                        <div className="text-center">
+                      {showCostColumn && (
+                        <div className={`col-span-1 flex items-center justify-end ${isDisabled ? "opacity-60" : ""}`}>
+                          <span className="text-xs font-normal text-gray-400 dark:text-gray-500 tabular-nums">
+                            {formattedCostPrice}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className={`col-span-2 flex items-center justify-end ${isDisabled ? "opacity-60" : ""}`}>
+                        <div className="text-right">
                           <span className="block font-semibold text-beveren-600 dark:text-beveren-400 text-sm">
                             {formattedPrice}
                           </span>
@@ -274,7 +292,7 @@ export default function ProductLineView({
                         </div>
                       </div>
 
-                      <div className={`col-span-2 flex items-center justify-center gap-1 ${isDisabled ? "opacity-60" : ""}`}>
+                      <div className={`col-span-2 flex items-center justify-end gap-1 ${isDisabled ? "opacity-60" : ""}`}>
                         <span className={`font-medium text-sm ${
                           isOutOfStock ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"
                         }`}>

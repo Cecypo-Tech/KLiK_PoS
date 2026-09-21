@@ -100,8 +100,14 @@ export default function ProductTooltip({
   }, [isLoading]);
 
   const costPrice = data?.valuation_rate || data?.standard_rate || item.cost_price || 0;
-  const margin = item.price - costPrice;
-  const marginPercentage = costPrice > 0 ? (margin / item.price) * 100 : 0;
+  // costPrice (valuation_rate) never includes sales tax. When the sell price does (Price
+  // List/tax template marks it inclusive), strip the tax portion before comparing to cost so
+  // margin reflects true profit rather than being inflated by the embedded tax.
+  const taxRate = Number(item.tax_info?.total_tax_rate || 0);
+  const isInclusiveTax = !!item.tax_info?.is_inclusive && taxRate > 0;
+  const exclusiveSellPrice = isInclusiveTax ? item.price / (1 + taxRate / 100) : item.price;
+  const margin = exclusiveSellPrice - costPrice;
+  const marginPercentage = costPrice > 0 ? (margin / exclusiveSellPrice) * 100 : 0;
   const bundleComponents = item.bundle_items ?? [];
 
   const handleClick = (e: React.MouseEvent) => {
@@ -325,7 +331,7 @@ export default function ProductTooltip({
             <div className="flex justify-between items-baseline">
               <div>
                 <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold tracking-wide">
-                  Profit Margin
+                  Profit Margin{isInclusiveTax ? " (excl. tax)" : ""}
                 </p>
                 <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
                   {formatCurrencyWithSymbol(margin, item.currency_symbol)}
