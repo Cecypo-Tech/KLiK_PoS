@@ -21,6 +21,7 @@ import {
   buildPriceOptions,
   computePricePopupPosition,
   cyclePriceOptionIndex,
+  resolveActivePriceList,
   type PricePopupPosition,
 } from "../../utils/priceOptions";
 
@@ -118,6 +119,7 @@ export const CartItemRow = ({
   autoFetchBatch = false,
 }: CartItemRowProps) => {
   const { updateItemBundleEntries, adjustQuantity } = useCartStore();
+  const cartPriceList = useCartStore((s) => s.selectedPriceList);
   const highlightItemId = useCartStore((s) => s.highlightItemId);
   const highlightNonce = useCartStore((s) => s.highlightNonce);
   const [glowing, setGlowing] = useState(false);
@@ -423,11 +425,22 @@ export const CartItemRow = ({
   const activeLinePriceList =
     selectedLinePriceLists.find((priceList) => Number(priceList.rate) === Number(itemDiscount.customRate))
     || selectedLinePriceLists[0];
+  // Until the line is switched it sells on the cart's price list, so that is what it shows.
+  const cartPriceListName = resolveActivePriceList(
+    cartPriceList,
+    (selectedCustomer as { sellingPriceList?: string } | null | undefined)?.sellingPriceList,
+    posDetails?.selling_price_list
+  );
+  const shownLinePriceList =
+    activeLinePriceList || linePriceLists.find((priceList) => priceList.price_list === cartPriceListName);
+  const linePriceListLabel = shownLinePriceList
+    ? `${shownLinePriceList.price_list} ${Number(shownLinePriceList.rate || 0).toFixed(2)}`
+    : cartPriceListName || "Price list";
 
   const openLinePricePopup = () => {
     const rect = priceTriggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const activeIndex = activeLinePriceList ? linePriceLists.indexOf(activeLinePriceList) : 0;
+    const activeIndex = shownLinePriceList ? linePriceLists.indexOf(shownLinePriceList) : 0;
     setLinePricePopup({
       selectedIndex: Math.max(0, activeIndex),
       position: computePricePopupPosition(rect, linePriceOptions.length, {
@@ -617,8 +630,8 @@ export const CartItemRow = ({
                   onKeyUp={(e) => { if (e.key === " ") e.preventDefault(); }}
                   onBlur={() => setLinePricePopup(null)}
                   title={
-                    activeLinePriceList
-                      ? `${activeLinePriceList.price_list}: ${formatCurrencyWithSymbol(Number(activeLinePriceList.rate || 0), currency_symbol)} - switch price list`
+                    shownLinePriceList
+                      ? `${shownLinePriceList.price_list}: ${formatCurrencyWithSymbol(Number(shownLinePriceList.rate || 0), currency_symbol)} - switch price list`
                       : "Switch price list for this line"
                   }
                   className={`max-w-full inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
@@ -628,9 +641,7 @@ export const CartItemRow = ({
                   }`}
                 >
                   <span className="truncate font-mono">
-                    {activeLinePriceList
-                      ? `${activeLinePriceList.price_list} ${Number(activeLinePriceList.rate || 0).toFixed(2)}`
-                      : "Price list"}
+                    {linePriceListLabel}
                   </span>
                   <ChevronDown size={10} className="flex-shrink-0" />
                 </button>
@@ -969,16 +980,19 @@ export const CartItemRow = ({
                     </div>
                     {!restrictCostVisibility && (
                       <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-3 border border-gray-200 dark:border-gray-600">
-                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate{isInclusiveTax ? " (excl. VAT)" : ""}</p>
+                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate{isInclusiveTax ? " (incl. VAT)" : ""}</p>
                         <p className="text-base font-bold text-gray-900 dark:text-white">
-                          {formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)}
+                          {formatCurrencyWithSymbol(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate, currency_symbol)}
                         </p>
-                        <p className="text-[10px] text-gray-500 mt-1">per {fullItemData?.uom}</p>
+                        <p className="text-[10px] text-gray-500 mt-1">
+                          per {item.uom || fullItemData?.uom}
+                          {isInclusiveTax ? ` · ${formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)} excl. VAT per ${fullItemData?.uom}` : ""}
+                        </p>
                       </div>
                     )}
                     {showPositiveMarginWarning && (
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md p-3 border border-blue-200 dark:border-blue-800">
-                        <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}</p>
+                        <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin</p>
                         <p className="text-base font-bold text-green-600 dark:text-green-400">
                           +{formatCurrencyWithSymbol(marginAmount, currency_symbol)}
                         </p>
@@ -989,7 +1003,7 @@ export const CartItemRow = ({
                       <div className="bg-red-50 dark:bg-red-900/20 rounded-md p-3 border border-red-200 dark:border-red-800">
                         <p className="text-[10px] text-red-500 dark:text-red-400 uppercase font-semibold flex items-center gap-1">
                           <AlertTriangle size={9} />
-                          Margin{isInclusiveTax ? " (cost incl. VAT)" : ""}
+                          Margin
                         </p>
                         <p className="text-base font-bold text-red-600 dark:text-red-400">
                           {formatCurrencyWithSymbol(marginAmount, currency_symbol)}

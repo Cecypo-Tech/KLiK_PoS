@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex } from "./priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, resolveActivePriceList } from "./priceOptions";
 
 describe("buildPriceOptions", () => {
   it("maps each price list entry to an option", () => {
@@ -82,5 +82,20 @@ describe("computePricePopupPosition", () => {
   it("never positions left of the viewport gutter on a narrow screen", () => {
     const pos = computePricePopupPosition({ left: 50, top: 10, bottom: 30 }, 1, { width: 200, height: 720 });
     expect(pos.left).toBe(8);
+  });
+});
+
+describe("resolveActivePriceList", () => {
+  it("prefers the price list picked on the cart", () => {
+    expect(resolveActivePriceList("Elite", "Wholesale", "Retail")).toBe("Elite");
+  });
+
+  it("falls back to the customer's price list, then the POS Profile's", () => {
+    expect(resolveActivePriceList(null, "Wholesale", "Retail")).toBe("Wholesale");
+    expect(resolveActivePriceList("", undefined, "Retail")).toBe("Retail");
+  });
+
+  it("is empty when nothing is configured", () => {
+    expect(resolveActivePriceList(null, undefined, undefined)).toBe("");
   });
 });

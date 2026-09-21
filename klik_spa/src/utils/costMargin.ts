@@ -34,3 +34,11 @@ export function getCostMargin({ sellPrice, costPerStockUom, inclusiveTaxRate, co
   const costInclTax = costPerStockUom * factor * (1 + inclusiveTaxRate / 100);
   return { costInclTax, margin: sellPrice - costInclTax };
 }
+
+/**
+ * A cost shown beside a tax-inclusive rate is shown tax-inclusive too, so the two figures can
+ * be compared at a glance. `cost` is already per the selling UOM.
+ */
+export function getDisplayCost(cost: number, inclusiveTaxRate: number): number {
+  return (Number(cost) || 0) * (1 + (Number(inclusiveTaxRate) || 0) / 100);
+}

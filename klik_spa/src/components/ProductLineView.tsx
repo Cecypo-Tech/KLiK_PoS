@@ -5,6 +5,7 @@ import type { MenuItem } from "../../types"
 import ProductTooltip from "./ProductTooltip"
 import ProductDetailsModal from "./ProductDetailsModal"
 import { usePOSProfileStore } from "../stores/posProfileStore"
+import { getDisplayCost, getInclusiveTaxRate } from "../utils/costMargin"
 
 import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isItemOutOfStock } from "../utils/stock"
@@ -115,8 +116,15 @@ export default function ProductLineView({
                 : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-700/50 dark:text-gray-300 dark:border-gray-600"
               const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0
               const variantCount = item.is_variant_template ? item.variant_count || 0 : 0
-              const costPrice = Number(item.cost_price || 0)
+              // Beside a VAT-inclusive Rate the cost is shown VAT-inclusive too (valuation itself
+              // never includes VAT), so the two columns compare directly.
+              const valuation = Number(item.cost_price || 0)
+              const costTaxRate = getInclusiveTaxRate(item.tax_info)
+              const costPrice = getDisplayCost(valuation, costTaxRate)
               const formattedCostPrice = costPrice > 0 ? formatCurrencyWithSymbol(costPrice, item.currency_symbol) : "—"
+              const costTitle = costPrice > 0 && costTaxRate > 0
+                ? `Valuation ${formatCurrencyWithSymbol(valuation, item.currency_symbol)} + ${costTaxRate}% VAT`
+                : undefined
 
               const isRowFocused = focusedIndex === rowIndex;
               return (
@@ -273,7 +281,7 @@ export default function ProductLineView({
                     <>
                       {showCostColumn && (
                         <div className={`col-span-1 flex items-center justify-end ${isDisabled ? "opacity-60" : ""}`}>
-                          <span className="text-xs font-normal text-gray-400 dark:text-gray-500 tabular-nums">
+                          <span title={costTitle} className="text-xs font-normal text-gray-400 dark:text-gray-500 tabular-nums">
                             {formattedCostPrice}
                           </span>
                         </div>
