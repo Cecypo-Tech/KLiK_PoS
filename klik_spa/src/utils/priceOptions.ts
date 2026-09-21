@@ -52,3 +52,12 @@ export function computePricePopupPosition(
     ...(openBelow ? { top: anchor.bottom + 6 } : { bottom: viewport.height - anchor.top + 6 }),
   };
 }
+
+/** The price list the cart is selling on: the cart's pick, else the customer's, else the profile's. */
+export function resolveActivePriceList(
+  cartPriceList: string | null | undefined,
+  customerPriceList: string | null | undefined,
+  profilePriceList: string | null | undefined
+): string {
+  return cartPriceList || customerPriceList || profilePriceList || "";
+}

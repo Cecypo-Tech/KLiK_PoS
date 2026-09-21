@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getInclusiveTaxRate, getCostMargin } from "./costMargin";
+import { getInclusiveTaxRate, getCostMargin, getDisplayCost } from "./costMargin";
 
 describe("getInclusiveTaxRate", () => {
   it("uses the inclusive portion only, not the total, for mixed tax lines", () => {
@@ -40,5 +40,19 @@ describe("getCostMargin", () => {
 
   it("treats a missing or zero conversion factor as 1", () => {
     expect(getCostMargin({ sellPrice: 10, costPerStockUom: 4, inclusiveTaxRate: 0, conversionFactor: 0 }).margin).toBe(6);
+  });
+});
+
+describe("getDisplayCost", () => {
+  it("shows the cost VAT-inclusive when the rate beside it is VAT-inclusive", () => {
+    expect(getDisplayCost(400, 16)).toBeCloseTo(464);
+  });
+
+  it("leaves the cost alone when no tax is baked into the rate", () => {
+    expect(getDisplayCost(400, 0)).toBe(400);
+  });
+
+  it("shows nothing-to-show as 0", () => {
+    expect(getDisplayCost(0, 16)).toBe(0);
   });
 });

@@ -298,11 +298,16 @@ export default function ProductTooltip({
 
             <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg">
               <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">
-                Our Cost{isInclusiveTax ? " (excl. VAT)" : ""}
+                Our Cost{isInclusiveTax ? " (incl. VAT)" : ""}
               </p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">
-                {formatCurrencyWithSymbol(costPrice, item.currency_symbol)}
+                {formatCurrencyWithSymbol(costInclTax, item.currency_symbol)}
               </p>
+              {isInclusiveTax && (
+                <p className="text-[10px] text-gray-400">
+                  {formatCurrencyWithSymbol(costPrice, item.currency_symbol)} excl. VAT
+                </p>
+              )}
             </div>
           </div>
 
@@ -344,7 +349,7 @@ export default function ProductTooltip({
             <div className="flex justify-between items-baseline">
               <div>
                 <p className={`text-[10px] uppercase font-semibold tracking-wide ${isLoss ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                  {isLoss ? "Loss" : "Profit Margin"}{isInclusiveTax ? " (cost incl. VAT)" : ""}
+                  {isLoss ? "Loss" : "Profit Margin"}
                 </p>
                 <p className={`text-2xl font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
                   {formatCurrencyWithSymbol(margin, item.currency_symbol)}
