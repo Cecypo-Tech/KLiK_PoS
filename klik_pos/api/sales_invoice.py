@@ -419,6 +419,18 @@ def _apply_walkin_party_fields(doc, walkin_name=None, walkin_phone=None):
 		doc.custom_walkin_phone = walkin_phone
 
 
+def _carry_tax_id_from_original(return_doc, original_invoice):
+	"""Put the sale's tax_id back on the credit note after its draft save.
+
+	Sales Invoice.tax_id is fetched from Customer.tax_id on every draft save, so a tax ID
+	captured at the till for a walk-in (whose Customer record has none) is wiped by
+	return_doc.save(). Submit does not re-fetch, so a direct write before it sticks - the
+	same trick create_and_submit_invoice and hold_invoice use for the sale itself."""
+	tax_id = original_invoice.get("tax_id")
+	if tax_id and return_doc.get("tax_id") != tax_id:
+		return_doc.db_set("tax_id", tax_id)
+
+
 def _parse_extra_fields(data):
 	"""Extract the generic POS extra-fields map from a request payload."""
 	if not isinstance(data, dict):
@@ -4192,6 +4204,7 @@ def return_sales_invoice(invoice_name):
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
 		return_doc.save(ignore_permissions=True)
+		_carry_tax_id_from_original(return_doc, original_invoice)
 		_enforce_submit_permission(return_doc)
 		return_doc.submit()
 
@@ -4812,6 +4825,7 @@ def create_partial_return(
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
 		return_doc.save(ignore_permissions=True)
+		_carry_tax_id_from_original(return_doc, original_invoice)
 		_enforce_submit_permission(return_doc)
 		return_doc.submit()
 
