@@ -431,6 +431,18 @@ def _carry_tax_id_from_original(return_doc, original_invoice):
 		return_doc.db_set("tax_id", tax_id)
 
 
+def _negate_actual_charges(return_doc):
+	"""Flip fixed ("Actual") tax rows on a credit note, the way ERPNext's make_return_doc does.
+
+	Percentage rows follow the negative item amounts through calculate_taxes_and_totals; a
+	fixed row (a Shipping Rule's courier fee) is copied as-is by the mapper and would stay
+	positive, shrinking the credit note and making ERPNext reject the refund row. Nothing
+	re-applies a shipping rule on a POS return, so the flip sticks."""
+	for tax in return_doc.get("taxes") or []:
+		if tax.charge_type == "Actual":
+			tax.tax_amount = -1 * flt(tax.tax_amount)
+
+
 def _parse_extra_fields(data):
 	"""Extract the generic POS extra-fields map from a request payload."""
 	if not isinstance(data, dict):
@@ -4162,6 +4174,7 @@ def return_sales_invoice(invoice_name):
 		)
 
 		return_doc.is_return = 1
+		_negate_actual_charges(return_doc)
 		return_doc.posting_date = frappe.utils.nowdate()
 		_apply_klik_invoice_flags(return_doc, is_held=False, is_submitted=True)
 
@@ -4743,6 +4756,7 @@ def create_partial_return(
 		)
 
 		return_doc.is_return = 1
+		_negate_actual_charges(return_doc)
 		return_doc.posting_date = frappe.utils.nowdate()
 		return_doc.custom_delivery_date = frappe.utils.nowdate()
 		_apply_klik_invoice_flags(return_doc, is_held=False, is_submitted=True)
