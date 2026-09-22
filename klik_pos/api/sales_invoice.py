@@ -463,6 +463,59 @@ def _drop_actual_charges(return_doc):
 	return_doc.set("taxes", [t for t in return_doc.get("taxes") or [] if t.charge_type != "Actual"])
 
 
+def _fixed_charges_for(invoice_names):
+	"""Fixed ("Actual") charge rows per invoice: what a Shipping Rule put on the sale."""
+	if not invoice_names:
+		return {}
+	rows = frappe.get_all(
+		"Sales Taxes and Charges",
+		filters={"parent": ["in", list(invoice_names)], "parenttype": "Sales Invoice", "charge_type": "Actual"},
+		fields=["parent", "description", "account_head", "tax_amount"],
+		order_by="parent, idx",
+	)
+	out = {}
+	for row in rows:
+		if not flt(row.tax_amount):
+			continue
+		out.setdefault(row.parent, []).append(
+			{"description": row.description, "account_head": row.account_head, "amount": flt(row.tax_amount)}
+		)
+	return out
+
+
+def _reversed_fixed_charges(invoice_names):
+	"""{invoice: {account_head: credit note}} for fixed charges an earlier submitted return
+	already reversed. Like returned_qty for items: a fee goes back once."""
+	if not invoice_names:
+		return {}
+	rows = frappe.db.sql(
+		"""
+		SELECT si.return_against AS original, si.name AS credit_note, t.account_head
+		FROM `tabSales Invoice` si
+		JOIN `tabSales Taxes and Charges` t ON t.parent = si.name
+		WHERE si.is_return = 1 AND si.docstatus = 1 AND si.return_against IN %(names)s
+		  AND t.charge_type = 'Actual' AND t.tax_amount < 0
+		ORDER BY si.name
+		""",
+		{"names": tuple(invoice_names)},
+		as_dict=True,
+	)
+	out = {}
+	for row in rows:
+		out.setdefault(row.original, {}).setdefault(row.account_head, row.credit_note)
+	return out
+
+
+def _refuse_second_fee_reversal(invoice_name):
+	already = _reversed_fixed_charges([invoice_name]).get(invoice_name) or {}
+	if already:
+		frappe.throw(
+			_("The fixed charges on {0} were already reversed by {1}.").format(
+				frappe.bold(invoice_name), ", ".join(sorted(set(already.values())))
+			)
+		)
+
+
 def _parse_extra_fields(data):
 	"""Extract the generic POS extra-fields map from a request payload."""
 	if not isinstance(data, dict):
@@ -1636,6 +1689,14 @@ def get_invoice_details(invoice_id):
 		invoice_data["refundable_cash"] = (
 			_get_refundable_cash(invoice, invoice) if not invoice.is_return else 0.0
 		)
+
+		# A Shipping Rule's courier fee, for the return dialog to offer as a line the cashier
+		# ticks - read the same way the return picker reads it.
+		reversed_by = _reversed_fixed_charges([invoice.name]).get(invoice.name, {})
+		invoice_data["fixed_charges"] = [
+			{**charge, "reversed_by": reversed_by.get(charge["account_head"])}
+			for charge in _fixed_charges_for([invoice.name]).get(invoice.name, [])
+		]
 
 		# Derived the same way the list endpoint derives it (_process_invoices), so the detail
 		# page and Invoice History cannot disagree about how an invoice was paid. Without this
@@ -4712,10 +4773,19 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 		# empty: M-Pesa money arrives as an advance, on an invoice whose payments table has
 		# the mode in it with no amount, so that fallback never fired for it.
 		payment_methods_map = _batch_fetch_payment_methods(invoice_names)
+		fixed_charges_map = _fixed_charges_for(invoice_names)
+		reversed_fees_map = _reversed_fixed_charges(invoice_names)
 
 		# Assign items to invoices
 		for invoice in invoices:
 			invoice.items = invoice_items_map.get(invoice.name, [])
+			# A Shipping Rule's courier fee is a line the cashier can tick, like an item;
+			# reversed_by names the credit note that already took it back, if any.
+			reversed_by = reversed_fees_map.get(invoice.name, {})
+			invoice.fixed_charges = [
+				{**charge, "reversed_by": reversed_by.get(charge["account_head"])}
+				for charge in fixed_charges_map.get(invoice.name, [])
+			]
 
 			payment_methods = payment_methods_map.get(invoice.name, [])
 			invoice.payment_methods = payment_methods
@@ -4740,9 +4810,19 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 
 @frappe.whitelist()
 def create_partial_return(
-	invoice_name, return_items, payment_method=None, return_amount=None, expected_return_amount=None
+	invoice_name,
+	return_items,
+	payment_method=None,
+	return_amount=None,
+	expected_return_amount=None,
+	return_fixed_charges=None,
 ):
-	"""Create a partial return for selected items from an invoice with custom payment method"""
+	"""Create a partial return for selected items from an invoice with custom payment method.
+
+	``return_fixed_charges`` is the cashier's tick for the courier fee (a Shipping Rule's
+	"Actual" row): 1 reverses it on the credit note, 0 leaves it off. A till that sends
+	nothing gets the old rule - the fee comes back only with every quantity on the invoice.
+	"""
 
 	try:
 		_ensure_return_allowed()
@@ -4804,7 +4884,15 @@ def create_partial_return(
 						break
 
 		return_doc.items = filtered_items
-		if not _returns_every_line(original_invoice, return_doc):
+		if return_fixed_charges is None:
+			reverse_fee = _returns_every_line(original_invoice, return_doc) and not _reversed_fixed_charges(
+				[invoice_name]
+			).get(invoice_name)
+		else:
+			reverse_fee = bool(cint(return_fixed_charges))
+			if reverse_fee:
+				_refuse_second_fee_reversal(invoice_name)
+		if not reverse_fee:
 			_drop_actual_charges(return_doc)
 
 		# Clear existing payments
@@ -4919,7 +5007,11 @@ def create_multi_invoice_return(return_data):
 			if return_items:
 				# Call create_partial_return with payment method and return amount
 				result = create_partial_return(
-					invoice_name, return_items, payment_method=payment_method, return_amount=return_amount
+					invoice_name,
+					return_items,
+					payment_method=payment_method,
+					return_amount=return_amount,
+					return_fixed_charges=invoice_return.get("return_fixed_charges"),
 				)
 				if result.get("success"):
 					created_returns.append(result.get("return_invoice"))
