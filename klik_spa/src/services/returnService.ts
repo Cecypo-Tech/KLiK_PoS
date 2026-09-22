@@ -9,6 +9,17 @@ export interface ReturnItem {
   return_qty?: number;
 }
 
+/** A fixed ("Actual") charge on the sale - a Shipping Rule's courier fee. A line the
+ * cashier ticks, like an item. `reversed_by` names the credit note that already took it
+ * back; `return_charge` is the cashier's tick, undefined until touched. */
+export interface FixedCharge {
+  description: string;
+  account_head: string;
+  amount: number;
+  reversed_by: string | null;
+  return_charge?: boolean;
+}
+
 export interface InvoiceForReturn {
   name: string;
   posting_date: string;
@@ -18,6 +29,7 @@ export interface InvoiceForReturn {
   paid_amount?: number;
   status: string;
   items: ReturnItem[];
+  fixed_charges?: FixedCharge[];
 }
 
 export interface ReturnData {
@@ -25,6 +37,10 @@ export interface ReturnData {
   invoice_returns: {
     invoice_name: string;
     return_items: ReturnItem[];
+    payment_method?: string;
+    return_amount?: number;
+    /** 1 reverses the sale's fixed charges on the credit note, 0 leaves them off. */
+    return_fixed_charges?: 0 | 1;
   }[];
 }
 
@@ -104,7 +120,8 @@ export async function createPartialReturn(
   invoiceName: string,
   returnItems: ReturnItem[],
   paymentMethod?: string,
-  returnAmount?: number
+  returnAmount?: number,
+  returnFixedCharges?: 0 | 1
 ): Promise<{success: boolean; returnInvoice?: string; message?: string; error?: string}> {
 
   const csrfToken = window.csrf_token;
@@ -119,7 +136,9 @@ export async function createPartialReturn(
         invoice_name: invoiceName,
         return_items: returnItems,
         payment_method: paymentMethod || 'Cash',
-        return_amount: returnAmount || 0
+        return_amount: returnAmount || 0,
+        // The courier fee is the cashier's call, like an item: 1 reverses it, 0 leaves it off.
+        ...(returnFixedCharges === undefined ? {} : { return_fixed_charges: returnFixedCharges })
       }),
        credentials: 'include'
     });

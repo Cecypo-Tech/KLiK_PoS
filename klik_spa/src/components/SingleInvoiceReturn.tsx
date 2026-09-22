@@ -6,13 +6,15 @@ import {
   CheckCircle,
   Package,
   Minus,
-  Plus
+  Plus,
+  Truck
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
-import { createPartialReturn, getReturnedQty, type ReturnItem } from "../services/returnService";
+import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem } from "../services/returnService";
+import { fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
 
 interface SingleInvoiceReturnProps {
@@ -30,6 +32,7 @@ export default function SingleInvoiceReturn({
   onSuccess
 }: SingleInvoiceReturnProps) {
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
+  const [fixedCharges, setFixedCharges] = useState<FixedCharge[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingReturnData, setLoadingReturnData] = useState(true);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -63,14 +66,13 @@ export default function SingleInvoiceReturn({
       // Check if we should ignore writeoff on partial returns
       const ignoreWriteoffOnPartialReturns = posDetails?.custom_ignore_write_off_on_partial_returns || false;
 
-      // Calculate return amount based on percentage of items being returned
-      const totalItemsAmount = returnItems.reduce((sum, item) => {
-        return sum + (item.qty * item.rate);
-      }, 0);
+      // Calculate return amount based on the share of the sale coming back: items at their
+      // rates plus the courier fee when it is ticked.
+      const basis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
+      const totalItemsAmount = returnItems.reduce((sum, item) => sum + (item.qty * item.rate), 0)
+        + fixedCharges.reduce((sum, charge) => sum + charge.amount, 0);
 
-      const returnedItemsAmount = returnItems.reduce((sum, item) => {
-        return sum + ((item.return_qty || 0) * item.rate);
-      }, 0);
+      const returnedItemsAmount = returnedValue(basis);
 
       // Check if this is a partial return (not all items are being returned)
       const isPartialReturn = returnedItemsAmount < totalItemsAmount;
@@ -91,12 +93,9 @@ export default function SingleInvoiceReturn({
       setReturnAmount(Math.round(calculatedReturnAmount * 100) / 100);
     } else {
       // Fallback to item-based calculation if paid amount is not available
-      const total = returnItems.reduce((sum, item) => {
-        return sum + ((item.return_qty || 0) * item.rate);
-      }, 0);
-      setReturnAmount(Math.round(total * 100) / 100);
+      setReturnAmount(returnedValue({ items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal }));
     }
-  }, [returnItems, originalInvoicePaidAmount, posDetails?.custom_ignore_write_off_on_partial_returns]);
+  }, [returnItems, fixedCharges, originalInvoiceGrandTotal, originalInvoicePaidAmount, posDetails?.custom_ignore_write_off_on_partial_returns]);
 
   // Set default payment method when payment modes are loaded
 
@@ -128,6 +127,9 @@ export default function SingleInvoiceReturn({
         // who had paid nothing.
         setOriginalInvoicePaidAmount(Number(invoiceWithItems.refundable_cash ?? invoiceWithItems.paid_amount ?? 0));
         setRefundableCash(Number(invoiceWithItems.refundable_cash ?? 0));
+        setFixedCharges(
+          (invoiceWithItems.fixed_charges || []).map((charge: FixedCharge) => ({ ...charge, amount: Number(charge.amount) || 0 }))
+        );
       } else {
         console.error('Failed to fetch invoice details:', invoiceDetails.error);
         throw new Error(invoiceDetails.error || 'Failed to fetch invoice details from backend');
@@ -200,6 +202,8 @@ export default function SingleInvoiceReturn({
       ...item,
       return_qty: item.available_qty
     })));
+    // Back to the rule: the fee follows "everything" until the cashier says otherwise.
+    setFixedCharges(prev => prev.map(charge => ({ ...charge, return_charge: undefined })));
   };
 
   const handleClearAll = () => {
@@ -207,6 +211,13 @@ export default function SingleInvoiceReturn({
       ...item,
       return_qty: 0
     })));
+    setFixedCharges(prev => prev.map(charge => ({ ...charge, return_charge: undefined })));
+  };
+
+  const handleFixedChargeToggle = (accountHead: string, checked: boolean) => {
+    setFixedCharges(prev => prev.map(charge =>
+      charge.account_head === accountHead ? { ...charge, return_charge: checked } : charge
+    ));
   };
 
   const handleSubmitReturn = async () => {
@@ -228,7 +239,10 @@ export default function SingleInvoiceReturn({
       };
 
 
-      const result = await createPartialReturn(invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount);
+      const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
+      const result = await createPartialReturn(
+        invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount, returnsAnyFixedCharge(returnBasis) ? 1 : 0
+      );
 
       if (result.success) {
         // Report what the backend actually did, not what was requested: a credit sale refunds
@@ -247,10 +261,8 @@ export default function SingleInvoiceReturn({
     }
   };
 
-  const totalReturnAmount = returnItems.reduce(
-    (sum, item) => sum + (item.return_qty || 0) * item.rate,
-    0
-  );
+  const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
+  const totalReturnAmount = returnedValue(returnBasis);
 
   const hasItemsToReturn = returnItems.some(item => (item.return_qty || 0) > 0);
 
@@ -455,6 +467,55 @@ export default function SingleInvoiceReturn({
                           </td>
                         </tr>
                       ))}
+                      {fixedCharges.map((charge) => {
+                        const returned = fixedChargeReturned(charge, returnBasis);
+                        return (
+                          <tr key={`fee:${charge.account_head}`} className="hover:bg-gray-50 dark:hover:bg-gray-600">
+                            <td className="px-4 py-4">
+                              <div className="flex items-center space-x-3">
+                                <div className="p-2 bg-amber-100 dark:bg-amber-900/20 rounded-lg">
+                                  <Truck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                                </div>
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {charge.description}
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                                    {charge.reversed_by ? `Reversed on ${charge.reversed_by}` : "Delivery charge"}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-center text-sm text-gray-900 dark:text-white">1</td>
+                            <td className="px-4 py-4 text-center">
+                              <span className="text-sm text-red-600 dark:text-red-400">{charge.reversed_by ? 1 : 0}</span>
+                            </td>
+                            <td className="px-4 py-4 text-center">
+                              <span className={`text-sm font-medium ${charge.reversed_by ? 'text-gray-500 dark:text-gray-400' : 'text-green-600 dark:text-green-400'}`}>
+                                {charge.reversed_by ? 0 : 1}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Return ${charge.description}`}
+                                  checked={returned}
+                                  disabled={!!charge.reversed_by}
+                                  onChange={(e) => handleFixedChargeToggle(charge.account_head, e.target.checked)}
+                                  className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-right text-sm text-gray-900 dark:text-white">
+                              {formatCurrencyWithSymbol(charge.amount, currency)}
+                            </td>
+                            <td className="px-4 py-4 text-right text-sm font-medium text-gray-900 dark:text-white">
+                              {formatCurrencyWithSymbol(returned ? charge.amount : 0, currency)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
