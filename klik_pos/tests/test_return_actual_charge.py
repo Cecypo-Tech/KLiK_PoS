@@ -2,7 +2,9 @@
 
 A POS sale with a Shipping Rule carries the courier fee as an Actual tax row. The mapper
 copied it as-is, calculate_taxes_and_totals left it positive, and ERPNext then rejected the
-return's payment row. ERPNext's own make_return_doc flips Actual rows; so do we now.
+return's payment row. ERPNext's own make_return_doc flips Actual rows; so do we now - but
+only when the whole order comes back. The delivery happened, so a partial return keeps the
+fee: the credit note carries the returned items and nothing else.
 """
 
 import frappe
@@ -51,7 +53,7 @@ class TestReturnReversesActualCharge(FrappeTestCase):
 		self.assertEqual([flt(t.tax_amount) for t in credit.taxes if t.charge_type == "Actual"], [-COURIER])
 		self.assertEqual([flt(p.amount) for p in credit.payments], [-flt(invoice.grand_total)])
 
-	def test_a_partial_return_still_negates_the_fixed_charge(self):
+	def test_a_partial_return_keeps_the_courier_fee(self):
 		invoice = self._sale(qty=2)
 		item = invoice.items[0].item_code
 
@@ -59,5 +61,18 @@ class TestReturnReversesActualCharge(FrappeTestCase):
 
 		self.assertTrue(result.get("success"), result.get("message"))
 		credit = frappe.get_doc("Sales Invoice", result["return_invoice"])
+		self.assertEqual([t.charge_type for t in credit.taxes if t.charge_type == "Actual"], [], "fee not on the note")
+		self.assertEqual(flt(credit.grand_total), -100.0, "only the returned item is credited")
+
+	def test_returning_every_item_through_the_partial_path_reverses_the_fee(self):
+		# The till has no separate "return all" call: a full return is the partial path with
+		# every quantity selected.
+		invoice = self._sale(qty=2)
+		item = invoice.items[0].item_code
+
+		result = create_partial_return(invoice.name, [{"item_code": item, "return_qty": 2}])
+
+		self.assertTrue(result.get("success"), result.get("message"))
+		credit = frappe.get_doc("Sales Invoice", result["return_invoice"])
 		self.assertEqual([flt(t.tax_amount) for t in credit.taxes if t.charge_type == "Actual"], [-COURIER])
-		self.assertEqual(flt(credit.grand_total), -(100 + COURIER))
+		self.assertEqual(flt(credit.grand_total), -flt(invoice.grand_total))

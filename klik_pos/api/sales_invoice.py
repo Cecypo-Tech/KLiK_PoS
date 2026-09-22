@@ -443,6 +443,26 @@ def _negate_actual_charges(return_doc):
 			tax.tax_amount = -1 * flt(tax.tax_amount)
 
 
+def _returns_every_line(original_invoice, return_doc):
+	"""True when this return alone brings back every quantity on the original invoice."""
+	sold = {}
+	for row in original_invoice.items:
+		sold[row.item_code] = sold.get(row.item_code, 0.0) + abs(flt(row.qty))
+	returned = {}
+	for row in return_doc.items:
+		returned[row.item_code] = returned.get(row.item_code, 0.0) + abs(flt(row.qty))
+	return all(flt(returned.get(code, 0.0)) >= qty for code, qty in sold.items())
+
+
+def _drop_actual_charges(return_doc):
+	"""Leave fixed charges off a partial credit note.
+
+	The delivery happened whether or not one item comes back, so a partial return keeps
+	the courier fee: the note carries the returned items and their percentage taxes only.
+	A return of every quantity reverses the fee through _negate_actual_charges."""
+	return_doc.set("taxes", [t for t in return_doc.get("taxes") or [] if t.charge_type != "Actual"])
+
+
 def _parse_extra_fields(data):
 	"""Extract the generic POS extra-fields map from a request payload."""
 	if not isinstance(data, dict):
@@ -4784,6 +4804,8 @@ def create_partial_return(
 						break
 
 		return_doc.items = filtered_items
+		if not _returns_every_line(original_invoice, return_doc):
+			_drop_actual_charges(return_doc)
 
 		# Clear existing payments
 		return_doc.payments = []
