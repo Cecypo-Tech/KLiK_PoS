@@ -9,6 +9,7 @@ from frappe import _
 from frappe.exceptions import ValidationError
 from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 
+from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 from .cashier_scope import own_invoice_filter
@@ -1586,18 +1587,9 @@ def _process_invoices(invoices, cashier_names_map, payment_methods_map, items_ma
 		payment_methods = payment_methods_map.get(inv.name, [])
 		inv["payment_methods"] = payment_methods
 
-		# Set backward-compatible mode_of_payment field
-		# Dedupe modes (order-preserving): with one row per receipt, several rows can now
-		# share a single mode (e.g. three M-Pesa receipts), and joining the raw rows would
-		# turn that into "Mpesa/Mpesa/Mpesa" which no longer matches the Mode of Payment
-		# filter dropdown used by Invoice History / Closing Shift.
-		modes = list(dict.fromkeys(pm["mode_of_payment"] for pm in payment_methods))
-		if len(modes) == 0:
-			inv["mode_of_payment"] = "-"
-		elif len(modes) == 1:
-			inv["mode_of_payment"] = modes[0]
-		else:
-			inv["mode_of_payment"] = "/".join(modes)
+		# Backward-compatible mode_of_payment label, shared with the detail page and the
+		# return picker so the three surfaces cannot disagree.
+		inv["mode_of_payment"] = mode_label(payment_methods)
 
 		# Set items and calculate return data
 		items = items_map.get(inv.name, [])
@@ -1709,16 +1701,7 @@ def get_invoice_details(invoice_id):
 			advance_payment_rows([invoice.name]).get(invoice.name, []),
 		)
 		invoice_data["payment_methods"] = payments
-		# Dedupe modes (order-preserving) before joining: several rows can now share a single
-		# mode (one row per receipt), so a row count above one no longer means a genuine split
-		# across modes. Only a distinct-mode count above one is.
-		modes = list(dict.fromkeys(p["mode_of_payment"] for p in payments))
-		if len(modes) == 0:
-			invoice_data["mode_of_payment"] = "-"
-		elif len(modes) == 1:
-			invoice_data["mode_of_payment"] = modes[0]
-		else:
-			invoice_data["mode_of_payment"] = "/".join(modes)
+		invoice_data["mode_of_payment"] = mode_label(payments)
 
 		return {
 			"success": True,
@@ -4789,17 +4772,8 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 
 			payment_methods = payment_methods_map.get(invoice.name, [])
 			invoice.payment_methods = payment_methods
-			# Keep backward compatibility - show first payment method or combined display.
-			# Dedupe modes (order-preserving): one row per receipt means several rows can
-			# share a single mode, so join the distinct modes, not the raw rows.
-			modes = list(dict.fromkeys(pm["mode_of_payment"] for pm in payment_methods))
-			if len(modes) == 0:
-				invoice.payment_method = "-"
-			elif len(modes) == 1:
-				invoice.payment_method = modes[0]
-			else:
-				# Show combined payment methods like "Cash/Credit Card"
-				invoice.payment_method = "/".join(modes)
+			# Keep backward compatibility - the same label Invoice History shows.
+			invoice.payment_method = mode_label(payment_methods)
 
 		return {"success": True, "data": invoices}
 
