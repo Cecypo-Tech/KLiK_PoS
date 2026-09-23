@@ -19,7 +19,8 @@ export interface PaymentStat {
  */
 export function computePaymentStats(
   modes: PaymentMode[] | undefined,
-  invoices: Pick<SalesInvoice, "payment_methods" | "paymentMethod" | "totalAmount" | "status">[]
+  invoices: Pick<SalesInvoice, "payment_methods" | "paymentMethod" | "totalAmount" | "status">[],
+  currentShift?: string | null
 ): Record<string, PaymentStat> {
   const stats: Record<string, PaymentStat> = {};
 
@@ -49,7 +50,12 @@ export function computePaymentStats(
   invoices.forEach((invoice) => {
     if (invoice.payment_methods && Array.isArray(invoice.payment_methods)) {
       invoice.payment_methods.forEach((payment, index) => {
-        const stat = ensurePaymentStat(payment.mode_of_payment);
+        // A row read from a Payment Entry counts only when that entry was stamped with
+        // the shift being closed (a receipt taken at the till). A customer advance an
+        // accountant recorded carries no shift: shown on the invoice, never in the
+        // cashier's hands, so not theirs to count. Same rule as the server's.
+        if (payment.payment_entry && (payment.pos_opening_entry || null) !== (currentShift || null)) return;
+        const stat = ensurePaymentStat(payment.mode_of_payment || undefined);
         if (!stat) return;
 
         const isReturn = invoice.status === "Return";

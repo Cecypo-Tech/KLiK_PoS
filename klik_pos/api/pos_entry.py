@@ -425,13 +425,9 @@ def _calculate_payment_reconciliation(opening_entry, data):
 
 	for row in _fetch_opening_payment_entry_data(opening_entry_name):
 		sales_map[row.mode_of_payment] = flt(sales_map.get(row.mode_of_payment, 0)) + flt(row.total_amount)
-
-	# Money that settled this shift's sales as an advance from a Payment Entry that was
-	# not stamped with any shift - a customer advance an accountant recorded - is counted
-	# with the sale it settled, under the mode the reader resolved for it. Anything stamped
-	# with a shift is already counted above through that shift, so it is skipped here.
-	for mode, amount in _unstamped_advances_by_mode(opening_entry_name).items():
-		sales_map[mode] = flt(sales_map.get(mode, 0)) + amount
+	# Money that settled a sale from outside the POS - a customer advance an accountant
+	# recorded, stamped with no shift - is shown on the invoice but deliberately not
+	# counted: it was never in the cashier's hands.
 
 	# Build reconciliation entries
 	closing_balance = data.get("closing_balance", {})
@@ -455,8 +451,8 @@ def _calculate_payment_reconciliation(opening_entry, data):
 		)
 
 	# Modes the cashier sent no count for: every opening mode, and every mode money is
-	# expected under even if the till does not list it (an advance into an account only
-	# another mode posts to). Without the latter that money left the closing entry silently.
+	# expected under even if the till does not list it (a receipt taken at the till in a
+	# mode the profile omits). Without the latter that money left the closing entry silently.
 	uncounted = list(opening_balance_map) + [m for m in sales_map if m and m not in opening_balance_map]
 	for mode in uncounted:
 		opening_amount = opening_balance_map.get(mode, 0)
@@ -476,25 +472,6 @@ def _calculate_payment_reconciliation(opening_entry, data):
 			)
 
 	return reconciliation
-
-
-def _unstamped_advances_by_mode(opening_entry_name):
-	"""{mode: amount} of Payment Entry advances on the shift's submitted invoices whose
-	entry carries no shift of its own and could be given a mode (see payment_rows)."""
-	from klik_pos.api.payment_rows import advance_payment_rows
-
-	invoice_names = frappe.get_all(
-		"Sales Invoice",
-		filters={"custom_pos_opening_entry": opening_entry_name, "docstatus": 1},
-		pluck="name",
-	)
-	totals: dict = {}
-	for rows in advance_payment_rows(invoice_names).values():
-		for row in rows:
-			if row["pos_opening_entry"] or not row["mode_of_payment"]:
-				continue
-			totals[row["mode_of_payment"]] = flt(totals.get(row["mode_of_payment"], 0)) + flt(row["amount"])
-	return totals
 
 
 def _calculate_closing_entry_totals(opening_entry_name):

@@ -16,17 +16,15 @@ def advance_payment_rows(invoice_names) -> dict:
 	callers can fall back to the payments table with a plain .get().
 
 	A Payment Entry need not carry a Mode of Payment - one made outside the POS (a customer
-	advance an accountant recorded) usually has none. A mode is only a name for an account,
-	so such a row takes the mode whose default account for the company is paid_to, the
-	account the money went to (see _mode_for_account); the list, the filter and the
-	Closing Shift then treat it as any other payment. When no mode points at that account
-	the mode stays blank - never the account name, because the Closing Shift turns every
-	mode it sees into a POS Closing Entry Detail row, whose mode is a Link to Mode of
-	Payment - and mode_label() shows paid_to instead so the money does not vanish.
+	advance an accountant recorded) usually has none. Such a row keeps mode_of_payment
+	blank and carries paid_to, the account the money went to, for mode_label() to show
+	instead. No mode is guessed for it: a mode is what the Closing Shift counts, the
+	closing entry's rows are Links to Mode of Payment, and money the till never handled is
+	not the cashier's to count.
 
 	pos_opening_entry is the shift the Payment Entry itself was stamped with (M-Pesa
-	receipts are); the closing reconciliation counts those through their own shift and
-	uses it to avoid counting them again here.
+	receipts taken at the till are). The closing screens count an advance only when it is
+	stamped with the shift being closed.
 
 	Only submitted entries on a live invoice count. ERPNext leaves the advance rows behind
 	on a cancelled invoice - it deletes them only when a single payment is unlinked - so
@@ -50,8 +48,7 @@ def advance_payment_rows(invoice_names) -> dict:
 	rows = frappe.db.sql(
 		f"""
 		SELECT adv.parent, adv.reference_name AS payment_entry, adv.allocated_amount AS amount,
-			pe.mode_of_payment, pe.paid_to, pe.reference_no, {phone}, {stamped_shift},
-			si.company, si.pos_profile
+			pe.mode_of_payment, pe.paid_to, pe.reference_no, {phone}, {stamped_shift}
 		FROM `tabSales Invoice Advance` adv
 		INNER JOIN `tabPayment Entry` pe ON pe.name = adv.reference_name
 		INNER JOIN `tabSales Invoice` si ON si.name = adv.parent
@@ -66,12 +63,11 @@ def advance_payment_rows(invoice_names) -> dict:
 		{"names": tuple(invoice_names)},
 		as_dict=True,
 	)
-	resolve = _mode_for_account(rows)
 	out: dict = {}
 	for row in rows:
 		out.setdefault(row.parent, []).append(
 			{
-				"mode_of_payment": row.mode_of_payment or resolve(row),
+				"mode_of_payment": row.mode_of_payment,
 				"paid_to": row.paid_to,
 				"amount": flt(row.amount),
 				"reference_no": row.reference_no,
@@ -81,56 +77,6 @@ def advance_payment_rows(invoice_names) -> dict:
 			}
 		)
 	return out
-
-
-def _mode_for_account(rows):
-	"""row -> the Mode of Payment to count a mode-less Payment Entry under, or None.
-
-	Candidates are the modes whose default account for the invoice's company is the
-	entry's paid_to. Several modes can share one account (Cash and Bank Draft both post
-	to the cash account), so the till that rang the sale settles it: a mode in its POS
-	Profile's payment list wins, in the till's order; failing that, the first by name.
-	Looked up once per call for every (company, account) and profile the rows need.
-	"""
-	pairs = {(r.company, r.paid_to) for r in rows if not r.mode_of_payment and r.paid_to}
-	if not pairs:
-		return lambda row: None
-
-	by_account: dict = {}
-	for r in frappe.db.sql(
-		"""
-		SELECT mpa.company, mpa.default_account, mpa.parent AS mode
-		FROM `tabMode of Payment Account` mpa
-		INNER JOIN `tabMode of Payment` mop ON mop.name = mpa.parent AND mop.enabled = 1
-		WHERE (mpa.company, mpa.default_account) IN %(pairs)s
-		ORDER BY mpa.parent
-		""",
-		{"pairs": tuple(pairs)},
-		as_dict=True,
-	):
-		by_account.setdefault((r.company, r.default_account), []).append(r.mode)
-
-	profiles = {r.pos_profile for r in rows if r.pos_profile}
-	till_modes: dict = {}
-	if profiles:
-		for r in frappe.get_all(
-			"POS Payment Method",
-			filters={"parenttype": "POS Profile", "parent": ("in", list(profiles))},
-			fields=["parent", "mode_of_payment"],
-			order_by="parent, idx",
-		):
-			till_modes.setdefault(r.parent, []).append(r.mode_of_payment)
-
-	def resolve(row):
-		candidates = by_account.get((row.company, row.paid_to), [])
-		if not candidates:
-			return None
-		for mode in till_modes.get(row.pos_profile, []):
-			if mode in candidates:
-				return mode
-		return candidates[0]
-
-	return resolve
 
 
 def merge_payment_rows(sip_rows: list, advance_rows: list) -> list:

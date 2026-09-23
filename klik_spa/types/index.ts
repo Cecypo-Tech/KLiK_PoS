@@ -252,8 +252,12 @@ export interface SalesInvoice {
    */
   mode_of_payment?: string
   payment_methods?: Array<{
-    mode_of_payment: string
+    mode_of_payment: string | null
     amount: number
+    /** Set on a row read from a Payment Entry advance rather than the payments table. */
+    payment_entry?: string
+    /** The shift that Payment Entry was stamped with; null for money from outside the POS. */
+    pos_opening_entry?: string | null
   }>
   amountPaid: number
   changeGiven: number

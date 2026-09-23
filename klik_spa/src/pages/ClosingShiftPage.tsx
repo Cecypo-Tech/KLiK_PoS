@@ -201,8 +201,8 @@ export default function ClosingShiftPage() {
 
   // Payment Stats Calculation - Calculate from filtered invoices
   const paymentStats = useMemo(
-    () => computePaymentStats(modes, filteredInvoices),
-    [modes, filteredInvoices]
+    () => computePaymentStats(modes, filteredInvoices, posDetails?.current_opening_entry as string | undefined),
+    [modes, filteredInvoices, posDetails?.current_opening_entry]
   );
   const total = Object.values(paymentStats).reduce((sum, stat) => sum + stat.amount, 0);
   const hasPaymentStats = Object.keys(paymentStats).length > 0;
