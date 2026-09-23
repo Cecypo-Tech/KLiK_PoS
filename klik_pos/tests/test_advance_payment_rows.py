@@ -14,8 +14,6 @@ from frappe.tests.utils import FrappeTestCase
 from klik_pos.api.mpesa import _allocate_receipts_before_submit
 from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows, mode_label
 from klik_pos.api.sales_invoice import get_customer_invoices_for_return, get_invoice_details, get_sales_invoices
-from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
-
 from klik_pos.tests.test_mpesa_payment_entry_first import COMPANY, CUSTOMER, MpesaFirstCase
 
 
@@ -74,7 +72,67 @@ class TestModeLabel(FrappeTestCase):
 		self.assertEqual(mode_label([{"mode_of_payment": None, "amount": 10.0}]), "-")
 
 
+BANK = "_Test Bank - _TC"
+CASH = "Cash - _TC"
+
+
+def pin_mode_accounts():
+	"""The account each mode posts to in _Test Company, owned by the test, not the site.
+
+	Cheque alone posts to the bank; Cash and Bank Draft share the cash account. Rows other
+	modes may have left on either account are removed so 'first by name' and 'the only
+	match' mean what the tests say. Child rows only; rolled back with the class.
+	"""
+	wanted = {"Cheque": BANK, "Cash": CASH, "Bank Draft": CASH}
+	frappe.db.delete("Mode of Payment Account", {"company": COMPANY, "parent": ("in", list(wanted))})
+	frappe.db.delete("Mode of Payment Account", {"company": COMPANY, "default_account": ("in", [BANK, CASH])})
+	for mode, account in wanted.items():
+		frappe.get_doc(
+			{
+				"doctype": "Mode of Payment Account",
+				"parenttype": "Mode of Payment",
+				"parent": mode,
+				"parentfield": "accounts",
+				"company": COMPANY,
+				"default_account": account,
+			}
+		).insert(ignore_permissions=True)
+	frappe.db.set_value("Mode of Payment", list(wanted), "enabled", 1, update_modified=False)
+
+
+def make_till(*modes):
+	"""A POS Profile of its own that takes `modes`, without touching any other profile.
+
+	(erpnext's make_pos_profile deletes every POS Profile on the site first.)
+	"""
+	profile = frappe.get_doc(
+		{
+			"doctype": "POS Profile",
+			"name": f"_Test Till {frappe.generate_hash(length=6)}",
+			"company": COMPANY,
+			"cost_center": "_Test Cost Center - _TC",
+			"currency": "INR",
+			"expense_account": "_Test Account Cost for Goods Sold - _TC",
+			"income_account": "Sales - _TC",
+			"selling_price_list": "_Test Price List",
+			"territory": "_Test Territory",
+			"customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name"),
+			"warehouse": "_Test Warehouse - _TC",
+			"write_off_account": "_Test Write Off - _TC",
+			"write_off_cost_center": "_Test Write Off Cost Center - _TC",
+			"payments": [{"mode_of_payment": m, "default": int(i == 0)} for i, m in enumerate(modes)],
+		}
+	)
+	profile.insert(ignore_permissions=True)
+	return profile
+
+
 class TestAdvancePaymentRows(MpesaFirstCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		pin_mode_accounts()
+
 	def test_a_payment_entry_without_a_mode_takes_the_mode_of_its_account(self):
 		"""Mode of Payment is optional on a Payment Entry, and one made outside the POS (a
 		customer advance an accountant recorded) usually has none. A mode is only a name
@@ -92,7 +150,7 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 	def test_when_several_modes_share_the_account_the_first_by_name_is_taken(self):
 		"""Cash - _TC is the account of both Bank Draft and Cash."""
 		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000405")])
-		self._mode_less_entry(invoice, paid_to="Cash - _TC")
+		self._mode_less_entry(invoice, paid_to=CASH)
 
 		rows = advance_payment_rows([invoice.name])[invoice.name]
 
@@ -102,9 +160,9 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 		"""The till that rang the sale lists the modes it takes; one of those beats a
 		mode nobody at the till has heard of."""
 		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000406")])
-		self._mode_less_entry(invoice, paid_to="Cash - _TC")
-		profile = make_pos_profile(company=COMPANY)  # its payments list is Cash alone
-		frappe.db.set_value("Sales Invoice", invoice.name, "pos_profile", profile.name, update_modified=False)
+		self._mode_less_entry(invoice, paid_to=CASH)
+		till = make_till("Cash")
+		frappe.db.set_value("Sales Invoice", invoice.name, "pos_profile", till.name, update_modified=False)
 
 		rows = advance_payment_rows([invoice.name])[invoice.name]
 

@@ -454,8 +454,12 @@ def _calculate_payment_reconciliation(opening_entry, data):
 			}
 		)
 
-	# Process modes without closing amounts (including all opening modes if no closing data)
-	for mode, opening_amount in opening_balance_map.items():
+	# Modes the cashier sent no count for: every opening mode, and every mode money is
+	# expected under even if the till does not list it (an advance into an account only
+	# another mode posts to). Without the latter that money left the closing entry silently.
+	uncounted = list(opening_balance_map) + [m for m in sales_map if m and m not in opening_balance_map]
+	for mode in uncounted:
+		opening_amount = opening_balance_map.get(mode, 0)
 		if mode not in closing_balance:
 			sales_amount = sales_map.get(mode, 0)
 			expected_amount = float(opening_amount) + float(sales_amount)

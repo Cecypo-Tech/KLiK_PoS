@@ -12,10 +12,16 @@ from frappe.utils import flt
 from klik_pos.api.mpesa import _allocate_receipts_before_submit
 from klik_pos.api.payment_rows import advance_payment_rows
 from klik_pos.api.pos_entry import _calculate_payment_reconciliation
+from klik_pos.tests.test_advance_payment_rows import pin_mode_accounts
 from klik_pos.tests.test_mpesa_payment_entry_first import MpesaFirstCase
 
 
 class TestClosingCountsAdvances(MpesaFirstCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		pin_mode_accounts()
+
 	def setUp(self):
 		super().setUp()
 		self.shift = f"TEST-OPE-ADV-{frappe.generate_hash(length=6)}"
@@ -51,8 +57,22 @@ class TestClosingCountsAdvances(MpesaFirstCase):
 		self.assertEqual(self._expected(rows, "Cash"), 100)
 		self.assertEqual(self._expected(rows, "Cheque"), 0)
 
+	def test_a_mode_the_till_does_not_list_still_reaches_the_closing_entry(self):
+		"""The till counts Cash alone, so the page sends no count for Cheque. The 150 that
+		settled the sale is still expected, so the closing entry carries a Cheque row with
+		that expectation and a zero count, rather than losing the money silently."""
+		invoice, (entry,) = self._sale_with_advances(cash=100, receipts=[150])
+		self._make_accountants_entry(entry)
+
+		rows = _calculate_payment_reconciliation(frappe._dict(name=self.shift), {"closing_balance": {"Cash": 0}})
+
+		cheque = next(r for r in rows if r["mode_of_payment"] == "Cheque")
+		self.assertEqual(flt(cheque["expected_amount"]), 150)
+		self.assertEqual(flt(cheque["closing_amount"]), 0)
+		self.assertEqual(flt(cheque["difference"]), -150)
+
 	def _sale_with_advances(self, cash, receipts):
-		invoice = self._draft(rate=cash + sum(receipts), posting_date=frappe.utils.nowdate())
+		invoice = self._draft(rate=cash + sum(receipts))
 		invoice.append("payments", {"mode_of_payment": "Cash", "amount": cash})
 		invoice.save(ignore_permissions=True)
 		invoice = self._record(invoice, *[self._receipt(a, f"2547000005{i:02d}") for i, a in enumerate(receipts)])
