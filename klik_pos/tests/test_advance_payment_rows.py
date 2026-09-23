@@ -13,8 +13,8 @@ from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.mpesa import _allocate_receipts_before_submit
 from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows, mode_label
-from klik_pos.api.sales_invoice import get_sales_invoices
-from klik_pos.tests.test_mpesa_payment_entry_first import MpesaFirstCase
+from klik_pos.api.sales_invoice import get_customer_invoices_for_return, get_invoice_details, get_sales_invoices
+from klik_pos.tests.test_mpesa_payment_entry_first import CUSTOMER, MpesaFirstCase
 
 
 class TestMergePaymentRows(FrappeTestCase):
@@ -32,6 +32,15 @@ class TestMergePaymentRows(FrappeTestCase):
 		)
 		self.assertEqual(len(merged), 2)
 
+	def test_a_mode_less_advance_keeps_every_payments_table_row(self):
+		"""An advance with no mode settles nothing in particular, so it cannot stand in for
+		the Mpesa placeholder; the placeholder stays and the money is added."""
+		merged = merge_payment_rows(
+			[{"mode_of_payment": "Mpesa", "amount": 0.0}],
+			[{"mode_of_payment": None, "paid_to": "Bank - TC", "amount": 450.0, "reference_no": None, "phone_number": None, "payment_entry": "PE-2"}],
+		)
+		self.assertEqual([(r["mode_of_payment"], r["amount"]) for r in merged], [("Mpesa", 0.0), (None, 450.0)])
+
 	def test_no_advances_means_the_rows_come_back_untouched(self):
 		rows = [{"mode_of_payment": "Cash", "amount": 50.0}]
 		self.assertEqual(merge_payment_rows(rows, []), rows)
@@ -45,6 +54,10 @@ class TestModeLabel(FrappeTestCase):
 	def test_a_blank_mode_does_not_take_the_label_down(self):
 		rows = [{"mode_of_payment": "Cash", "amount": 50.0}, {"mode_of_payment": None, "amount": 450.0}]
 		self.assertEqual(mode_label(rows), "Cash")
+
+	def test_a_mode_less_row_is_labelled_by_its_account(self):
+		rows = [{"mode_of_payment": "Cash", "amount": 50.0}, {"mode_of_payment": None, "paid_to": "Bank - TC", "amount": 450.0}]
+		self.assertEqual(mode_label(rows), "Cash/Bank - TC")
 
 	def test_known_modes_are_joined_once_each(self):
 		rows = [
@@ -60,17 +73,20 @@ class TestModeLabel(FrappeTestCase):
 
 
 class TestAdvancePaymentRows(MpesaFirstCase):
-	def test_a_payment_entry_without_a_mode_is_labelled_by_its_account(self):
+	def test_a_payment_entry_without_a_mode_carries_its_account_and_no_mode(self):
 		"""Mode of Payment is optional on a Payment Entry. On a site whose money arrives as
-		plain customer advances it is blank on every one, so the row names the account
-		the money went to instead - what the accountant chose, and still filterable."""
+		plain customer advances it is blank on every one. The row carries the account the
+		money went to for the label, but mode_of_payment stays blank: the Closing Shift
+		turns every mode it sees into a POS Closing Entry Detail row, whose mode is a Link,
+		and an account name there would stop the shift from closing."""
 		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000403")])
 		entry = advance_payment_rows([invoice.name])[invoice.name][0]["payment_entry"]
 		frappe.db.set_value("Payment Entry", entry, "mode_of_payment", None, update_modified=False)
 
 		rows = advance_payment_rows([invoice.name])[invoice.name]
 
-		self.assertEqual(rows[0]["mode_of_payment"], frappe.db.get_value("Payment Entry", entry, "paid_to"))
+		self.assertIsNone(rows[0]["mode_of_payment"])
+		self.assertEqual(rows[0]["paid_to"], frappe.db.get_value("Payment Entry", entry, "paid_to"))
 
 	def test_invoice_history_survives_a_payment_entry_without_a_mode(self):
 		"""Regression: one such invoice in a page returned
@@ -95,6 +111,20 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 		row = next(r for r in result["data"] if r["name"] == invoice.name)
 		account = frappe.db.get_value("Payment Entry", entry, "paid_to")
 		self.assertEqual(row["mode_of_payment"], f"Cash/{account}")
+		self.assertEqual(
+			{p["mode_of_payment"] for p in row["payment_methods"]},
+			{"Cash", None},
+			"only real Modes of Payment reach the rows the Closing Shift counts",
+		)
+
+		detail = get_invoice_details(invoice.name)
+		self.assertTrue(detail["success"], detail.get("error"))
+		self.assertEqual(detail["data"]["mode_of_payment"], f"Cash/{account}")
+
+		picker = get_customer_invoices_for_return(CUSTOMER)
+		self.assertTrue(picker["success"], picker.get("error"))
+		picked = next(r for r in picker["data"] if r["name"] == invoice.name)
+		self.assertEqual(picked["payment_method"], f"Cash/{account}")
 
 	def test_reads_mode_amount_and_receipt_details_from_the_payment_entry(self):
 		invoice = self._record(self._draft(rate=500), self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
