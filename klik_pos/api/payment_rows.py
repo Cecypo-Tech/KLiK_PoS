@@ -15,6 +15,10 @@ def advance_payment_rows(invoice_names) -> dict:
 	Only invoices that have at least one allocated Payment Entry advance appear as keys, so
 	callers can fall back to the payments table with a plain .get().
 
+	A Payment Entry need not carry a Mode of Payment - one made outside the POS (a customer
+	advance, a bank reconciliation) usually has none - so such a row is named after the
+	account the money went to instead, which is what the accountant chose.
+
 	Only submitted entries on a live invoice count. ERPNext leaves the advance rows behind
 	on a cancelled invoice - it deletes them only when a single payment is unlinked - so
 	without the docstatus filters a cancelled sale would still read as paid by M-Pesa.
@@ -32,7 +36,7 @@ def advance_payment_rows(invoice_names) -> dict:
 	rows = frappe.db.sql(
 		f"""
 		SELECT adv.parent, adv.reference_name AS payment_entry, adv.allocated_amount AS amount,
-			pe.mode_of_payment, pe.reference_no, {phone}
+			pe.mode_of_payment, pe.paid_to, pe.reference_no, {phone}
 		FROM `tabSales Invoice Advance` adv
 		INNER JOIN `tabPayment Entry` pe ON pe.name = adv.reference_name
 		INNER JOIN `tabSales Invoice` si ON si.name = adv.parent
@@ -51,7 +55,7 @@ def advance_payment_rows(invoice_names) -> dict:
 	for row in rows:
 		out.setdefault(row.parent, []).append(
 			{
-				"mode_of_payment": row.mode_of_payment,
+				"mode_of_payment": row.mode_of_payment or row.paid_to,
 				"amount": flt(row.amount),
 				"reference_no": row.reference_no,
 				"phone_number": row.phone_number,
@@ -73,3 +77,15 @@ def merge_payment_rows(sip_rows: list, advance_rows: list) -> list:
 	advanced_modes = {r["mode_of_payment"] for r in advance_rows}
 	kept = [r for r in sip_rows if not (flt(r.get("amount")) == 0 and r.get("mode_of_payment") in advanced_modes)]
 	return kept + list(advance_rows)
+
+
+def mode_label(payment_rows: list) -> str:
+	"""The 'Cash/Mpesa' label a list shows for how an invoice was paid.
+
+	Distinct modes in first-seen order: one row per receipt means several rows share a
+	mode, and 'Mpesa/Mpesa/Mpesa' would no longer match the Mode of Payment filter. A row
+	with no mode is left out rather than crashing the join - a Payment Entry need not have
+	one - and an invoice with nothing to show reads as '-'.
+	"""
+	modes = list(dict.fromkeys(row["mode_of_payment"] for row in payment_rows if row.get("mode_of_payment")))
+	return "/".join(modes) if modes else "-"

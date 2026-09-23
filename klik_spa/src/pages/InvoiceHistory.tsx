@@ -555,8 +555,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="bg-red-50 dark:bg-red-900/20 p-2 rounded-lg max-w-md">
           <h3 className="text-lg font-medium text-red-800 dark:text-red-200">Error loading invoices</h3>
-           {/* @ts-expect-error just ignore */}
-          <p className="mt-2 text-sm text-red-700 dark:text-red-300">{error.message}</p>
+          <p className="mt-2 text-sm text-red-700 dark:text-red-300">{error}</p>
           <button
             onClick={() => window.location.reload()}
             className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded hover:bg-red-200 dark:hover:bg-red-800"
