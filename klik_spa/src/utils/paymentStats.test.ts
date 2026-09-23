@@ -82,3 +82,28 @@ describe("computePaymentStats", () => {
     expect(statFor(stats, "Cash").amount).toBe(0);
   });
 });
+
+describe("computePaymentStats and money from outside the POS", () => {
+  it("counts an advance only when its Payment Entry was stamped with this shift", () => {
+    // 100 Cash at the till; 100 by M-Pesa receipt taken at the till (stamped with the
+    // shift); 150 a customer advance an accountant recorded (no shift). The last was
+    // never in the cashier's hands, so it is shown on the invoice but not counted.
+    const modes = [mode({ name: "Cash", openingAmount: 0 }), mode({ name: "Cheque", mode_of_payment: "Cheque", openingAmount: 0 })];
+    const invoices = [
+      invoice({
+        paymentMethod: "Cash",
+        totalAmount: 350,
+        payment_methods: [
+          { mode_of_payment: "Cash", amount: 100 },
+          { mode_of_payment: "Cheque", amount: 100, payment_entry: "PE-TILL", pos_opening_entry: "OPE-1" },
+          { mode_of_payment: "Cheque", amount: 150, payment_entry: "PE-OUTSIDE", pos_opening_entry: null },
+        ],
+      }),
+    ];
+
+    const stats = computePaymentStats(modes, invoices, "OPE-1");
+
+    expect(statFor(stats, "Cash").amount).toBe(100);
+    expect(statFor(stats, "Cheque").amount).toBe(100);
+  });
+});
