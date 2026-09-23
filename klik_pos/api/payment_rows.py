@@ -10,14 +10,17 @@ from frappe.utils import flt
 
 
 def advance_payment_rows(invoice_names) -> dict:
-	"""{invoice: [{mode_of_payment, amount, reference_no, phone_number, payment_entry}]}.
+	"""{invoice: [{mode_of_payment, paid_to, amount, reference_no, phone_number, payment_entry}]}.
 
 	Only invoices that have at least one allocated Payment Entry advance appear as keys, so
 	callers can fall back to the payments table with a plain .get().
 
 	A Payment Entry need not carry a Mode of Payment - one made outside the POS (a customer
-	advance, a bank reconciliation) usually has none - so such a row is named after the
-	account the money went to instead, which is what the accountant chose.
+	advance, a bank reconciliation) usually has none. Such a row keeps mode_of_payment blank
+	and carries paid_to, the account the money went to, for mode_label() to show instead.
+	The mode stays blank rather than borrowing the account name because the Closing Shift
+	turns every mode it sees into a POS Closing Entry Detail row, whose mode is a Link to
+	Mode of Payment: an account name there would stop the shift from closing.
 
 	Only submitted entries on a live invoice count. ERPNext leaves the advance rows behind
 	on a cancelled invoice - it deletes them only when a single payment is unlinked - so
@@ -55,7 +58,8 @@ def advance_payment_rows(invoice_names) -> dict:
 	for row in rows:
 		out.setdefault(row.parent, []).append(
 			{
-				"mode_of_payment": row.mode_of_payment or row.paid_to,
+				"mode_of_payment": row.mode_of_payment,
+				"paid_to": row.paid_to,
 				"amount": flt(row.amount),
 				"reference_no": row.reference_no,
 				"phone_number": row.phone_number,
@@ -74,7 +78,7 @@ def merge_payment_rows(sip_rows: list, advance_rows: list) -> list:
 	"""
 	if not advance_rows:
 		return list(sip_rows)
-	advanced_modes = {r["mode_of_payment"] for r in advance_rows}
+	advanced_modes = {r["mode_of_payment"] for r in advance_rows if r.get("mode_of_payment")}
 	kept = [r for r in sip_rows if not (flt(r.get("amount")) == 0 and r.get("mode_of_payment") in advanced_modes)]
 	return kept + list(advance_rows)
 
@@ -84,8 +88,9 @@ def mode_label(payment_rows: list) -> str:
 
 	Distinct modes in first-seen order: one row per receipt means several rows share a
 	mode, and 'Mpesa/Mpesa/Mpesa' would no longer match the Mode of Payment filter. A row
-	with no mode is left out rather than crashing the join - a Payment Entry need not have
-	one - and an invoice with nothing to show reads as '-'.
+	with no mode - a Payment Entry need not have one - shows the account the money went to
+	(paid_to) instead of crashing the join, and an invoice with nothing to show reads as '-'.
 	"""
-	modes = list(dict.fromkeys(row["mode_of_payment"] for row in payment_rows if row.get("mode_of_payment")))
+	modes = list(dict.fromkeys(row.get("mode_of_payment") or row.get("paid_to") for row in payment_rows))
+	modes = [m for m in modes if m]
 	return "/".join(modes) if modes else "-"
