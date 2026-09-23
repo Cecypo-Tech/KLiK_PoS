@@ -14,7 +14,9 @@ from frappe.tests.utils import FrappeTestCase
 from klik_pos.api.mpesa import _allocate_receipts_before_submit
 from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows, mode_label
 from klik_pos.api.sales_invoice import get_customer_invoices_for_return, get_invoice_details, get_sales_invoices
-from klik_pos.tests.test_mpesa_payment_entry_first import CUSTOMER, MpesaFirstCase
+from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
+
+from klik_pos.tests.test_mpesa_payment_entry_first import COMPANY, CUSTOMER, MpesaFirstCase
 
 
 class TestMergePaymentRows(FrappeTestCase):
@@ -73,20 +75,60 @@ class TestModeLabel(FrappeTestCase):
 
 
 class TestAdvancePaymentRows(MpesaFirstCase):
-	def test_a_payment_entry_without_a_mode_carries_its_account_and_no_mode(self):
-		"""Mode of Payment is optional on a Payment Entry. On a site whose money arrives as
-		plain customer advances it is blank on every one. The row carries the account the
-		money went to for the label, but mode_of_payment stays blank: the Closing Shift
-		turns every mode it sees into a POS Closing Entry Detail row, whose mode is a Link,
-		and an account name there would stop the shift from closing."""
+	def test_a_payment_entry_without_a_mode_takes_the_mode_of_its_account(self):
+		"""Mode of Payment is optional on a Payment Entry, and one made outside the POS (a
+		customer advance an accountant recorded) usually has none. A mode is only a name
+		for an account, so the row takes the mode whose default account for the company is
+		where the money went - and then the list, the filter and the Closing Shift all treat
+		it as any other payment. In _Test Company, _Test Bank is Cheque's account."""
 		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000403")])
-		entry = advance_payment_rows([invoice.name])[invoice.name][0]["payment_entry"]
-		frappe.db.set_value("Payment Entry", entry, "mode_of_payment", None, update_modified=False)
+		entry = self._mode_less_entry(invoice)
+
+		rows = advance_payment_rows([invoice.name])[invoice.name]
+
+		self.assertEqual(rows[0]["mode_of_payment"], "Cheque")
+		self.assertEqual(rows[0]["paid_to"], frappe.db.get_value("Payment Entry", entry, "paid_to"))
+
+	def test_when_several_modes_share_the_account_the_first_by_name_is_taken(self):
+		"""Cash - _TC is the account of both Bank Draft and Cash."""
+		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000405")])
+		self._mode_less_entry(invoice, paid_to="Cash - _TC")
+
+		rows = advance_payment_rows([invoice.name])[invoice.name]
+
+		self.assertEqual(rows[0]["mode_of_payment"], "Bank Draft")
+
+	def test_when_several_modes_share_the_account_the_tills_own_mode_wins(self):
+		"""The till that rang the sale lists the modes it takes; one of those beats a
+		mode nobody at the till has heard of."""
+		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000406")])
+		self._mode_less_entry(invoice, paid_to="Cash - _TC")
+		profile = make_pos_profile(company=COMPANY)  # its payments list is Cash alone
+		frappe.db.set_value("Sales Invoice", invoice.name, "pos_profile", profile.name, update_modified=False)
+
+		rows = advance_payment_rows([invoice.name])[invoice.name]
+
+		self.assertEqual(rows[0]["mode_of_payment"], "Cash")
+
+	def test_an_account_no_mode_points_at_keeps_the_row_labelled_by_the_account(self):
+		"""Nothing to count it under, but the money must not vanish from the list."""
+		invoice = self._submitted(rate=100, receipts=[self._receipt(100, "254700000407")])
+		self._mode_less_entry(invoice, paid_to="HDFC - _TC")
 
 		rows = advance_payment_rows([invoice.name])[invoice.name]
 
 		self.assertIsNone(rows[0]["mode_of_payment"])
-		self.assertEqual(rows[0]["paid_to"], frappe.db.get_value("Payment Entry", entry, "paid_to"))
+		self.assertEqual(rows[0]["paid_to"], "HDFC - _TC")
+		self.assertEqual(mode_label(rows), "HDFC - _TC")
+
+	def _mode_less_entry(self, invoice, paid_to=None):
+		"""Turn the invoice's first advance into one an accountant might have made."""
+		entry = advance_payment_rows([invoice.name])[invoice.name][0]["payment_entry"]
+		values = {"mode_of_payment": None}
+		if paid_to:
+			values["paid_to"] = paid_to
+		frappe.db.set_value("Payment Entry", entry, values, update_modified=False)
+		return entry
 
 	def test_invoice_history_survives_a_payment_entry_without_a_mode(self):
 		"""Regression: one such invoice in a page returned
@@ -99,8 +141,7 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 		_allocate_receipts_before_submit(invoice)
 		invoice.reload()
 		invoice.submit()
-		entry = advance_payment_rows([invoice.name])[invoice.name][0]["payment_entry"]
-		frappe.db.set_value("Payment Entry", entry, "mode_of_payment", None, update_modified=False)
+		self._mode_less_entry(invoice)
 		frappe.db.set_value(
 			"Sales Invoice", invoice.name, "custom_pos_opening_entry", "POS-OPE-TEST-BLANK-MODE", update_modified=False
 		)
@@ -109,22 +150,21 @@ class TestAdvancePaymentRows(MpesaFirstCase):
 
 		self.assertTrue(result["success"], result.get("error"))
 		row = next(r for r in result["data"] if r["name"] == invoice.name)
-		account = frappe.db.get_value("Payment Entry", entry, "paid_to")
-		self.assertEqual(row["mode_of_payment"], f"Cash/{account}")
+		self.assertEqual(row["mode_of_payment"], "Cash/Cheque")
 		self.assertEqual(
 			{p["mode_of_payment"] for p in row["payment_methods"]},
-			{"Cash", None},
+			{"Cash", "Cheque"},
 			"only real Modes of Payment reach the rows the Closing Shift counts",
 		)
 
 		detail = get_invoice_details(invoice.name)
 		self.assertTrue(detail["success"], detail.get("error"))
-		self.assertEqual(detail["data"]["mode_of_payment"], f"Cash/{account}")
+		self.assertEqual(detail["data"]["mode_of_payment"], "Cash/Cheque")
 
 		picker = get_customer_invoices_for_return(CUSTOMER)
 		self.assertTrue(picker["success"], picker.get("error"))
 		picked = next(r for r in picker["data"] if r["name"] == invoice.name)
-		self.assertEqual(picked["payment_method"], f"Cash/{account}")
+		self.assertEqual(picked["payment_method"], "Cash/Cheque")
 
 	def test_reads_mode_amount_and_receipt_details_from_the_payment_entry(self):
 		invoice = self._record(self._draft(rate=500), self._receipt(250, "254700000201"), self._receipt(450, "254700000202"))
