@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, resolveActivePriceList } from "./priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, resolveActivePriceList, seedCustomPrice, typeCustomPrice } from "./priceOptions";
 
 describe("buildPriceOptions", () => {
   it("maps each price list entry to an option", () => {
@@ -97,5 +97,40 @@ describe("resolveActivePriceList", () => {
 
   it("is empty when nothing is configured", () => {
     expect(resolveActivePriceList(null, undefined, undefined)).toBe("");
+  });
+});
+
+describe("custom price draft", () => {
+  it("seeds the item's own rate as a selected value", () => {
+    expect(seedCustomPrice(450)).toEqual({ value: "450", selected: true });
+  });
+
+  it("replaces a selected value with the first digit typed, then appends", () => {
+    // The cashier opens the popup on 450 and types 9: they mean 9, not 4509.
+    const first = typeCustomPrice(seedCustomPrice(450), "9");
+    expect(first).toEqual({ value: "9", selected: false });
+    expect(typeCustomPrice(first, "5")).toEqual({ value: "95", selected: false });
+  });
+
+  it("clears a selected value on Backspace", () => {
+    expect(typeCustomPrice(seedCustomPrice(450), "Backspace")).toEqual({ value: "", selected: false });
+  });
+
+  it("keeps the old typing rules once the value is being edited", () => {
+    const editing = { value: "0", selected: false };
+    expect(typeCustomPrice(editing, "7")).toEqual({ value: "7", selected: false });
+    expect(typeCustomPrice({ value: "1.5", selected: false }, ".")).toEqual({ value: "1.5", selected: false });
+    expect(typeCustomPrice({ value: "12", selected: false }, "Backspace")).toEqual({ value: "1", selected: false });
+  });
+
+  it("treats a dot typed over the selected seed as the start of a new number", () => {
+    // Like a focused input: the seed is gone, and "." alone is not a price, so Enter
+    // would add the line with no override rather than commit the seeded rate.
+    expect(typeCustomPrice(seedCustomPrice(450), ".")).toEqual({ value: ".", selected: false });
+  });
+
+  it("ignores keys that are not digits, a dot, or Backspace", () => {
+    const draft = seedCustomPrice(450);
+    expect(typeCustomPrice(draft, "a")).toBe(draft);
   });
 });

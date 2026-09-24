@@ -22,6 +22,32 @@ export function buildPriceOptions(
   return options;
 }
 
+/**
+ * The "Custom Price" field as the cashier types into it. It is seeded with the
+ * item's own rate, shown selected the way a focused input selects its contents:
+ * the first digit replaces the seed rather than appending to it (opening on 450
+ * and typing 9 means 9, not 4509), and Backspace clears it. From then on digits
+ * append, one dot is allowed, and a lone leading zero is still "first digit".
+ */
+export interface CustomPriceDraft {
+  value: string;
+  selected: boolean;
+}
+
+export function seedCustomPrice(rate: number): CustomPriceDraft {
+  return { value: String(rate), selected: true };
+}
+
+export function typeCustomPrice(draft: CustomPriceDraft, key: string): CustomPriceDraft {
+  if (key === "Backspace") {
+    return { value: draft.selected ? "" : draft.value.slice(0, -1), selected: false };
+  }
+  if (!/^[0-9.]$/.test(key)) return draft;
+  const base = draft.selected || draft.value === "0" ? "" : draft.value;
+  if (key === "." && base.includes(".")) return draft;
+  return { value: base + key, selected: false };
+}
+
 /** Wraps in both directions; returns 0 for an empty list instead of NaN. */
 export function cyclePriceOptionIndex(current: number, length: number, direction: 1 | -1): number {
   if (length <= 0) return 0;
