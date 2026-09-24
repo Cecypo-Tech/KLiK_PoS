@@ -16,6 +16,7 @@ import { usePaymentModes } from "../hooks/usePaymentModes";
 import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem } from "../services/returnService";
 import { fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
+import { returnNotice } from "../utils/returnNotice";
 
 interface SingleInvoiceReturnProps {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,6 +36,7 @@ export default function SingleInvoiceReturn({
   const [fixedCharges, setFixedCharges] = useState<FixedCharge[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingReturnData, setLoadingReturnData] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [originalInvoiceGrandTotal, setOriginalInvoiceGrandTotal] = useState<number>(0);
   const [originalInvoicePaidAmount, setOriginalInvoicePaidAmount] = useState<number>(0);
@@ -112,6 +114,14 @@ export default function SingleInvoiceReturn({
 
   const initializeReturnItems = async () => {
     setLoadingReturnData(true);
+    setLoadError(null);
+    // The dialog stays mounted between opens, so clear the previous invoice's rows before
+    // loading: if this load fails, nothing of the last invoice may remain returnable.
+    setReturnItems([]);
+    setFixedCharges([]);
+    setRefundableCash(0);
+    setOriginalInvoicePaidAmount(0);
+    setOriginalInvoiceGrandTotal(0);
     try {
 
       // Always fetch complete invoice details from backend to get accurate grand_total
@@ -180,7 +190,9 @@ export default function SingleInvoiceReturn({
       setReturnItems(items);
     } catch (error) {
       console.error('Error initializing return items:', error);
-      toast.error('Failed to load return data');
+      const message = error instanceof Error && error.message ? error.message : 'Failed to load return data';
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoadingReturnData(false);
     }
@@ -521,8 +533,23 @@ export default function SingleInvoiceReturn({
                 </div>
               </div>
 
+              {/* The invoice could not be loaded: say so, never "already returned" */}
+              {returnNotice(returnItems, loadError) === "load-error" && (
+                <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                    <div>
+                      <h4 className="text-sm font-medium text-red-800 dark:text-red-200">
+                        Could Not Load This Invoice
+                      </h4>
+                      <p className="text-sm text-red-700 dark:text-red-300 mt-1">{loadError}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Warning for no returnable items */}
-              {returnItems.every(item => item.available_qty === 0) && (
+              {returnNotice(returnItems, loadError) === "all-returned" && (
                 <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <div className="flex items-center space-x-3">
                     <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
