@@ -12,7 +12,7 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, typeCustomPrice } from "../utils/priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, seedCustomPrice, typeCustomPrice } from "../utils/priceOptions";
 import PriceListPopup from "./PriceListPopup";
 
 interface PriceListEntry {
@@ -238,8 +238,8 @@ export default function ProductGrid({
         item,
         options,
         selectedIndex: 0,
-        customValue: customOption ? String(customOption.rate) : "",
-        customSelected: true,
+        customValue: customOption ? seedCustomPrice(customOption.rate).value : "",
+        customSelected: !!customOption,
         position: computePricePopupPosition(rect, options.length, {
           width: window.innerWidth,
           height: window.innerHeight,
@@ -299,11 +299,12 @@ export default function ProductGrid({
           // Re-seed on arrival so the field always shows this option's own
           // rate, not whatever was last typed while a different option (or
           // none) was selected.
+          const seed = nextOption?.isCustom ? seedCustomPrice(nextOption.rate) : null;
           return {
             ...p,
             selectedIndex: nextIndex,
-            customValue: nextOption?.isCustom ? String(nextOption.rate) : p.customValue,
-            customSelected: nextOption?.isCustom ? true : p.customSelected,
+            customValue: seed ? seed.value : p.customValue,
+            customSelected: seed ? seed.selected : p.customSelected,
           };
         });
         return;

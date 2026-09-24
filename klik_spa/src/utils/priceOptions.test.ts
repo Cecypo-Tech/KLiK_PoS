@@ -123,6 +123,12 @@ describe("custom price draft", () => {
     expect(typeCustomPrice({ value: "12", selected: false }, "Backspace")).toEqual({ value: "1", selected: false });
   });
 
+  it("treats a dot typed over the selected seed as the start of a new number", () => {
+    // Like a focused input: the seed is gone, and "." alone is not a price, so Enter
+    // would add the line with no override rather than commit the seeded rate.
+    expect(typeCustomPrice(seedCustomPrice(450), ".")).toEqual({ value: ".", selected: false });
+  });
+
   it("ignores keys that are not digits, a dot, or Backspace", () => {
     const draft = seedCustomPrice(450);
     expect(typeCustomPrice(draft, "a")).toBe(draft);
