@@ -12,7 +12,7 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption } from "../utils/priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, typeCustomPrice } from "../utils/priceOptions";
 import PriceListPopup from "./PriceListPopup";
 
 interface PriceListEntry {
@@ -80,6 +80,8 @@ export default function ProductGrid({
     options: PriceOption[];
     selectedIndex: number;
     customValue: string;
+    /** The seeded custom value is shown selected: the first key typed replaces it. */
+    customSelected: boolean;
     position: { left: number; top?: number; bottom?: number };
   } | null>(null);
   const allowRateChange = !!posDetails?.allow_rate_change;
@@ -237,6 +239,7 @@ export default function ProductGrid({
         options,
         selectedIndex: 0,
         customValue: customOption ? String(customOption.rate) : "",
+        customSelected: true,
         position: computePricePopupPosition(rect, options.length, {
           width: window.innerWidth,
           height: window.innerHeight,
@@ -300,6 +303,7 @@ export default function ProductGrid({
             ...p,
             selectedIndex: nextIndex,
             customValue: nextOption?.isCustom ? String(nextOption.rate) : p.customValue,
+            customSelected: nextOption?.isCustom ? true : p.customSelected,
           };
         });
         return;
@@ -328,20 +332,13 @@ export default function ProductGrid({
         return;
       }
       if (currentOption?.isCustom) {
-        if (/^[0-9.]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if ((/^[0-9.]$/.test(e.key) || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           setPricePopup((p) => {
             if (!p) return p;
-            // A single leading zero reads as "still typing the first digit", not a value.
-            const base = p.customValue === "0" ? "" : p.customValue;
-            if (e.key === '.' && base.includes('.')) return p;
-            return { ...p, customValue: base + e.key };
+            const draft = typeCustomPrice({ value: p.customValue, selected: p.customSelected }, e.key);
+            return { ...p, customValue: draft.value, customSelected: draft.selected };
           });
-          return;
-        }
-        if (e.key === 'Backspace') {
-          e.preventDefault();
-          setPricePopup((p) => p && ({ ...p, customValue: p.customValue.slice(0, -1) }));
           return;
         }
       }
@@ -565,6 +562,7 @@ export default function ProductGrid({
             options={pricePopup.options}
             selectedIndex={pricePopup.selectedIndex}
             customValue={pricePopup.customValue}
+            customValueSelected={pricePopup.customSelected}
             position={pricePopup.position}
             currencySymbol={posDetails?.currency_symbol}
           />
@@ -703,6 +701,7 @@ export default function ProductGrid({
           options={pricePopup.options}
           selectedIndex={pricePopup.selectedIndex}
           customValue={pricePopup.customValue}
+            customValueSelected={pricePopup.customSelected}
           position={pricePopup.position}
           currencySymbol={posDetails?.currency_symbol}
         />

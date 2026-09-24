@@ -8,6 +8,8 @@ interface PriceListPopupProps {
   options: PriceOption[];
   selectedIndex: number;
   customValue: string;
+  /** Shown highlighted, like a focused input's selected contents: typing replaces it. */
+  customValueSelected?: boolean;
   position: { left: number; top?: number; bottom?: number };
   currencySymbol?: string;
   /** Mouse selection. Omitted where the popup is keyboard-only (the item list's '*'). */
@@ -18,6 +20,7 @@ export default function PriceListPopup({
   options,
   selectedIndex,
   customValue,
+  customValueSelected = false,
   position,
   currencySymbol,
   onSelect,
@@ -61,7 +64,12 @@ export default function PriceListPopup({
                 <input
                   readOnly
                   value={customValue}
-                  className="w-16 text-right bg-transparent outline-none"
+                  className={`w-16 text-right outline-none rounded px-0.5 ${
+                    customValueSelected
+                      ? "bg-beveren-200 dark:bg-beveren-700 text-beveren-900 dark:text-white"
+                      : "bg-transparent"
+                  }`}
+                  title={customValueSelected ? "Type to replace this price" : undefined}
                   aria-label="Custom price"
                 />
               </span>
