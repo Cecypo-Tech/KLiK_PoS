@@ -115,6 +115,13 @@ export default function SingleInvoiceReturn({
   const initializeReturnItems = async () => {
     setLoadingReturnData(true);
     setLoadError(null);
+    // The dialog stays mounted between opens, so clear the previous invoice's rows before
+    // loading: if this load fails, nothing of the last invoice may remain returnable.
+    setReturnItems([]);
+    setFixedCharges([]);
+    setRefundableCash(0);
+    setOriginalInvoicePaidAmount(0);
+    setOriginalInvoiceGrandTotal(0);
     try {
 
       // Always fetch complete invoice details from backend to get accurate grand_total

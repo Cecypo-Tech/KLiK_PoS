@@ -754,15 +754,17 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   <td className="px-6 py-4 sticky right-0 z-10 whitespace-nowrap bg-white dark:bg-gray-800 group-hover:bg-gray-50 dark:group-hover:bg-gray-700 text-sm font-medium">
                     <div className="flex space-x-2">
                       {/* A row the till will not open (rung by another cashier) gets no View or
-                          Return, as on the Closing Shift page; the backend refuses both anyway. */}
-                      {invoice.canOpen !== false && (
-                      <button
-                        onClick={() => handleViewInvoice(invoice)}
-                        className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
-                      >
-                        <Eye className="w-4 h-4" />
-                        <span>View</span>
-                      </button>
+                          Return, as on the Closing Shift page: the detail read behind both is refused. */}
+                      {invoice.canOpen !== false ? (
+                        <button
+                          onClick={() => handleViewInvoice(invoice)}
+                          className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>View</span>
+                        </button>
+                      ) : (
+                        <span className="text-gray-400 text-xs" title="Rung by another cashier">—</span>
                       )}
                       {(invoice.status === "Draft" || (invoice as SalesInvoice & { isHeldOrder?: boolean }).isHeldOrder) && (
                         <>
@@ -857,13 +859,15 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {invoice.canOpen !== false && (
-                <button
-                  onClick={() => handleViewInvoice(invoice)}
-                  className="flex-1 text-xs px-3 py-2 bg-beveren-600 text-white rounded hover:bg-beveren-700 transition-colors"
-                >
-                  View
-                </button>
+                {invoice.canOpen !== false ? (
+                  <button
+                    onClick={() => handleViewInvoice(invoice)}
+                    className="flex-1 text-xs px-3 py-2 bg-beveren-600 text-white rounded hover:bg-beveren-700 transition-colors"
+                  >
+                    View
+                  </button>
+                ) : (
+                  <span className="flex-1 text-xs px-3 py-2 text-center text-gray-400" title="Rung by another cashier">—</span>
                 )}
                 {(invoice.status === "Draft" || (invoice as SalesInvoice & { isHeldOrder?: boolean }).isHeldOrder) && (
                   <>
@@ -892,7 +896,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                     )}
                   </>
                 )}
-                  {invoice.canOpen !== false && canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && hasReturnableItems(invoice) && (
+                  {invoice.canOpen !== false && canProcessReturns && ["Paid", "Unpaid", "Overdue", "Partly Paid", "Credit Note Issued"].includes(invoice.status) && !(invoice as SalesInvoice & { is_return?: boolean | number }).is_return && hasReturnableItems(invoice) && (
                   <button
                     onClick={() => handleSingleReturnClick(invoice)}
                     className="flex-1 text-xs px-3 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"

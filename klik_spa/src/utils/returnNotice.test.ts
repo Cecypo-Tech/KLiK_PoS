@@ -9,6 +9,10 @@ describe("returnNotice", () => {
     expect(returnNotice([], "This invoice was rung by another cashier.")).toBe("load-error");
   });
 
+  it("reports a load failure even when rows from a previous invoice are still present", () => {
+    expect(returnNotice([{ available_qty: 0 }], "network error")).toBe("load-error");
+  });
+
   it("says 'all returned' only when every loaded row has nothing left", () => {
     expect(returnNotice([{ available_qty: 0 }, { available_qty: 0 }], null)).toBe("all-returned");
   });
