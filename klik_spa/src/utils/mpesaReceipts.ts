@@ -32,3 +32,13 @@ export function appliedFromReceipts(openTotal: number, owed: number): number {
 export function uncoveredMpesa(mpesaAmount: number, receiptsOpenTotal: number, stkCompletedAmount: number): number {
   return roundCurrency(Math.max(0, mpesaAmount - receiptsOpenTotal - stkCompletedAmount));
 }
+
+/**
+ * What a receipt-paid draft sends on submit. Money the cashier took besides the receipts
+ * (cash added after the pick) must reach the invoice, so those rows go; when the receipts
+ * pay the whole sale there are none, and an empty payments list would be refused as a cash
+ * sale with no payment - then nothing is sent and the draft keeps what it has.
+ */
+export function receiptDraftSubmitData<T extends { paymentMethods: Array<Record<string, unknown>> }>(data: T): T | undefined {
+  return data.paymentMethods.some((p) => Number(p.amount) > 0) ? data : undefined;
+}

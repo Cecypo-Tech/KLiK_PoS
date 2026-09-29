@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, receiptCardState, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, receiptCardState, receiptDraftSubmitData, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -70,5 +70,20 @@ describe("uncoveredMpesa", () => {
 
   it("ignores sub-cent float noise", () => {
     expect(uncoveredMpesa(0.1 + 0.2, 0.3, 0)).toBe(0);
+  });
+});
+
+describe("receiptDraftSubmitData", () => {
+  const data = (amounts: number[]) => ({ customer: "Walk In", paymentMethods: amounts.map((amount) => ({ method: "Cash", amount })) });
+
+  it("sends the other payment rows when the cashier took money besides the receipts", () => {
+    const d = data([800]);
+    expect(receiptDraftSubmitData(d)).toBe(d);
+  });
+
+  it("sends nothing when the receipts pay the whole sale, so the draft keeps what it has", () => {
+    // An empty payments list would be refused as "a cash sale with no payment".
+    expect(receiptDraftSubmitData(data([]))).toBeUndefined();
+    expect(receiptDraftSubmitData(data([0]))).toBeUndefined();
   });
 });

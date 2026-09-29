@@ -27,7 +27,7 @@ import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
-import { appliedFromReceipts, uncoveredMpesa } from "../../utils/mpesaReceipts";
+import { appliedFromReceipts, receiptDraftSubmitData, uncoveredMpesa } from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
@@ -1408,12 +1408,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       if (mpesaDraftInvoiceName) {
         // Receipt-paid M-Pesa reaches the draft as advances, so its row stays out of the
         // payments; everything else the cashier took (cash added after the pick) goes in.
-        response = await submitDraftInvoice(mpesaDraftInvoiceName, {
-          ...(mpesaFlow?.source === "c2b"
-            ? buildPaymentData(deliveryPersonnel, { excludeActiveMpesa: true })
-            : paymentData),
-          enable_background_invoice_submission: enableBackgroundSubmission,
-        });
+        const receiptData =
+          mpesaFlow?.source === "c2b"
+            ? receiptDraftSubmitData(buildPaymentData(deliveryPersonnel, { excludeActiveMpesa: true }))
+            : paymentData;
+        response = await submitDraftInvoice(
+          mpesaDraftInvoiceName,
+          receiptData && { ...receiptData, enable_background_invoice_submission: enableBackgroundSubmission },
+        );
       } else if (originalHeldOrderId) {
         // Checkout from a held Sales Order — convert it to a submitted Sales Invoice
         const checkoutPayload = {
