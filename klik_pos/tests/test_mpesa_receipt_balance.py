@@ -19,12 +19,24 @@ OTHER_CUSTOMER = "_Test Customer 1"
 
 
 class ReceiptCase(MpesaFirstCase):
-	def _sell(self, rate, *receipts, customer=CUSTOMER):
-		"""Pick receipts onto a fresh draft of `rate`, allocate, submit, finalise."""
+	def _draft_for(self, customer, rate=100):
+		"""A draft for `customer`; the fixture's addresses belong to _Test Customer, so they go."""
 		invoice = self._draft(rate=rate)
 		if customer != CUSTOMER:
-			invoice.customer = customer
-			invoice.save()
+			self._switch_customer(invoice, customer)
+		return invoice
+
+	@staticmethod
+	def _switch_customer(invoice, customer):
+		invoice.customer = customer
+		for field in ("customer_address", "address_display", "shipping_address_name", "shipping_address"):
+			if invoice.meta.has_field(field):
+				invoice.set(field, None)
+		invoice.save()
+
+	def _sell(self, rate, *receipts, customer=CUSTOMER):
+		"""Pick receipts onto a fresh draft of `rate`, allocate, submit, finalise."""
+		invoice = self._draft_for(customer, rate=rate)
 		process_mpesa(
 			doctype="Sales Invoice", invoice_name=invoice.name, customer=customer,
 			mpesa_payments=",".join(r.name for r in receipts), mode_of_payment=MODE,
@@ -99,3 +111,41 @@ class TestSearch(ReceiptCase):
 		receipt = self._receipt(1000)
 		self._sell(300, receipt)
 		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before + 1)
+
+
+class TestPick(ReceiptCase):
+	def test_an_open_receipt_can_be_picked_again(self):
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		invoice = self._draft(rate=200)
+		result = process_mpesa(doctype="Sales Invoice", invoice_name=invoice.name, customer=CUSTOMER,
+			mpesa_payments=receipt.name, mode_of_payment=MODE)
+		self.assertEqual(flt(result["total_amount"]), 700)
+		invoice.reload()
+		child = invoice.custom_mpesa_reconciled_payments[0]
+		self.assertEqual(flt(child.amount), 700)
+		self.assertTrue(child.payment_entry)
+
+	def test_a_spent_receipt_is_refused_by_name(self):
+		receipt = self._receipt(300)
+		self._sell(300, receipt)
+		with self.assertRaisesRegex(frappe.ValidationError, f"{receipt.transid}.*nothing left"):
+			process_mpesa(doctype="Sales Invoice", invoice_name=self._draft().name, customer=CUSTOMER,
+				mpesa_payments=receipt.name, mode_of_payment=MODE)
+
+	def test_another_customers_receipt_is_refused_with_who_holds_it(self):
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		invoice = self._draft_for(OTHER_CUSTOMER)
+		with self.assertRaisesRegex(frappe.ValidationError, f"held by {CUSTOMER}"):
+			process_mpesa(doctype="Sales Invoice", invoice_name=invoice.name, customer=OTHER_CUSTOMER,
+				mpesa_payments=receipt.name, mode_of_payment=MODE)
+
+	def test_the_same_receipt_twice_on_one_invoice_is_refused(self):
+		receipt = self._receipt(1000)
+		invoice = self._draft(rate=200)
+		process_mpesa(doctype="Sales Invoice", invoice_name=invoice.name, customer=CUSTOMER,
+			mpesa_payments=receipt.name, mode_of_payment=MODE)
+		with self.assertRaisesRegex(frappe.ValidationError, "already on this invoice"):
+			process_mpesa(doctype="Sales Invoice", invoice_name=invoice.name, customer=CUSTOMER,
+				mpesa_payments=receipt.name, mode_of_payment=MODE)

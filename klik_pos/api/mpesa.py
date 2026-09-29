@@ -281,43 +281,54 @@ def process_mpesa(
 			)
 		)
 
-	register_rows = []
+	on_invoice = {c.mpesa_c2b_payment_register for c in invoice.get("custom_mpesa_reconciled_payments") or []}
+	picked = []
 	invalid = []
 	for name in names:
 		if not frappe.db.exists("Mpesa C2B Payment Register", name):
 			invalid.append(_("{0} (not found)").format(name))
 			continue
-		row = frappe.get_doc("Mpesa C2B Payment Register", name)
-		if row.docstatus != 0:
-			invalid.append(_("{0} (already consumed, docstatus={1})").format(name, row.docstatus))
-			continue
-		if not flt(row.transamount) > 0:
-			invalid.append(_("{0} (invalid amount: {1})").format(name, row.transamount))
-			continue
-		register_rows.append(row)
+		bal = _receipt_balance(name)
+		label = bal.transid or name
+		if name in on_invoice:
+			invalid.append(_("{0} (already on this invoice)").format(label))
+		elif bal.state == "spent":
+			invalid.append(_("{0} (nothing left on it)").format(label))
+		elif bal.state not in ("new", "open"):
+			invalid.append(
+				_("{0} (cannot be used: cancelled, or its Payment Entry is not a submitted customer receipt)").format(
+					label
+				)
+			)
+		elif bal.held_by and bal.held_by != invoice.customer:
+			invalid.append(
+				_("{0} (held by {1}; switch the sale to that customer to use it)").format(label, bal.held_by)
+			)
+		else:
+			picked.append((frappe.get_doc("Mpesa C2B Payment Register", name), bal))
 
 	if invalid:
-		frappe.throw(_("Cannot reconcile the following Mpesa payment(s): {0}").format("; ".join(invalid)))
+		frappe.throw(_("Cannot use these M-Pesa receipts: {0}").format("; ".join(invalid)))
 
-	total_amount = sum(flt(row.transamount) for row in register_rows)
+	total_amount = sum(flt(bal.open_amount) for _row, bal in picked)
 
 	payments_added = [
-		{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
-		for row in register_rows
+		{"mode_of_payment": mode_of_payment, "amount": bal.open_amount, "reference": row.transid}
+		for row, bal in picked
 	]
 
-	# Traceability only -- the register rows themselves stay untouched
-	# (docstatus=0) until the invoice is actually submitted; see
-	# `_finalize_mpesa_reconciliation`.
-	for row in register_rows:
+	# Traceability only: a new receipt's register row stays a draft until the invoice is
+	# submitted (see `_finalize_mpesa_reconciliation`); an open one already names its entry.
+	for row, bal in picked:
 		invoice.append(
 			"custom_mpesa_reconciled_payments",
 			{
 				"mpesa_c2b_payment_register": row.name,
 				"transid": row.transid,
-				"amount": row.transamount,
+				"amount": bal.open_amount,
 				"msisdn": row.msisdn,
 				"mode_of_payment": mode_of_payment,
+				"payment_entry": bal.payment_entry,
 			},
 		)
 
@@ -326,7 +337,7 @@ def process_mpesa(
 	result = {
 		"success": True,
 		"payments_added": payments_added,
-		"mpesa_payments": [{"name": row.name, "amount": row.transamount} for row in register_rows],
+		"mpesa_payments": [{"name": row.name, "amount": bal.open_amount} for row, bal in picked],
 		"total_amount": total_amount,
 		"saved": True,
 		"submitted": False,
