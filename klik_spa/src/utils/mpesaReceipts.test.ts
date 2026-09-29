@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptDraftSubmitData, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptDraftSubmitData, receiptLeftoverMessage, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -99,5 +99,13 @@ describe("isMpesaPaymentMode", () => {
     expect(isMpesaPaymentMode({ type: "Phone" }, "Till 1")).toBe(true);
     expect(isMpesaPaymentMode(undefined, "Mpesa-160745")).toBe(true);
     expect(isMpesaPaymentMode({ type: "Cash" }, "Cash")).toBe(false);
+  });
+});
+
+describe("receiptLeftoverMessage", () => {
+  it("says the money stays on the receipt for the customer's next sale, in the sale's currency", () => {
+    expect(receiptLeftoverMessage(6598, "Sh", "Walk In")).toBe(
+      "Sh 6,598.00 stays on the M-Pesa receipt for Walk In's next sale. No cash change is given for M-Pesa.",
+    );
   });
 });

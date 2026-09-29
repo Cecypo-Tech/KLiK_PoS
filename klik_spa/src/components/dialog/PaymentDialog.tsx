@@ -27,7 +27,13 @@ import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptDraftSubmitData, uncoveredMpesa } from "../../utils/mpesaReceipts";
+import {
+  appliedFromReceipts,
+  isMpesaPaymentMode,
+  receiptDraftSubmitData,
+  receiptLeftoverMessage,
+  uncoveredMpesa,
+} from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
@@ -1471,18 +1477,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaDraftInvoiceName(null);
       toast.success(enableBackgroundSubmission ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
 
-      // M-Pesa overpayment: the excess is held as reusable customer credit, not
-      // handed back as cash change. Surface it explicitly.
+      // What the receipts held beyond this sale stays on them for the customer's next
+      // sale - never handed back as cash change. Surface it explicitly.
       const mpesaExcess = (response?.mpesa_reconciliation || []).reduce(
         (sum: number, r: any) => sum + Number(r?.excess_amount || 0),
         0
       );
       if (mpesaExcess > 0) {
         const who = selectedCustomer?.customerName || selectedCustomer?.name || "the customer";
-        toast.success(
-          `${formatCurrencyWithSymbol(mpesaExcess)} credit added to ${who}'s account — no cash change is given for M-Pesa.`,
-          { autoClose: 8000 }
-        );
+        toast.success(receiptLeftoverMessage(mpesaExcess, displayCurrencySymbol, who), { autoClose: 8000 });
       }
 
       clearDraftInvoiceCache();

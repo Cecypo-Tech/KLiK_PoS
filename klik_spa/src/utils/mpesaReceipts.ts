@@ -1,4 +1,5 @@
 import type { MpesaRegisterPayment } from "../services/mpesa";
+import { formatCurrencyWithSymbol } from "./currency";
 import { roundCurrency } from "./currencyMath";
 
 export interface ReceiptCardState {
@@ -51,4 +52,9 @@ export function receiptDraftSubmitData<T extends { paymentMethods: Array<Record<
 export function isMpesaPaymentMode(mode: { is_mpesa?: boolean; type?: string } | undefined, method: string): boolean {
   if (typeof mode?.is_mpesa === "boolean") return mode.is_mpesa;
   return (mode?.type || "").toLowerCase() === "phone" || /mpesa/i.test(method || "");
+}
+
+/** The note after a sale that left money on its M-Pesa receipt(s) for the customer's next sale. */
+export function receiptLeftoverMessage(amount: number, currencySymbol: string, who: string): string {
+  return `${formatCurrencyWithSymbol(amount, currencySymbol)} stays on the M-Pesa receipt for ${who}'s next sale. No cash change is given for M-Pesa.`;
 }
