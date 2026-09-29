@@ -28,6 +28,7 @@ import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
 import { appliedFromReceipts, uncoveredMpesa } from "../../utils/mpesaReceipts";
+import { toggleOn } from "../../utils/paymentToggle";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -43,6 +44,7 @@ import InvoicePreview from "./InvoicePreview";
 import SharingInterface from "./SharingInterface";
 import DeliveryPersonnelModal from "./DeliveryPersonnelModal";
 import MpesaOptionsModal from "./MpesaOptionsModal";
+import OtherCharges from "./OtherCharges";
 import type { PaymentDialogProps, PaymentAmount, Calculations, BackendTaxPreview } from "./types";
 import { reconcileCheckout } from "../../utils/checkoutReconciliation";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -1018,14 +1020,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       // turn off: clear this row's amount (reference is pruned by the effect in Step 2)
       setPaymentAmounts((amts) => ({ ...amts, [methodId]: 0 }));
     } else {
-      // turn on: fill the remaining outstanding, preserving other rows
-      setPaymentAmounts((amts) => {
-        const others = Object.entries(amts)
-          .filter(([id]) => id !== methodId)
-          .reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
-        const remaining = roundCurrency(Math.max(0, checkoutPayableTotal - others));
-        return { ...amts, [methodId]: remaining };
-      });
+      // turn on: fill what is owed, or take over from a single row holding the whole sale
+      setPaymentAmounts((amts) => toggleOn(amts, methodId, checkoutPayableTotal));
       setLastModifiedMethodId(methodId);
       setActiveMethodId(methodId);
     }
@@ -2156,12 +2152,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     selectedCustomer && selectedCustomer.loyalty?.enabled && selectedCustomer.loyalty?.loyalty_program,
   );
 
-  const renderDeliveryChargeInput = () => {
+  const renderDeliveryChargeInput = (inline = false) => {
     const chargedByRule = Boolean(activeShippingRule);
     const locked = invoiceSubmitted || isProcessingPayment || chargedByRule;
     return (
-      <div className="min-w-[9rem] flex-1">
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Delivery charge</label>
+      <div className={inline ? "flex items-center justify-between gap-3" : "min-w-[9rem] flex-1"}>
+        <label
+          className={inline ? "text-sm font-medium text-gray-600 dark:text-gray-400" : "block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1"}
+        >
+          Delivery charge
+        </label>
         <input
           type="number"
           min="0"
@@ -2177,7 +2177,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 ? `Posted as service item: ${deliveryChargeItemCode}`
                 : "Set Delivery Charge Item on POS Profile to post this amount as a service item."
           }
-          className={`w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
+          aria-label="Delivery charge"
+          className={`${inline ? "w-28 text-right" : "w-full"} px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
         />
       </div>
     );
@@ -2682,21 +2683,69 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 />
 
                 {renderMpesaStatusNotice()}
-                {(showLoyaltyRedemption || isDeliveryChargeEnabled || allowDiscountChange) && (
-                  <div className="flex flex-wrap items-end gap-3">
-                    {renderLoyaltyRedemption()}
-                    {isDeliveryChargeEnabled && renderDeliveryChargeInput()}
-                    <TaxSection
-                      invoiceSubmitted={invoiceSubmitted}
-                      isProcessingPayment={isProcessingPayment}
-                      allowDiscountChange={allowDiscountChange}
-                      orderDiscountAmount={orderDiscountAmount}
-                      orderDiscountPercentInput={orderDiscountPercentInput}
-                      onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
-                      onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
+
+                <div ref={mpesaOptionsPanelRef}>
+                  <MpesaOptionsModal
+                    isOpen={showMpesaPanel}
+                    modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
+                    amount={getActiveMpesaPayment()?.amount || 0}
+                    phoneNumber={mpesaPhoneNumber}
+                    currencySymbol={displayCurrencySymbol}
+                    searchTerm={mpesaSearchTerm}
+                    payments={mpesaRegisterPayments}
+                    pendingCount={mpesaRegisterCount}
+                    selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
+                    selectedTotal={selectedMpesaTotal}
+                    isLoadingPayments={isLoadingMpesaRegisterPayments}
+                    isProcessing={isProcessingPayment}
+                    onClose={() => setMpesaPanelDismissed(true)}
+                    onPhoneNumberChange={setMpesaPhoneNumber}
+                    onSearchChange={setMpesaSearchTerm}
+                    onTogglePayment={handleToggleMpesaPayment}
+                    onInitiateStk={() => void handleInitiateMpesaPayment()}
+                    onAddPayments={() => void handleReconcileMpesaPayments()}
+                    variant="panel"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                  <OtherCharges>
+                    {showLoyaltyRedemption && renderLoyaltyRedemption()}
+                    {isDeliveryChargeEnabled && renderDeliveryChargeInput(true)}
+                    {allowDiscountChange && (
+                      <TaxSection
+                        invoiceSubmitted={invoiceSubmitted}
+                        isProcessingPayment={isProcessingPayment}
+                        allowDiscountChange={allowDiscountChange}
+                        orderDiscountAmount={orderDiscountAmount}
+                        orderDiscountPercentInput={orderDiscountPercentInput}
+                        onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
+                        onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
+                        inline
+                      />
+                    )}
+                  </OtherCharges>
+
+                  <div className="lg:col-start-2">
+                    <TotalsSection
+                      calculations={calculations}
+                      displaySubtotal={displaySubtotal}
+                      displayTaxTotal={displayTaxTotal}
+                      displayTaxIsIncluded={displayTaxIsIncluded}
+                      checkoutGrandTotal={checkoutGrandTotal}
+                      loyaltyAmount={loyaltyAmount}
+                      checkoutPayableTotal={checkoutPayableTotal}
+                      totalPaidAmount={totalPaidAmount}
+                      outstandingAmount={outstandingAmount}
+                      displayCurrencySymbol={displayCurrencySymbol}
+                      isB2B={isB2B}
+                      backendTaxPreview={backendTaxPreview}
+                      shippingAmount={shippingAmount}
+                      netWeightLabel={netWeightLabel}
+                      compact
                     />
                   </div>
-                )}
+                </div>
 
                 <SalesPersonSection
                   requiresSalespersonPin={requiresSalespersonPin}
@@ -2712,49 +2761,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   title="Verify salesperson"
                   description="Switch or verify the salesperson assigned to this sale."
                 />
-
-                <TotalsSection
-                  calculations={calculations}
-                  displaySubtotal={displaySubtotal}
-                  displayTaxTotal={displayTaxTotal}
-                  displayTaxIsIncluded={displayTaxIsIncluded}
-                  checkoutGrandTotal={checkoutGrandTotal}
-                  loyaltyAmount={loyaltyAmount}
-                  checkoutPayableTotal={checkoutPayableTotal}
-                  totalPaidAmount={totalPaidAmount}
-                  outstandingAmount={outstandingAmount}
-                  displayCurrencySymbol={displayCurrencySymbol}
-                  isB2B={isB2B}
-                  backendTaxPreview={backendTaxPreview}
-                  shippingAmount={shippingAmount}
-                  netWeightLabel={netWeightLabel}
-                />
               </>
             )}
 
-            <div ref={mpesaOptionsPanelRef}>
-              <MpesaOptionsModal
-                isOpen={showMpesaPanel}
-                modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
-                amount={getActiveMpesaPayment()?.amount || 0}
-                phoneNumber={mpesaPhoneNumber}
-                currencySymbol={displayCurrencySymbol}
-                searchTerm={mpesaSearchTerm}
-                payments={mpesaRegisterPayments}
-                pendingCount={mpesaRegisterCount}
-                selectedPaymentNames={selectedMpesaPayments.map((payment) => payment.name)}
-                selectedTotal={selectedMpesaTotal}
-                isLoadingPayments={isLoadingMpesaRegisterPayments}
-                isProcessing={isProcessingPayment}
-                onClose={() => setMpesaPanelDismissed(true)}
-                onPhoneNumberChange={setMpesaPhoneNumber}
-                onSearchChange={setMpesaSearchTerm}
-                onTogglePayment={handleToggleMpesaPayment}
-                onInitiateStk={() => void handleInitiateMpesaPayment()}
-                onAddPayments={() => void handleReconcileMpesaPayments()}
-                variant="panel"
-              />
-            </div>
           </div>
 
           <div className="w-[40%] min-w-[280px] xl:min-w-[320px] max-w-[520px] shrink-0 p-4 border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto custom-scrollbar">

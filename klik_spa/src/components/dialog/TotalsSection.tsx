@@ -20,6 +20,8 @@ interface TotalsSectionProps {
   shippingAmount?: number;
   /** e.g. "12.5 Kg"; the row is hidden when empty. */
   netWeightLabel?: string;
+  /** One column, for a half-width summary. */
+  compact?: boolean;
 }
 
 export default function TotalsSection({
@@ -37,6 +39,7 @@ export default function TotalsSection({
   backendTaxPreview,
   shippingAmount = 0,
   netWeightLabel = "",
+  compact = false,
 }: TotalsSectionProps) {
   const amountDue = checkoutPayableTotal ?? checkoutGrandTotal;
   const changeDue = totalPaidAmount > amountDue ? subtractCurrency(totalPaidAmount, amountDue) : 0;
@@ -48,7 +51,7 @@ export default function TotalsSection({
         {isB2B ? "Invoice Summary" : "Payment Summary"}
       </h3>
       <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div className={compact ? "grid grid-cols-1 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6"}>
           <div className="space-y-2">
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
@@ -91,8 +94,8 @@ export default function TotalsSection({
             )}
           </div>
 
-          <div className="space-y-2 md:border-l md:border-gray-200 md:dark:border-gray-600 md:pl-6">
-            <div className="border-t border-gray-200 dark:border-gray-600 pt-2 md:border-t-0 md:pt-0">
+          <div className={compact ? "space-y-2" : "space-y-2 md:border-l md:border-gray-200 md:dark:border-gray-600 md:pl-6"}>
+            <div className={compact ? "border-t border-gray-200 dark:border-gray-600 pt-2" : "border-t border-gray-200 dark:border-gray-600 pt-2 md:border-t-0 md:pt-0"}>
               <div className="flex justify-between">
                 <span className="text-xl font-bold text-gray-900 dark:text-white">Grand Total</span>
                 <span className="text-xl font-bold text-gray-900 dark:text-white">
