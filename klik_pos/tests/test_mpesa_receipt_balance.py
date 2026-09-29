@@ -410,3 +410,24 @@ class TestOtherFlowsKeepWorking(NoReceiptCase):
 		invoice.payments[0].reference_no = "NOSUCHTX"
 		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
 			assert_mpesa_rows_backed(invoice)
+
+
+class TestTillKnowsTheMpesaModes(NoReceiptCase):
+	def test_payment_modes_say_which_modes_are_mpesa(self):
+		"""The till gates Submit and opens the M-Pesa panel on this flag, so it must be the
+		server's own rule - not a guess from the mode's name."""
+		from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
+
+		from klik_pos.api.payment import get_payment_modes
+
+		profile = make_pos_profile(company=COMPANY, do_not_insert=1)
+		profile.set("payments", [{"mode_of_payment": "Cash", "default": 1}, {"mode_of_payment": PHONE_MODE}])
+		profile.name = f"_Test Klik Mpesa Flag {frappe.generate_hash(length=5)}"
+		profile.insert(ignore_permissions=True)
+		frappe.form_dict.pos_profile = profile.name
+		try:
+			modes = {m["mode_of_payment"]: m for m in get_payment_modes()["data"]}
+		finally:
+			frappe.form_dict.pop("pos_profile", None)
+		self.assertIs(modes[PHONE_MODE]["is_mpesa"], True)
+		self.assertIs(modes["Cash"]["is_mpesa"], False)

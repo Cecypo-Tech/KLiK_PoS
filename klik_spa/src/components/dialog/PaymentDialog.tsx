@@ -27,7 +27,7 @@ import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
-import { appliedFromReceipts, receiptDraftSubmitData, uncoveredMpesa } from "../../utils/mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptDraftSubmitData, uncoveredMpesa } from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
@@ -539,9 +539,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const entries = Object.entries(paymentAmounts).filter(([, amount]) => (amount || 0) > 0);
     for (const [method, amount] of entries) {
       const mode = modes.find((m) => m.mode_of_payment === method);
-      const isMpesaMode =
-        (mode?.type || "").toLowerCase() === "phone" || /mpesa/i.test(method || "");
-      if (isMpesaMode) {
+      if (isMpesaPaymentMode(mode, method)) {
         return {
           method,
           amount: Number(amount || 0),

@@ -42,3 +42,13 @@ export function uncoveredMpesa(mpesaAmount: number, receiptsOpenTotal: number, s
 export function receiptDraftSubmitData<T extends { paymentMethods: Array<Record<string, unknown>> }>(data: T): T | undefined {
   return data.paymentMethods.some((p) => Number(p.amount) > 0) ? data : undefined;
 }
+
+/**
+ * Whether a payment mode is M-Pesa - the modes whose money must come from a receipt or an
+ * STK push. The server sends its own answer (`is_mpesa`); a server too old to send it
+ * falls back to the till's former guess: type Phone, or "mpesa" in the name.
+ */
+export function isMpesaPaymentMode(mode: { is_mpesa?: boolean; type?: string } | undefined, method: string): boolean {
+  if (typeof mode?.is_mpesa === "boolean") return mode.is_mpesa;
+  return (mode?.type || "").toLowerCase() === "phone" || /mpesa/i.test(method || "");
+}

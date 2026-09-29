@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, receiptCardState, receiptDraftSubmitData, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptDraftSubmitData, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -85,5 +85,19 @@ describe("receiptDraftSubmitData", () => {
     // An empty payments list would be refused as "a cash sale with no payment".
     expect(receiptDraftSubmitData(data([]))).toBeUndefined();
     expect(receiptDraftSubmitData(data([0]))).toBeUndefined();
+  });
+});
+
+describe("isMpesaPaymentMode", () => {
+  it("follows the server's flag when it sends one", () => {
+    expect(isMpesaPaymentMode({ is_mpesa: true, type: "Bank" }, "Collections")).toBe(true);
+    // A Bank-type mode that merely has M-Pesa in its name is not held to a receipt.
+    expect(isMpesaPaymentMode({ is_mpesa: false, type: "Bank" }, "KCB Mpesa")).toBe(false);
+  });
+
+  it("falls back to type Phone or the name for an older server", () => {
+    expect(isMpesaPaymentMode({ type: "Phone" }, "Till 1")).toBe(true);
+    expect(isMpesaPaymentMode(undefined, "Mpesa-160745")).toBe(true);
+    expect(isMpesaPaymentMode({ type: "Cash" }, "Cash")).toBe(false);
   });
 });
