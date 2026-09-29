@@ -231,7 +231,9 @@ def _ensure_phone_mode():
 	frappe.local._klik_mpesa_modes = None
 
 
-class TestNoReceiptNoMpesa(ReceiptCase):
+class NoReceiptCase(ReceiptCase):
+	"""Invoices with a typed amount on a Phone-type mode, and STK requests to back them."""
+
 	def setUp(self):
 		_ensure_phone_mode()
 
@@ -254,6 +256,8 @@ class TestNoReceiptNoMpesa(ReceiptCase):
 		doc.db_insert()
 		return doc.name
 
+
+class TestNoReceiptNoMpesa(NoReceiptCase):
 	def test_a_typed_mpesa_amount_is_refused(self):
 		from klik_pos.api.mpesa import assert_mpesa_rows_backed
 
@@ -367,3 +371,42 @@ class TestCancelGuard(ReceiptCase):
 		register = frappe.get_doc("Mpesa C2B Payment Register", receipt.name)
 		with self.assertRaisesRegex(frappe.ValidationError, second.name):
 			register.cancel()
+
+
+class TestOtherFlowsKeepWorking(NoReceiptCase):
+	"""The no-receipt rule is for typed amounts; money other flows already tied to a receipt passes."""
+
+	def test_a_consolidated_invoice_is_exempt(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		# ERPNext's POS closing merges POS Invoices into one; their rows are summed there.
+		invoice = self._typed()
+		invoice.is_consolidated = 1
+		assert_mpesa_rows_backed(invoice)
+
+	def test_a_desk_stk_push_named_by_its_transaction_id_backs_the_row(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		self._stk(transaction_id="DESKSTK1")
+		invoice = self._typed()
+		invoice.payments[0].reference_no = "DESKSTK1"
+		assert_mpesa_rows_backed(invoice)
+
+	def test_a_quick_pay_row_naming_a_register_receipt_backs_the_row(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		receipt = self._receipt(100)
+		invoice = self._typed()
+		invoice.payments[0].custom_reference_text = receipt.name
+		assert_mpesa_rows_backed(invoice)
+		invoice.payments[0].custom_reference_text = None
+		invoice.payments[0].reference_no = receipt.transid
+		assert_mpesa_rows_backed(invoice)
+
+	def test_a_made_up_reference_still_does_not(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		invoice = self._typed()
+		invoice.payments[0].reference_no = "NOSUCHTX"
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			assert_mpesa_rows_backed(invoice)

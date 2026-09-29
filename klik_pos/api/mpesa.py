@@ -128,6 +128,9 @@ def _mpesa_modes() -> set[str]:
 	if cached is None:
 		cached = set(frappe.get_all("Mode of Payment", filters={"type": "Phone"}, pluck="name"))
 		cached |= {m for m in frappe.get_all("Mpesa C2B Payment Register URL", pluck="mode_of_payment") if m}
+		# ERPNext's M-Pesa integration names the mode it creates after the settings record.
+		settings_modes = [f"Mpesa-{name}" for name in frappe.get_all("Mpesa Settings", pluck="name")]
+		cached |= set(frappe.get_all("Mode of Payment", filters={"name": ["in", settings_modes]}, pluck="name"))
 		frappe.local._klik_mpesa_modes = cached
 	return cached
 
@@ -137,22 +140,46 @@ def is_mpesa_mode(mode: str | None) -> bool:
 
 
 def _stk_backs(payment_row, invoice_name: str) -> bool:
-	"""A completed STK push for at least this row's amount, not already used on another sale."""
-	request = payment_row.get("custom_reference_text")
-	if not request or not frappe.db.exists("Mpesa Express Request", request):
+	"""A completed STK push for at least this row's amount, not already used on another sale.
+
+	klik names the request in `custom_reference_text`; the desk's own STK flow puts the
+	request's M-Pesa transaction id in `reference_no` instead. Either identifies it.
+	"""
+	refs = {r for r in (payment_row.get("custom_reference_text"), payment_row.get("reference_no")) if r}
+	if not refs:
 		return False
 	req = frappe.db.get_value(
-		"Mpesa Express Request", request, ["status", "transaction_id", "amount"], as_dict=True
+		"Mpesa Express Request",
+		{"name": ["in", list(refs)]},
+		["name", "status", "transaction_id", "amount"],
+		as_dict=True,
+	) or frappe.db.get_value(
+		"Mpesa Express Request",
+		{"transaction_id": ["in", list(refs)], "status": "Completed"},
+		["name", "status", "transaction_id", "amount"],
+		as_dict=True,
 	)
-	if req.status != "Completed" or not req.transaction_id or flt(req.amount) < flt(payment_row.amount):
+	if not req or req.status != "Completed" or not req.transaction_id or flt(req.amount) < flt(payment_row.amount):
 		return False
 	used_elsewhere = frappe.db.sql(
 		"""SELECT 1 FROM `tabSales Invoice Payment` sip
 		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
-		WHERE sip.custom_reference_text = %s AND si.name != %s AND si.docstatus = 1 LIMIT 1""",
-		(request, invoice_name),
+		WHERE (sip.custom_reference_text IN %(ids)s OR sip.reference_no IN %(ids)s)
+			AND si.name != %(invoice)s AND si.docstatus = 1 LIMIT 1""",
+		{"ids": (req.name, req.transaction_id), "invoice": invoice_name},
 	)
 	return not used_elsewhere
+
+
+def _register_backs(payment_row) -> bool:
+	"""The M-Pesa app's own quick-pay names the register receipt it consumed on the row."""
+	refs = [r for r in (payment_row.get("custom_reference_text"), payment_row.get("reference_no")) if r]
+	if not refs:
+		return False
+	return bool(
+		frappe.db.exists("Mpesa C2B Payment Register", {"name": ["in", refs], "docstatus": ["<", 2]})
+		or frappe.db.exists("Mpesa C2B Payment Register", {"transid": ["in", refs], "docstatus": ["<", 2]})
+	)
 
 
 def assert_mpesa_rows_backed(invoice) -> None:
@@ -162,14 +189,20 @@ def assert_mpesa_rows_backed(invoice) -> None:
 	leaves only a zero placeholder row here; an amount typed straight into an M-Pesa row
 	posts to the M-Pesa account on its own, and when the real receipt is later reconciled
 	the same money is counted twice. So a positive M-Pesa payment row passes only when it is
-	a completed STK push not already used on another sale. Returns are refunds and exempt.
+	a completed STK push not already used on another sale, or names a register receipt the
+	M-Pesa app's quick-pay consumed. Returns are refunds and exempt.
 	"""
-	if not cint(invoice.get("is_pos")) or cint(invoice.get("is_return")):
+	# A consolidated invoice is ERPNext merging POS Invoices at closing; its rows are sums
+	# of rows each checked on their own invoice.
+	if not cint(invoice.get("is_pos")) or cint(invoice.get("is_return")) or cint(invoice.get("is_consolidated")):
 		return
 	unbacked = [
 		p
 		for p in invoice.get("payments") or []
-		if is_mpesa_mode(p.mode_of_payment) and flt(p.amount) > 0 and not _stk_backs(p, invoice.name)
+		if is_mpesa_mode(p.mode_of_payment)
+		and flt(p.amount) > 0
+		and not _stk_backs(p, invoice.name)
+		and not _register_backs(p)
 	]
 	if unbacked:
 		frappe.throw(
