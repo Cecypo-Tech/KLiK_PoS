@@ -357,3 +357,13 @@ class TestRetry(ReceiptCase):
 			frappe.db.count("Payment Entry", {"custom_mpesa_receipt_number": receipt.transid, "docstatus": 1}), 0
 		)
 
+
+class TestCancelGuard(ReceiptCase):
+	def test_a_receipt_cannot_be_cancelled_while_a_later_sale_still_draws_on_it(self):
+		receipt = self._receipt(1000)
+		first = self._sell(300, receipt)
+		second = self._sell(200, receipt)
+		first.cancel()  # the sale the register row names is gone; the second still uses the entry
+		register = frappe.get_doc("Mpesa C2B Payment Register", receipt.name)
+		with self.assertRaisesRegex(frappe.ValidationError, second.name):
+			register.cancel()
