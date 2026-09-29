@@ -27,6 +27,7 @@ import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
+import { appliedFromReceipts, uncoveredMpesa } from "../../utils/mpesaReceipts";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -80,7 +81,8 @@ interface MpesaFlowState {
   transactionId?: string;
   status: "idle" | "in_progress" | "completed" | "failed";
   message?: string;
-  c2bPayments?: Array<{ name: string; amount: number }>;
+  /** Receipts linked to the draft, each with what it could pay when picked. */
+  c2bPayments?: Array<{ name: string; amount: number; transid?: string }>;
 }
 
 interface MpesaRealtimeEvent {
@@ -187,7 +189,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
   // This sale turned out to be recorded already, as this invoice; Submit stays blocked.
   const [alreadySubmittedAs, setAlreadySubmittedAs] = useState<string | null>(null);
-  const [showMpesaOptionsModal, setShowMpesaOptionsModal] = useState(false);
+  // Only the mobile overlay can be dismissed; unticking M-Pesa resets it.
+  const [mpesaPanelDismissed, setMpesaPanelDismissed] = useState(false);
   const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
   const [mpesaSearchTerm, setMpesaSearchTerm] = useState("");
@@ -546,6 +549,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return null;
   }, [modes, paymentAmounts]);
 
+  const activeMpesaMethod = getActiveMpesaPayment()?.method ?? null;
+  const hasActiveMpesaPayment = activeMpesaMethod !== null;
+  // Ticking an M-Pesa row is the trigger: the panel follows it, no separate button.
+  const showMpesaPanel = hasActiveMpesaPayment && !invoiceSubmitted && !mpesaPanelDismissed;
+
+  useEffect(() => {
+    if (!hasActiveMpesaPayment) setMpesaPanelDismissed(false);
+  }, [hasActiveMpesaPayment]);
+
   const trimPaymentAmountsToPayable = useCallback((payableTotal: number) => {
     setPaymentAmounts((prev) => {
       const updated = { ...prev };
@@ -675,7 +687,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [mpesaFlow?.requestName]);
 
   const selectedMpesaTotal = useMemo(
-    () => selectedMpesaPayments.reduce((sum, payment) => sum + Number(payment.transamount || 0), 0),
+    () => selectedMpesaPayments.reduce((sum, payment) => sum + Number(payment.open_amount ?? payment.transamount ?? 0), 0),
     [selectedMpesaPayments]
   );
 
@@ -843,24 +855,23 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   };
 
-  const handleOpenMpesaOptions = async () => {
+  /** Bring the M-Pesa panel back into view (and reopen the mobile overlay). */
+  const handleOpenMpesaOptions = () => {
+    setMpesaPanelDismissed(false);
+    mpesaOptionsPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+
+  const salespersonBlocksMpesa = () => {
     if (requiresSalespersonPin && !currentSalesperson) {
       setShowSalespersonModal(true);
       toast.error("Verify the salesperson before managing M-Pesa payments");
-      return;
+      return true;
     }
-
-    const activeMpesaPayment = getActiveMpesaPayment();
-    if (!activeMpesaPayment || activeMpesaPayment.amount <= 0) {
-      toast.error("Enter an amount on an M-Pesa payment method before opening M-Pesa options.");
-      return;
-    }
-
-    setMpesaPhoneNumber(selectedCustomer?.phone || mpesaFlow?.phoneNumber || "");
-    setShowMpesaOptionsModal(true);
+    return false;
   };
 
   const handleInitiateMpesaPayment = async () => {
+    if (salespersonBlocksMpesa()) return;
     const activeMpesaPayment = getActiveMpesaPayment();
     if (!activeMpesaPayment || activeMpesaPayment.amount <= 0) {
       toast.error("Enter an amount on an M-Pesa payment method before initiating STK push.");
@@ -868,7 +879,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
 
     await initiateMpesaFlow(activeMpesaPayment.method, activeMpesaPayment.amount, mpesaPhoneNumber.trim());
-    setShowMpesaOptionsModal(false);
+    if (isMobile) setMpesaPanelDismissed(true);
   };
 
   const handleToggleMpesaPayment = (paymentName: string) => {
@@ -885,6 +896,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   };
 
   const handleReconcileMpesaPayments = async () => {
+    if (salespersonBlocksMpesa()) return;
     if (!selectedCustomer?.id && !selectedCustomer?.name) {
       toast.error("Kindly select a customer");
       return;
@@ -904,7 +916,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     try {
       setIsProcessingPayment(true);
       const draftInvoiceName = await ensureMpesaDraftInvoice();
-      const response = await processKlikPosMpesaPayments({
+      await processKlikPosMpesaPayments({
         doctype: "Sales Invoice",
         invoice_name: draftInvoiceName,
         customer: selectedCustomer.id || selectedCustomer.name,
@@ -914,25 +926,42 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         auto_submit: 0,
       });
 
-      setPaymentAmounts((prev) => ({
-        ...prev,
-        [activeMpesaPayment.method]: Number(response.total_amount || selectedMpesaTotal),
-      }));
+      // Receipts accumulate across picks; together they pay what the sale still owes after
+      // the other methods, and whatever they hold beyond that stays on the receipts.
+      const alreadyLinked =
+        mpesaFlow?.source === "c2b" && mpesaFlow.draftInvoiceName === draftInvoiceName ? mpesaFlow.c2bPayments ?? [] : [];
+      const linked = [
+        ...alreadyLinked,
+        ...selectedMpesaPayments.map((payment) => ({
+          name: payment.name,
+          amount: Number(payment.open_amount ?? payment.transamount ?? 0),
+          transid: payment.transid,
+        })),
+      ];
+      const linkedOpen = linked.reduce((sum, payment) => sum + payment.amount, 0);
+      const owedByMpesa = roundCurrency(
+        checkoutPayableTotal -
+          calculateTotalPayments(
+            Object.entries(paymentAmounts)
+              .filter(([method]) => method !== activeMpesaPayment.method)
+              .map(([, amount]) => amount),
+          ),
+      );
+      const applied = appliedFromReceipts(linkedOpen, owedByMpesa);
+
+      setPaymentAmounts((prev) => ({ ...prev, [activeMpesaPayment.method]: applied }));
       setMpesaFlow({
         modeOfPayment: activeMpesaPayment.method,
-        amount: Number(response.total_amount || selectedMpesaTotal),
+        amount: applied,
         phoneNumber: "",
         accountReference: draftInvoiceName,
         source: "c2b",
         draftInvoiceName,
         status: "completed",
-        message: `${selectedMpesaPayments.length} M-Pesa register payment(s) linked to draft invoice ${draftInvoiceName}.`,
-        c2bPayments: selectedMpesaPayments.map((payment) => ({
-          name: payment.name,
-          amount: Number(payment.transamount || 0),
-        })),
+        message: undefined,
+        c2bPayments: linked,
       });
-      setShowMpesaOptionsModal(false);
+      if (isMobile) setMpesaPanelDismissed(true);
       setSelectedMpesaPayments([]);
       setMpesaSearchTerm("");
       toast.success("M-Pesa register payments added to draft invoice.");
@@ -1236,11 +1265,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     getEffectiveItemRate,
   ]);
 
-  useEffect(() => {
-    if (!showMpesaOptionsModal || !posCompanyName) return;
+  const mpesaCustomer = selectedCustomer?.id || selectedCustomer?.name || undefined;
 
-    const activeMpesaPayment = getActiveMpesaPayment();
-    if (!activeMpesaPayment) return;
+  useEffect(() => {
+    if (!showMpesaPanel || !posCompanyName || !activeMpesaMethod) return;
 
     let cancelled = false;
     const loadMpesaRegisterPayments = async () => {
@@ -1249,8 +1277,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         const response = await fetchMpesaRegisterPayments({
           company: posCompanyName,
           pos_profile: posProfileName || undefined,
-          mode_of_payment: activeMpesaPayment.method,
+          mode_of_payment: activeMpesaMethod,
           search: mpesaSearchTerm.trim().length >= 3 ? mpesaSearchTerm.trim() : undefined,
+          customer: mpesaCustomer,
         });
         if (cancelled) return;
         setMpesaRegisterCount(Number(response.count || 0));
@@ -1270,12 +1299,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return () => {
       cancelled = true;
     };
-  }, [showMpesaOptionsModal, posCompanyName, posProfileName, mpesaSearchTerm, getActiveMpesaPayment]);
+  }, [showMpesaPanel, posCompanyName, posProfileName, mpesaSearchTerm, activeMpesaMethod, mpesaCustomer]);
 
   useEffect(() => {
-    if (!showMpesaOptionsModal) return;
+    if (!showMpesaPanel) return;
+    setMpesaPhoneNumber((current) => current || selectedCustomer?.phone || "");
     mpesaOptionsPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [showMpesaOptionsModal]);
+    // Only when the panel appears, not on every customer edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMpesaPanel]);
 
   useEffect(() => {
     if (mpesaFlow?.source !== "stk" || !mpesaFlow?.requestName) return;
@@ -1323,7 +1355,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
       setAlreadySubmittedAs(null);
-      setShowMpesaOptionsModal(false);
+      setMpesaPanelDismissed(false);
       setMpesaSearchTerm("");
       setSelectedMpesaPayments([]);
       setDeliveryCharge(0);
@@ -1378,13 +1410,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       let response;
 
       if (mpesaDraftInvoiceName) {
-        response = await submitDraftInvoice(
-          mpesaDraftInvoiceName,
-          mpesaFlow?.source === "c2b" ? undefined : {
-            ...paymentData,
-            enable_background_invoice_submission: enableBackgroundSubmission,
-          }
-        );
+        // Receipt-paid M-Pesa reaches the draft as advances, so its row stays out of the
+        // payments; everything else the cashier took (cash added after the pick) goes in.
+        response = await submitDraftInvoice(mpesaDraftInvoiceName, {
+          ...(mpesaFlow?.source === "c2b"
+            ? buildPaymentData(deliveryPersonnel, { excludeActiveMpesa: true })
+            : paymentData),
+          enable_background_invoice_submission: enableBackgroundSubmission,
+        });
       } else if (originalHeldOrderId) {
         // Checkout from a held Sales Order — convert it to a submitted Sales Invoice
         const checkoutPayload = {
@@ -1690,7 +1723,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return "M-Pesa Options";
   };
 
-  const hasActiveMpesaPayment = Boolean(getActiveMpesaPayment());
 
   const isMpesaButtonDisabled = () => {
     if (!hasActiveMpesaPayment) return true;
@@ -1698,6 +1730,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (!reconciliation.ok) return true;
     return false;
   };
+
+  const mpesaReceiptsOpen =
+    mpesaFlow?.source === "c2b" ? (mpesaFlow.c2bPayments ?? []).reduce((sum, payment) => sum + payment.amount, 0) : 0;
+  const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" ? Number(mpesaFlow.amount || 0) : 0;
+  const mpesaUncovered = uncoveredMpesa(getActiveMpesaPayment()?.amount || 0, mpesaReceiptsOpen, mpesaStkDone);
 
   const submitBlockReason = () => {
     const originalHeldOrderId = getOriginalHeldOrderId();
@@ -1716,7 +1753,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       priceApprovalMessage: heldOrderApproval
         ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
         : null,
-      mpesaUncoveredLabel: null,
+      mpesaUncoveredLabel: mpesaUncovered > 0 ? formatCurrencyWithSymbol(mpesaUncovered, displayCurrencySymbol) : null,
     });
   };
 
@@ -2051,7 +2088,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
     setMpesaFlow((prev) => (prev ? { ...prev, status: "idle", message: undefined } : prev));
-    setShowMpesaOptionsModal(true);
+    handleOpenMpesaOptions();
   };
 
   const renderLoyaltyRedemption = () => {
@@ -2206,10 +2243,22 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               {mpesaFlow.source === "c2b" ? "M-Pesa Register Status" : "M-Pesa STK Status"}: {statusText}
             </p>
             {mpesaFlow.source === "c2b" ? (
-              <p className="text-xs">
-                Draft Invoice: {mpesaFlow.draftInvoiceName}
-                {mpesaFlow.c2bPayments?.length ? ` | Payments: ${mpesaFlow.c2bPayments.length}` : ""}
-              </p>
+              (() => {
+                // Receipts pay in the order they were picked; what they hold beyond the
+                // M-Pesa amount stays on them for a later sale.
+                let left = paymentAmounts[mpesaFlow.modeOfPayment] || 0;
+                return (mpesaFlow.c2bPayments ?? []).map((payment) => {
+                  const applied = roundCurrency(Math.min(payment.amount, Math.max(0, left)));
+                  left = roundCurrency(left - applied);
+                  const stays = roundCurrency(payment.amount - applied);
+                  return (
+                    <p key={payment.name} className="text-xs">
+                      {payment.transid || payment.name} · {formatCurrencyWithSymbol(applied, displayCurrencySymbol)} applied
+                      {stays > 0 ? ` · ${formatCurrencyWithSymbol(stays, displayCurrencySymbol)} stays on the receipt` : ""}
+                    </p>
+                  );
+                });
+              })()
             ) : (
               <p className="text-xs">
                 Request: {mpesaFlow.requestName}
@@ -2496,7 +2545,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           </div>
         </div>
         <MpesaOptionsModal
-          isOpen={showMpesaOptionsModal}
+          isOpen={showMpesaPanel}
           modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
           amount={getActiveMpesaPayment()?.amount || 0}
           phoneNumber={mpesaPhoneNumber}
@@ -2508,7 +2557,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           selectedTotal={selectedMpesaTotal}
           isLoadingPayments={isLoadingMpesaRegisterPayments}
           isProcessing={isProcessingPayment}
-          onClose={() => setShowMpesaOptionsModal(false)}
+          onClose={() => setMpesaPanelDismissed(true)}
           onPhoneNumberChange={setMpesaPhoneNumber}
           onSearchChange={setMpesaSearchTerm}
           onTogglePayment={handleToggleMpesaPayment}
@@ -2685,7 +2734,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
             <div ref={mpesaOptionsPanelRef}>
               <MpesaOptionsModal
-                isOpen={showMpesaOptionsModal}
+                isOpen={showMpesaPanel}
                 modeOfPayment={getActiveMpesaPayment()?.method || "M-Pesa"}
                 amount={getActiveMpesaPayment()?.amount || 0}
                 phoneNumber={mpesaPhoneNumber}
@@ -2697,7 +2746,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 selectedTotal={selectedMpesaTotal}
                 isLoadingPayments={isLoadingMpesaRegisterPayments}
                 isProcessing={isProcessingPayment}
-                onClose={() => setShowMpesaOptionsModal(false)}
+                onClose={() => setMpesaPanelDismissed(true)}
                 onPhoneNumberChange={setMpesaPhoneNumber}
                 onSearchChange={setMpesaSearchTerm}
                 onTogglePayment={handleToggleMpesaPayment}
@@ -2774,11 +2823,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   isProcessingPayment={isProcessingPayment}
                   isHoldingOrder={isHoldingOrder}
                   isActionButtonDisabled={isActionButtonDisabled}
-                showMpesaButton={hasActiveMpesaPayment}
-                isMpesaButtonDisabled={isMpesaButtonDisabled}
                   getActionButtonText={getActionButtonText}
-                getMpesaButtonText={getMpesaButtonText}
-                  onInitiateMpesa={handleOpenMpesaOptions}
                   onCompletePayment={handleCompletePayment}
                   onHoldOrder={handleHoldOrder}
                   onEditOrder={handleEditOrder}
