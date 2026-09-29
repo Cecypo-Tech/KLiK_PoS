@@ -276,17 +276,22 @@ def reset():
 
 def _reset():
 	frappe.set_user("Administrator")
-	# A closing entry refuses to cancel while any shift on its profile is open, so the
-	# shifts are stood down first.
-	for shift in frappe.get_all(
-		"POS Opening Entry", filters={"pos_profile": PROFILE, "status": "Open"}, pluck="name"
-	):
-		frappe.db.set_value("POS Opening Entry", shift, "status", "Closed", update_modified=False)
+	# A closing entry refuses to cancel while any shift on its profile is open, and cancelling
+	# one reopens the shift it closed - so the shifts are stood down before every cancel, or
+	# a profile with two closings stops at the second.
+	def stand_down_shifts():
+		for shift in frappe.get_all(
+			"POS Opening Entry", filters={"pos_profile": PROFILE, "status": "Open"}, pluck="name"
+		):
+			frappe.db.set_value("POS Opening Entry", shift, "status", "Closed", update_modified=False)
+
 	# The closing entry owns the shift it filed, so it goes before anything it counted.
 	for closing in frappe.get_all(
 		"POS Closing Entry", filters={"pos_profile": PROFILE, "docstatus": 1}, pluck="name"
 	):
+		stand_down_shifts()
 		frappe.get_doc("POS Closing Entry", closing).cancel()
+	stand_down_shifts()
 	invoices = frappe.get_all("Sales Invoice", filters={"pos_profile": PROFILE, "docstatus": 1}, pluck="name")
 	# Order matters both ways round: the register row refuses to cancel while its invoice
 	# is live, and the Payment Entry refuses while the register row still links it.
