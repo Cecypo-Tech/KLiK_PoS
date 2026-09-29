@@ -424,6 +424,28 @@ def _pending_mpesa_rows(invoice) -> list:
 	]
 
 
+def _refuse_if_used_meanwhile(doctype: str, name: str, field: str, current, transid: str | None):
+	"""Refuse when another till changed this receipt after our transaction began.
+
+	The row lock (`FOR UPDATE`) returns the row as it is now, but MariaDB's repeatable-read
+	snapshot keeps showing every other read in this transaction the row as it was when the
+	transaction started. ERPNext's reconciliation reads the Payment Entry that way, so going
+	on would either trip its "modified after you pulled it" check or, worse, write the entry
+	back from stale figures and undo the other till's allocation. A resubmit runs in a fresh
+	transaction and sees the receipt as it now stands.
+	"""
+	snapshot = frappe.db.sql(f"SELECT `{field}` FROM `tab{doctype}` WHERE name=%s", name)
+	was = snapshot[0][0] if snapshot else None
+	same = (flt(was) == flt(current)) if field == "unallocated_amount" else ((was or None) == (current or None))
+	if not same or not snapshot:
+		frappe.throw(
+			_("{0} was used on another sale a moment ago. Submit again to use what is left on it.").format(
+				transid or name
+			),
+			title=_("Receipt just used"),
+		)
+
+
 def _usable_mpesa_rows(invoice) -> list:
 	"""Recorded trace rows whose receipt can still pay: new (no entry yet) or open (its
 	entry has money left). Minting and allocation go by this; finalise still consumes only
@@ -479,6 +501,7 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 			"SELECT payment_entry FROM `tabMpesa C2B Payment Register` WHERE name=%s FOR UPDATE", register
 		)
 		linked = locked[0][0] if locked else None
+		_refuse_if_used_meanwhile("Mpesa C2B Payment Register", register, "payment_entry", linked, child.transid)
 		existing = linked or child.payment_entry or _klik_entry_for_transid(child.transid)
 		if existing and frappe.db.get_value("Payment Entry", existing, "docstatus") == 1:
 			child.payment_entry = existing
@@ -584,6 +607,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 				)
 			)
 		available = flt(pe_row.unallocated_amount)
+		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
 		if pe_name not in existing_refs and available < flt(child.amount) and remaining > available:
 			last = frappe.db.get_value(
 				"Payment Entry Reference",
