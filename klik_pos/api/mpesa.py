@@ -581,13 +581,20 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 
 	by_register = _ensure_receipt_payment_entries(invoice)
 
+	# A retry re-enters with the advances of an earlier attempt still on the draft. They
+	# recorded what each receipt held then; another till may have drawn on it since, and a
+	# stale advance fails ERPNext's reconciliation after the invoice is already submitted.
+	# So the receipts' advances are rebuilt from the locked balances every time.
+	receipt_entries = set(by_register.values())
+	invoice.set(
+		"advances",
+		[a for a in invoice.get("advances") or [] if a.reference_name not in receipt_entries],
+	)
+
 	payable = flt(invoice.rounded_total) or flt(invoice.grand_total)
 	already_paid = sum(flt(p.amount) for p in invoice.get("payments") or [])
 	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
 	remaining = max(payable - already_paid - already_advanced, 0.0)
-
-	# A retry re-enters here with the advances of the last attempt still on the draft.
-	existing_refs = {a.reference_name for a in invoice.get("advances") or []}
 
 	summary = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
 	for child in children:
@@ -608,7 +615,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		available = flt(pe_row.unallocated_amount)
 		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
-		if pe_name not in existing_refs and available < flt(child.amount) and remaining > available:
+		if available < flt(child.amount) and remaining > available:
 			last = frappe.db.get_value(
 				"Payment Entry Reference",
 				{"parent": pe_name, "reference_doctype": "Sales Invoice"},
@@ -625,7 +632,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 				)
 			)
 		take = min(available, remaining) if remaining > 0 else 0.0
-		if take > 0 and pe_name not in existing_refs:
+		if take > 0:
 			invoice.append(
 				"advances",
 				{
@@ -639,7 +646,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 				},
 			)
 			remaining -= take
-		child.allocated_amount = take if pe_name not in existing_refs else child.allocated_amount
+		child.allocated_amount = take
 		summary["received_total"] += flt(child.amount)
 		summary["allocated_total"] += flt(child.allocated_amount)
 		summary["by_register"][child.mpesa_c2b_payment_register] = {

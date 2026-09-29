@@ -319,3 +319,41 @@ class TestNoReceiptNoMpesa(ReceiptCase):
 		paid.save()
 		paid.submit()
 		self.assertNotIn(receipt.name, self._search(receipt))
+
+
+class TestRetry(ReceiptCase):
+	def test_a_retry_rebuilds_the_advance_from_what_the_receipt_holds_now(self):
+		receipt = self._receipt(1000)
+		first = self._record(self._draft(rate=200), receipt)
+		_allocate_receipts_before_submit(first)  # an attempt that then failed; its advance was kept
+		self._sell(300, receipt)  # meanwhile another sale drew 300
+		first.reload()
+		summary = _allocate_receipts_before_submit(first)
+		first.reload()
+		self.assertEqual([flt(a.advance_amount) for a in first.advances], [700])
+		self.assertEqual(flt(summary["allocated_total"]), 200)
+		first.submit()
+		_finalize_mpesa_reconciliation(first, summary)
+		self.assertEqual(flt(_receipt_balance(receipt.name).open_amount), 500)
+
+	def test_a_failed_foreground_checkout_leaves_no_half_done_receipt_behind(self):
+		from unittest.mock import patch
+
+		from klik_pos.api.sales_invoice import submit_draft_invoice
+
+		receipt = self._receipt(500)
+		invoice = self._record(self._draft(rate=200), receipt)
+		with patch(
+			"klik_pos.api.sales_invoice._enforce_submit_permission", side_effect=frappe.ValidationError("refused")
+		):
+			result = submit_draft_invoice(invoice.name)
+
+		self.assertFalse(result["success"])
+		invoice.reload()
+		self.assertEqual(invoice.docstatus, 0)
+		self.assertEqual(invoice.advances, [], "no advance from the failed attempt stays on the draft")
+		self.assertIsNone(frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry"))
+		self.assertEqual(
+			frappe.db.count("Payment Entry", {"custom_mpesa_receipt_number": receipt.transid, "docstatus": 1}), 0
+		)
+
