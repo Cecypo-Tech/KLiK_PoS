@@ -13,6 +13,8 @@ export interface PaymentBlockState {
   alreadySubmittedAs: string | null;
   /** Why a held order this cart came from still cannot be checked out, or null. */
   priceApprovalMessage: string | null;
+  /** The M-Pesa amount no picked receipt or completed STK push covers, formatted, or null. */
+  mpesaUncoveredLabel: string | null;
 }
 
 /**
@@ -26,6 +28,7 @@ export function paymentBlockReason(s: PaymentBlockState): string | null {
   }
   if (s.priceApprovalMessage) return s.priceApprovalMessage;
   if (s.isProcessingPayment) return "Payment is already being processed";
+  if (s.mpesaUncoveredLabel) return `Pick the M-Pesa receipt or send an STK push for ${s.mpesaUncoveredLabel}`;
   if (!s.reconciliationOk) return s.reconciliationMessage || "This sale is on hold";
   if (s.isCreditSale && !s.hasDueDate) return "Select a due date for this credit sale";
   if (s.isB2C && !s.isCreditSale && s.outstandingAmount > 0) {

@@ -13,6 +13,7 @@ const ready: PaymentBlockState = {
   outstandingLabel: "KSh 0.00",
   alreadySubmittedAs: null,
   priceApprovalMessage: null,
+  mpesaUncoveredLabel: null,
 };
 
 describe("paymentBlockReason", () => {
@@ -70,5 +71,11 @@ describe("paymentBlockReason", () => {
     expect(
       paymentBlockReason({ ...ready, isCreditSale: true, hasDueDate: true, outstandingAmount: 150 }),
     ).toBeNull();
+  });
+
+  it("blocks while an M-Pesa amount has no receipt or STK push behind it", () => {
+    expect(paymentBlockReason({ ...ready, mpesaUncoveredLabel: "Sh 3,450.00" })).toBe(
+      "Pick the M-Pesa receipt or send an STK push for Sh 3,450.00",
+    );
   });
 });

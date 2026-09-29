@@ -1716,6 +1716,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       priceApprovalMessage: heldOrderApproval
         ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
         : null,
+      mpesaUncoveredLabel: null,
     });
   };
 

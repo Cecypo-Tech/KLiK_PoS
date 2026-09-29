@@ -37,6 +37,16 @@ export interface MpesaRegisterPayment {
   billrefnumber?: string;
   businessshortcode?: string;
   creation?: string;
+  /** "new": untouched, full amount; "open": used before, its Payment Entry still has money. */
+  state?: "new" | "open";
+  /** What the receipt can still pay. */
+  open_amount?: number;
+  payment_entry?: string | null;
+  /** The customer the receipt's Payment Entry belongs to, once it has one. */
+  held_by?: string | null;
+  used_count?: number;
+  /** False when another customer holds the receipt. */
+  selectable?: boolean;
 }
 
 export interface MpesaPaymentsResponse {
@@ -99,12 +109,14 @@ export async function fetchMpesaRegisterPayments(params: {
   pos_profile?: string;
   mode_of_payment?: string;
   search?: string;
+  customer?: string;
 }) {
   const query = new URLSearchParams();
   query.set("company", params.company);
   if (params.pos_profile) query.set("pos_profile", params.pos_profile);
   if (params.mode_of_payment) query.set("mode_of_payment", params.mode_of_payment);
   if (params.search) query.set("search", params.search);
+  if (params.customer) query.set("customer", params.customer);
 
   const response = await fetch(
     `/api/method/klik_pos.api.mpesa.get_mpesa_payments?${query.toString()}`,
