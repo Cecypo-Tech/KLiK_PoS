@@ -42,57 +42,171 @@ def _mpesa_shortcodes_for_company(company: str) -> list[str]:
 	return sorted(shortcodes)
 
 
+_UNUSABLE = "unusable"
+
+
+def _klik_entry_for_transid(transid: str | None) -> str | None:
+	"""The submitted Payment Entry klik already minted for this receipt, found by the
+	receipt number it is stamped with. Covers entries minted before the register row was
+	linked at mint time (a checkout that failed after minting)."""
+	if not transid or not frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number"):
+		return None
+	return frappe.db.get_value(
+		"Payment Entry", {"custom_mpesa_receipt_number": transid, "docstatus": 1}, "name"
+	)
+
+
+def _receipt_balance(register: str) -> frappe._dict:
+	"""What one M-Pesa receipt can still pay, and for whom.
+
+	A receipt that has a submitted Payment Entry is that entry: `open` while the entry has
+	unallocated money, `spent` once it has none, and held by the entry's customer. A receipt
+	with no entry yet is `new` for its whole amount, for any customer. Anything else - a
+	cancelled row, a cancelled or draft entry, a supplier entry, another company - is
+	`unusable`. The register row's own docstatus says only whether it has been consumed
+	once, not whether money is left.
+	"""
+	row = frappe.db.get_value(
+		"Mpesa C2B Payment Register",
+		register,
+		["name", "docstatus", "transamount", "transid", "company", "payment_entry"],
+		as_dict=True,
+	)
+	out = frappe._dict(state=_UNUSABLE, open_amount=0.0, payment_entry=None, held_by=None, transid=None)
+	if not row:
+		return out
+	out.transid = row.transid
+	if row.docstatus == 2:
+		return out
+
+	pe_name = row.payment_entry or _klik_entry_for_transid(row.transid)
+	if pe_name:
+		pe = frappe.db.get_value(
+			"Payment Entry",
+			pe_name,
+			["docstatus", "party_type", "party", "unallocated_amount", "company"],
+			as_dict=True,
+		)
+		out.payment_entry = pe_name
+		if not pe or pe.docstatus != 1 or pe.party_type != "Customer" or (row.company and pe.company != row.company):
+			return out
+		out.held_by = pe.party
+		out.open_amount = flt(pe.unallocated_amount)
+		out.state = "open" if out.open_amount > 0 else "spent"
+		return out
+
+	if row.docstatus == 0 and flt(row.transamount) > 0:
+		out.state = "new"
+		out.open_amount = flt(row.transamount)
+	return out
+
+
+def _stk_used_transids(transids: list[str]) -> set[str]:
+	"""Receipt numbers that already paid a live sale through a completed STK push. The same
+	money often lands in the register as a C2B row too; offering that row again would let
+	one payment pay twice."""
+	if not transids:
+		return set()
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT req.transaction_id
+		FROM `tabMpesa Express Request` req
+		INNER JOIN `tabSales Invoice Payment` sip ON sip.custom_reference_text = req.name
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE req.status = 'Completed' AND req.transaction_id IN %(ids)s AND si.docstatus = 1
+		""",
+		{"ids": tuple(transids)},
+	)
+	return {r[0] for r in rows}
+
+
 @frappe.whitelist()
 def get_mpesa_payments(
 	company: str,
 	pos_profile: str | None = None,
 	mode_of_payment: str | None = None,
 	search: str | None = None,
+	customer: str | None = None,
 ) -> dict:
-	"""Return pending Mpesa C2B Payment Register rows for `company`, optionally
-	filtered by a 3+ character `search` term.
+	"""Receipts with money left for `company`: untouched register rows at their full
+	amount, and rows already used once whose Payment Entry still has unallocated money, at
+	that amount. `customer` does not filter - another customer's receipt is still listed so
+	the cashier can see it, with `selectable` false (a leftover can pay only the customer
+	its entry belongs to). A 3+ character `search` returns rows; without one only the count.
 
-	`mode_of_payment` is accepted for query-string compatibility with the
-	frontend but is intentionally NOT used to filter: a pending row's
-	`mode_of_payment` is only populated later, via a separate
-	`Mpesa C2B Payment Register URL` lookup in that doctype's
-	`set_missing_values()`, so it's NULL on most pending rows pre-reconciliation.
-	Filtering on it would exclude every unassigned row.
+	`mode_of_payment` is accepted for query-string compatibility and not used to filter: a
+	pending row's mode is only filled in later (see set_missing_values), so filtering on it
+	would drop every unassigned row.
 	"""
 	shortcodes = _mpesa_shortcodes_for_company(company)
 	if not shortcodes:
 		return {"count": 0, "payments": [], "shortcodes": []}
 
-	base_filters = {"docstatus": 0, "businessshortcode": ["in", shortcodes]}
-	total_count = frappe.db.count("Mpesa C2B Payment Register", base_filters)
+	has_money_left = """
+		reg.businessshortcode IN %(codes)s
+		AND reg.docstatus < 2
+		AND (
+			(reg.docstatus = 0 AND IFNULL(reg.payment_entry, '') = '' AND reg.transamount > 0)
+			OR (pe.docstatus = 1 AND pe.unallocated_amount > 0)
+		)
+	"""
+	params = {"codes": tuple(shortcodes)}
+	total_count = frappe.db.sql(
+		f"""SELECT COUNT(*) FROM `tabMpesa C2B Payment Register` reg
+		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
+		WHERE {has_money_left}""",
+		params,
+	)[0][0]
 
 	payments = []
 	search = (search or "").strip()
 	if len(search) >= 3:
-		s = f"%{search}%"
-		payments = frappe.get_all(
-			"Mpesa C2B Payment Register",
-			filters=base_filters,
-			or_filters=[
-				["full_name", "like", s],
-				["transid", "like", s],
-				["billrefnumber", "like", s],
-				["msisdn", "like", s],
-			],
-			fields=[
-				"name",
-				"full_name",
-				"transamount",
-				"transid",
-				"msisdn",
-				"posting_date",
-				"billrefnumber",
-				"businessshortcode",
-				"creation",
-			],
-			order_by="creation desc",
-			limit_page_length=100,
+		params["s"] = f"%{search}%"
+		rows = frappe.db.sql(
+			f"""
+			SELECT reg.name, reg.full_name, reg.transamount, reg.transid, reg.msisdn,
+				reg.posting_date, reg.billrefnumber, reg.businessshortcode, reg.creation
+			FROM `tabMpesa C2B Payment Register` reg
+			LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
+			WHERE {has_money_left}
+				AND (reg.full_name LIKE %(s)s OR reg.transid LIKE %(s)s
+					OR reg.billrefnumber LIKE %(s)s OR reg.msisdn LIKE %(s)s)
+			ORDER BY reg.creation DESC
+			LIMIT 100
+			""",
+			params,
+			as_dict=True,
 		)
+		stk_used = _stk_used_transids([r.transid for r in rows if r.transid])
+		for r in rows:
+			if r.transid in stk_used:
+				continue
+			bal = _receipt_balance(r.name)
+			if bal.state not in ("new", "open"):
+				continue
+			used_count = (
+				frappe.db.count(
+					"Payment Entry Reference",
+					{
+						"parent": bal.payment_entry,
+						"reference_doctype": "Sales Invoice",
+						"allocated_amount": [">", 0],
+					},
+				)
+				if bal.payment_entry
+				else 0
+			)
+			payments.append(
+				{
+					**r,
+					"state": bal.state,
+					"open_amount": bal.open_amount,
+					"payment_entry": bal.payment_entry,
+					"held_by": bal.held_by,
+					"used_count": used_count,
+					"selectable": not bal.held_by or not customer or bal.held_by == customer,
+				}
+			)
 
 	return {"count": total_count, "payments": payments, "shortcodes": shortcodes}
 
