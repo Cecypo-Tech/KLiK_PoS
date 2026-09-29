@@ -362,6 +362,17 @@ def _pending_mpesa_rows(invoice) -> list:
 	]
 
 
+def _usable_mpesa_rows(invoice) -> list:
+	"""Recorded trace rows whose receipt can still pay: new (no entry yet) or open (its
+	entry has money left). Minting and allocation go by this; finalise still consumes only
+	the draft register rows (`_pending_mpesa_rows`)."""
+	return [
+		child
+		for child in invoice.get("custom_mpesa_reconciled_payments") or []
+		if _receipt_balance(child.mpesa_c2b_payment_register).state in ("new", "open")
+	]
+
+
 def _stamp_klik_fields(pe, invoice, child):
 	"""Everything a later reader needs to find this entry from the shift, the receipt or the phone."""
 	updates = {}
@@ -392,20 +403,27 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 	whatever its billref happens to match. Returns {register_row_name: payment_entry_name}
 	and sets `child.payment_entry` on the draft; the caller saves the draft.
 
-	Only receipts whose register row is still unconsumed are minted, the same filter the
-	caller allocates by: a trace row whose receipt was spent elsewhere is stale, and an
-	entry for it would be money nothing ever allocates.
+	Only receipts that can still pay are minted or reused, the same filter the caller
+	allocates by: a trace row whose receipt was spent elsewhere is stale.
 	"""
 	from frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry import create_payment_entry
 
 	by_register = {}
-	for child in _pending_mpesa_rows(invoice):
+	for child in _usable_mpesa_rows(invoice):
 		register = child.mpesa_c2b_payment_register
-		existing = child.payment_entry or frappe.db.get_value(
-			"Mpesa C2B Payment Register", register, "payment_entry"
+		# Lock the register row: two tills picking the same new receipt must end up on one
+		# entry, so the second waits here and then finds the entry the first linked.
+		locked = frappe.db.sql(
+			"SELECT payment_entry FROM `tabMpesa C2B Payment Register` WHERE name=%s FOR UPDATE", register
 		)
+		linked = locked[0][0] if locked else None
+		existing = linked or child.payment_entry or _klik_entry_for_transid(child.transid)
 		if existing and frappe.db.get_value("Payment Entry", existing, "docstatus") == 1:
 			child.payment_entry = existing
+			if not linked:
+				frappe.db.set_value(
+					"Mpesa C2B Payment Register", register, "payment_entry", existing, update_modified=False
+				)
 			by_register[register] = existing
 			continue
 
@@ -422,6 +440,8 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 			submit=1,
 		)
 		_stamp_klik_fields(pe, invoice, child)
+		# Linked now, not at finalise: the register row is how the next till finds this entry.
+		frappe.db.set_value("Mpesa C2B Payment Register", register, "payment_entry", pe.name, update_modified=False)
 		child.payment_entry = pe.name
 		by_register[register] = pe.name
 
@@ -468,7 +488,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		)
 
-	children = _pending_mpesa_rows(invoice)
+	children = _usable_mpesa_rows(invoice)
 	if not children:
 		return empty
 
@@ -487,8 +507,37 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	summary = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
 	for child in children:
 		pe_name = by_register[child.mpesa_c2b_payment_register]
-		pe = frappe.get_doc("Payment Entry", pe_name)
-		available = flt(pe.unallocated_amount)
+		# Lock the entry and read what is left under the lock: another till drawing on the
+		# same receipt waits here until this sale commits, then sees the reduced balance.
+		pe_row = frappe.db.sql(
+			"""SELECT unallocated_amount, party, source_exchange_rate, remarks
+			FROM `tabPayment Entry` WHERE name=%s FOR UPDATE""",
+			pe_name,
+			as_dict=True,
+		)[0]
+		if pe_row.party != invoice.customer:
+			frappe.throw(
+				_("{0} is held by {1}; switch the sale to that customer to use it.").format(
+					child.transid, pe_row.party
+				)
+			)
+		available = flt(pe_row.unallocated_amount)
+		if pe_name not in existing_refs and available < flt(child.amount) and remaining > available:
+			last = frappe.db.get_value(
+				"Payment Entry Reference",
+				{"parent": pe_name, "reference_doctype": "Sales Invoice"},
+				"reference_name",
+				order_by="creation desc",
+			)
+			frappe.throw(
+				_(
+					"{0} has only {1} left now; it was used on {2} a moment ago. Pick another receipt or take the rest another way."
+				).format(
+					child.transid,
+					frappe.format_value(available, {"fieldtype": "Currency"}),
+					last or _("another sale"),
+				)
+			)
 		take = min(available, remaining) if remaining > 0 else 0.0
 		if take > 0 and pe_name not in existing_refs:
 			invoice.append(
@@ -499,8 +548,8 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 					"reference_row": None,
 					"advance_amount": available,
 					"allocated_amount": take,
-					"ref_exchange_rate": flt(pe.source_exchange_rate) or 1,
-					"remarks": pe.remarks,
+					"ref_exchange_rate": flt(pe_row.source_exchange_rate) or 1,
+					"remarks": pe_row.remarks,
 				},
 			)
 			remaining -= take

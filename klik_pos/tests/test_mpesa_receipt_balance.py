@@ -149,3 +149,67 @@ class TestPick(ReceiptCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "already on this invoice"):
 			process_mpesa(doctype="Sales Invoice", invoice_name=invoice.name, customer=CUSTOMER,
 				mpesa_payments=receipt.name, mode_of_payment=MODE)
+
+
+class TestDrawDown(ReceiptCase):
+	def test_second_sale_draws_what_the_first_left(self):
+		receipt = self._receipt(10048)
+		self._sell(3450, receipt)
+		self._sell(850, receipt)
+		self.assertEqual(flt(_receipt_balance(receipt.name).open_amount), 5748)
+
+	def test_a_draw_larger_than_the_balance_takes_the_balance(self):
+		receipt = self._receipt(1000)
+		self._sell(700, receipt)
+		invoice = self._record(self._draft(rate=500), receipt)
+		summary = _allocate_receipts_before_submit(invoice)
+		self.assertEqual(flt(summary["allocated_total"]), 300)
+
+	def test_minting_links_the_register_row_at_once(self):
+		receipt = self._receipt(500)
+		invoice = self._record(self._draft(rate=200), receipt)
+		_allocate_receipts_before_submit(invoice)
+		self.assertTrue(frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry"))
+
+	def test_a_second_invoice_on_a_minted_but_unsubmitted_receipt_reuses_the_entry(self):
+		receipt = self._receipt(500)
+		first = self._record(self._draft(rate=200), receipt)
+		_allocate_receipts_before_submit(first)
+		second = self._record(self._draft(rate=100), receipt)
+		_allocate_receipts_before_submit(second)
+		self.assertEqual(
+			frappe.get_doc("Sales Invoice", first.name).custom_mpesa_reconciled_payments[0].payment_entry,
+			frappe.get_doc("Sales Invoice", second.name).custom_mpesa_reconciled_payments[0].payment_entry,
+		)
+		self.assertEqual(
+			frappe.db.count("Payment Entry", {"custom_mpesa_receipt_number": receipt.transid, "docstatus": 1}), 1
+		)
+
+	def test_a_receipt_drained_after_the_pick_refuses_the_shortfall(self):
+		receipt = self._receipt(1000)
+		invoice = self._record(self._draft(rate=800), receipt)  # picked while 1000 was open
+		self._sell(900, receipt)  # another till takes 900
+		invoice.reload()
+		with self.assertRaisesRegex(frappe.ValidationError, f"{receipt.transid}.*a moment ago"):
+			_allocate_receipts_before_submit(invoice)
+
+	def test_customer_change_after_pick_is_refused(self):
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		invoice = self._record(self._draft(rate=200), receipt)
+		self._switch_customer(invoice, OTHER_CUSTOMER)
+		with self.assertRaisesRegex(frappe.ValidationError, f"held by {CUSTOMER}"):
+			_allocate_receipts_before_submit(invoice)
+
+	def test_finalise_leaves_an_already_consumed_register_row_alone(self):
+		receipt = self._receipt(1000)
+		first = self._sell(300, receipt)
+		self._sell(200, receipt)
+		self.assertEqual(frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "sales_invoice"), first.name)
+
+	def test_cancelling_a_sale_gives_its_amount_back_to_the_receipt(self):
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		second = self._sell(200, receipt)
+		second.cancel()
+		self.assertEqual(flt(_receipt_balance(receipt.name).open_amount), 700)
