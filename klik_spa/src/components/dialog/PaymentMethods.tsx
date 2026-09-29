@@ -5,6 +5,7 @@ import type { PaymentMethod } from "./types";
 import { isReferenceMethod } from "./paymentIcons";
 import { partitionPaymentMethods } from "../../utils/paymentMethodVisibility";
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
+import { clickCameFromControl, isIncidentalClick } from "../../utils/rowClick";
 
 interface PaymentMethodsProps {
   paymentMethods: PaymentMethod[];
@@ -65,7 +66,7 @@ export default function PaymentMethods({
         {headerRight}
       </div>
 
-      <div className="border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden divide-y divide-gray-200 dark:divide-gray-700">
         {rows.map((method) => {
           const isActive = (method.amount || 0) > 0;
           const showRef = isActive && isReferenceMethod(method.type, method.name);
@@ -73,11 +74,23 @@ export default function PaymentMethods({
           return (
             <div
               key={method.id}
-              className={`flex flex-wrap items-center gap-3 px-3 py-2 ${disabled ? "bg-gray-50 dark:bg-gray-800" : ""}`}
+              onClick={(e) => {
+                if (disabled || clickCameFromControl(e.target, e.currentTarget)) return;
+                if (isIncidentalClick(e.detail, window.getSelection()?.toString() ?? "")) return;
+                onToggle(method.id);
+              }}
+              className={`flex flex-wrap items-center gap-3 px-3 py-2 transition-colors ${
+                disabled
+                  ? "bg-gray-50 dark:bg-gray-800"
+                  : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60"
+              }`}
             >
               <button
                 type="button"
-                onClick={() => onToggle(method.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(method.id);
+                }}
                 disabled={disabled}
                 title="Use this method (fill outstanding)"
                 className={`shrink-0 ${disabled ? "cursor-not-allowed opacity-50" : "hover:text-beveren-600"} ${isActive ? "text-beveren-600" : "text-gray-400"}`}
