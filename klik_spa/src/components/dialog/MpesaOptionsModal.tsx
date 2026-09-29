@@ -1,6 +1,7 @@
 import { Loader2, Search } from "lucide-react";
 import type { MpesaRegisterPayment } from "../../services/mpesa";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
+import { receiptCardState } from "../../utils/mpesaReceipts";
 
 interface MpesaOptionsModalProps {
   isOpen: boolean;
@@ -63,6 +64,7 @@ export default function MpesaOptionsModal({
               {modeOfPayment} • Expected amount {formatCurrencyWithSymbol(amount, currencySymbol)}
             </p>
           </div>
+          {variant !== "panel" && (
           <button
             type="button"
             onClick={onClose}
@@ -70,10 +72,11 @@ export default function MpesaOptionsModal({
           >
             Close
           </button>
+          )}
         </div>
 
-        <div className="grid gap-6 p-6 md:grid-cols-2">
-          <section className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-900 p-4">
+        <div className={`grid md:grid-cols-5 ${variant === "panel" ? "gap-4 p-4" : "gap-6 p-6"}`}>
+          <section className="md:col-span-2 space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-900 p-4">
             <div>
               <h3 className="font-semibold text-emerald-800 dark:text-emerald-300">Initiate STK Push</h3>
               <p className="text-sm text-emerald-700/80 dark:text-emerald-400/80">
@@ -102,11 +105,11 @@ export default function MpesaOptionsModal({
             </button>
           </section>
 
-          <section className="space-y-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <section className="md:col-span-3 space-y-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white">Reconcile Received C2B Payments</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Pending register entries: {pendingCount}. Search by sender, transaction ID, or reference.
+                Receipts with money left: {pendingCount}. Search by sender, transaction ID, or reference.
               </p>
             </div>
 
@@ -122,7 +125,7 @@ export default function MpesaOptionsModal({
               />
             </div>
 
-            <div className="max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+            <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
               {isLoadingPayments ? (
                 <div className="p-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                   <Loader2 size={16} className="animate-spin" />
@@ -139,16 +142,17 @@ export default function MpesaOptionsModal({
               ) : (
                 payments.map((payment) => {
                   const checked = selectedPaymentNames.includes(payment.name);
+                  const card = receiptCardState(payment);
                   return (
                     <label
                       key={payment.name}
-                      className={`flex items-start gap-3 p-3 cursor-pointer ${checked ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-white dark:bg-gray-900"}`}
+                      className={`flex items-start gap-3 p-3 ${card.selectable ? "cursor-pointer" : "cursor-not-allowed opacity-60"} ${checked ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-white dark:bg-gray-900"}`}
                     >
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => onTogglePayment(payment.name)}
-                        disabled={isProcessing}
+                        disabled={isProcessing || !card.selectable}
                         className="mt-1"
                       />
                       <div className="min-w-0 flex-1">
@@ -156,8 +160,17 @@ export default function MpesaOptionsModal({
                           <span className="font-medium text-gray-900 dark:text-white truncate">
                             {payment.full_name || payment.name}
                           </span>
-                          <span className="font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                            {formatCurrencyWithSymbol(Number(payment.transamount || 0), currencySymbol)}
+                          <span className="text-right whitespace-nowrap">
+                            <span className={`block font-semibold ${card.selectable ? "text-emerald-700 dark:text-emerald-400" : "text-gray-400"}`}>
+                              {formatCurrencyWithSymbol(card.openAmount, currencySymbol)}
+                              {card.kind !== "new" ? " left" : ""}
+                            </span>
+                            {card.kind !== "new" && (
+                              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                                of {formatCurrencyWithSymbol(card.total, currencySymbol)}
+                                {card.usedCount > 0 ? ` · used on ${card.usedCount} sale${card.usedCount === 1 ? "" : "s"}` : ""}
+                              </span>
+                            )}
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 space-y-1">
@@ -166,6 +179,11 @@ export default function MpesaOptionsModal({
                             {payment.msisdn ? ` - ${payment.msisdn}` : ""}
                           </div>
                           <div>{payment.billrefnumber || "No reference"}</div>
+                          {card.kind === "other" && (
+                            <div className="text-amber-600 dark:text-amber-400">
+                              Held by {card.heldBy}. Switch customer to use it.
+                            </div>
+                          )}
                         </div>
                       </div>
                     </label>

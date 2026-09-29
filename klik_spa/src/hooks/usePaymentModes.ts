@@ -5,6 +5,8 @@ export interface PaymentMode {
   default: number;
   amount?: number;
   type?: string;
+  /** The server's answer to "is this M-Pesa?" - its money must come from a receipt or STK push. */
+  is_mpesa?: boolean;
   account?: string;
   account_type?: string | null;
   custom_currency?: string;

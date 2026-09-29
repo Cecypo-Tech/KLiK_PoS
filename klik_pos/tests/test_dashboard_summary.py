@@ -28,10 +28,12 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
 from klik_pos.api.dashboard import get_dashboard_summary
+from klik_pos.api.mpesa import is_mpesa_mode
 
 COMPANY = "Dev Co"
 PROFILE = "_Test POS Profile"
 ITEM = "Consulting"
+LATER_MODE = "Cheque"
 CUSTOMER = "Walk In"
 
 # Far from any real posting date on a dev or staging site, and from the other test modules.
@@ -54,6 +56,10 @@ def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_
 	The modes are not named here on purpose: ERPNext's set_pos_fields rebuilds `payments`
 	from the profile during set_missing_values, so any row appended beforehand is discarded
 	and a fixture that names its modes silently tests different ones than it claims.
+
+	M-Pesa rows are skipped: M-Pesa money reaches a sale only from a receipt (an advance),
+	and a typed amount on an M-Pesa row is refused at submit. LATER_MODE is skipped too -
+	it is the mode the debt is collected in later, and must show nothing at the till.
 	"""
 	si = frappe.new_doc("Sales Invoice")
 	si.customer = CUSTOMER
@@ -72,17 +78,22 @@ def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_
 	si.calculate_taxes_and_totals()
 
 	if shares:
-		if len(si.payments) < len(shares):
+		fundable = [
+			row
+			for row in si.payments
+			if not is_mpesa_mode(row.mode_of_payment) and row.mode_of_payment != LATER_MODE
+		]
+		if len(fundable) < len(shares):
 			raise AssertionError(
-				f"{PROFILE} offers {len(si.payments)} payment modes; the fixture needs {len(shares)}"
+				f"{PROFILE} offers {len(fundable)} fundable payment modes; the fixture needs {len(shares)}"
 			)
 		total = flt(si.rounded_total or si.grand_total)
 		for row in si.payments:
 			row.amount = 0
-		for row, share in zip(si.payments, shares, strict=False):
+		for row, share in zip(fundable, shares, strict=False):
 			row.amount = flt(total * share, 2)
 		# Absorb rounding on the last funded row so the invoice is exactly settled.
-		si.payments[len(shares) - 1].amount += total - sum(flt(p.amount) for p in si.payments)
+		fundable[len(shares) - 1].amount += total - sum(flt(p.amount) for p in si.payments)
 	elif si.payments:
 		for row in si.payments:
 			row.amount = 0
@@ -158,7 +169,7 @@ class TestDashboardSummary(FrappeTestCase):
 
 		cls.credit_sale = _invoice(DAY_ONE, [(1, 300), (1, 100)], is_pos=False)
 		cls.settled_later = _invoice(DAY_TWO, [(1, 500), (1, 100)], is_pos=False)
-		cls.later_payment = _settle(cls.settled_later, 250, "Cheque")
+		cls.later_payment = _settle(cls.settled_later, 250, LATER_MODE)
 
 		cls.refund_owed = _invoice(
 			DAY_TWO, [(-1, 100)], is_pos=False, is_return=1, return_against=cls.cash.name
@@ -215,7 +226,7 @@ class TestDashboardSummary(FrappeTestCase):
 		identity = self.summary["identity"]
 
 		self.assertAlmostEqual(identity["collected_later"], 250.0, places=2)
-		cheque = next(row for row in self.summary["collected_by_mode"] if row["mode"] == "Cheque")
+		cheque = next(row for row in self.summary["collected_by_mode"] if row["mode"] == LATER_MODE)
 		self.assertAlmostEqual(cheque["later"], 250.0, places=2)
 		self.assertEqual(cheque["amount"], 0.0)
 

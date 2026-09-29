@@ -582,10 +582,15 @@ def get_payment_modes():
 			order_by="idx asc",
 		)
 
+		from klik_pos.api.mpesa import is_mpesa_mode
+
 		company = pos_doc.company
 		for mode in payment_modes:
 			payment_type = frappe.get_value("Mode of Payment", mode["mode_of_payment"], "type")
 			mode["type"] = payment_type or "Default"
+			# The server's own rule, so the till opens the M-Pesa panel and gates Submit on
+			# exactly the modes the submit check will hold to a receipt.
+			mode["is_mpesa"] = is_mpesa_mode(mode["mode_of_payment"])
 
 			# The Receive modal keys its reference-number requirement off the ACCOUNT type,
 			# not the mode type: an M-Pesa mode is type Phone but usually lands in a Bank

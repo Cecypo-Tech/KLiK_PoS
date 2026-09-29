@@ -4307,6 +4307,10 @@ def _needs_shift_check(doc):
 
 class CustomSalesInvoice(SalesInvoice):
 	def before_submit(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		assert_mpesa_rows_backed(self)
+
 		if _needs_shift_check(self):
 			# ERPNext only runs this from validate_created_using_pos, which klik never
 			# reaches (it never sets is_created_using_pos). Call it directly so a klik
@@ -5233,31 +5237,40 @@ def submit_draft_invoice(invoice_id, data=None):
 				"invoice": invoice_doc,
 			}
 		else:
-			# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and
-			# the draft takes what it owes as advances, before submit; the remainder stays
-			# unallocated on that same entry and is surfaced after submit as excess.
-			mpesa_allocation = None
-			if invoice_doc.get("custom_mpesa_reconciled_payments"):
-				from klik_pos.api.mpesa import _allocate_receipts_before_submit
-
-				mpesa_allocation = _allocate_receipts_before_submit(invoice_doc)
-
-			_apply_klik_invoice_flags(invoice_doc, is_submitted=True)
-			_enforce_submit_permission(invoice_doc)
-			invoice_doc.submit()
+			# Receipts, advances and the submit are one unit: a failure anywhere in it (stock,
+			# a PIN check, the reconciliation) must not leave an entry minted, a receipt
+			# linked or advances saved on the draft - this endpoint reports failure without
+			# raising, so the request would otherwise commit the half-done checkout.
+			frappe.db.savepoint("klik_submit_draft")
 			try:
-				_cancel_sales_invoice_reservations(invoice_doc.name)
+				# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and
+				# the draft takes what it owes as advances, before submit; the remainder stays
+				# unallocated on that same entry and is surfaced after submit as excess.
+				mpesa_allocation = None
+				if invoice_doc.get("custom_mpesa_reconciled_payments"):
+					from klik_pos.api.mpesa import _allocate_receipts_before_submit
+
+					mpesa_allocation = _allocate_receipts_before_submit(invoice_doc)
+
+				_apply_klik_invoice_flags(invoice_doc, is_submitted=True)
+				_enforce_submit_permission(invoice_doc)
+				invoice_doc.submit()
+				try:
+					_cancel_sales_invoice_reservations(invoice_doc.name)
+				except Exception:
+					frappe.log_error(
+						frappe.get_traceback(),
+						f"Failed to cancel reservations after submit for {invoice_doc.name}",
+					)
+
+				mpesa_reconciliation = None
+				if invoice_doc.get("custom_mpesa_reconciled_payments"):
+					from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
+
+					mpesa_reconciliation = _finalize_mpesa_reconciliation(invoice_doc, mpesa_allocation)
 			except Exception:
-				frappe.log_error(
-					frappe.get_traceback(),
-					f"Failed to cancel reservations after submit for {invoice_doc.name}",
-				)
-
-			mpesa_reconciliation = None
-			if invoice_doc.get("custom_mpesa_reconciled_payments"):
-				from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
-
-				mpesa_reconciliation = _finalize_mpesa_reconciliation(invoice_doc, mpesa_allocation)
+				frappe.db.rollback(save_point="klik_submit_draft")
+				raise
 
 			response = {
 				"success": True,

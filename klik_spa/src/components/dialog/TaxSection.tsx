@@ -8,6 +8,8 @@ interface TaxSectionProps {
   orderDiscountPercentInput: number;
   onOrderDiscountAmountChange: (value: number) => void;
   onOrderDiscountPercentChange: (value: number) => void;
+  /** Label beside compact inputs, for the Other charges card. */
+  inline?: boolean;
 }
 
 /**
@@ -22,10 +24,48 @@ export default function TaxSection({
   orderDiscountPercentInput,
   onOrderDiscountAmountChange,
   onOrderDiscountPercentChange,
+  inline = false,
 }: TaxSectionProps) {
   if (!allowDiscountChange) return null;
 
   const locked = invoiceSubmitted || isProcessingPayment;
+
+  const inputClass = `px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`;
+
+  if (inline) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Discount</label>
+        <div className="flex gap-1.5">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Amount"
+            aria-label="Discount amount"
+            value={orderDiscountAmount || ""}
+            {...selectAllOnFocus}
+            onChange={(e) => onOrderDiscountAmountChange(Number(e.target.value || 0))}
+            disabled={locked}
+            className={`w-28 text-right ${inputClass}`}
+          />
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            placeholder="%"
+            aria-label="Discount percent"
+            value={orderDiscountPercentInput || ""}
+            {...selectAllOnFocus}
+            onChange={(e) => onOrderDiscountPercentChange(Number(e.target.value || 0))}
+            disabled={locked}
+            className={`w-20 text-right ${inputClass}`}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-w-[10rem] flex-1">

@@ -27,7 +27,7 @@ from contextlib import contextmanager
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 def _mpesa_shortcodes_for_company(company: str) -> list[str]:
@@ -42,57 +42,266 @@ def _mpesa_shortcodes_for_company(company: str) -> list[str]:
 	return sorted(shortcodes)
 
 
+_UNUSABLE = "unusable"
+
+
+def _klik_entry_for_transid(transid: str | None) -> str | None:
+	"""The submitted Payment Entry klik already minted for this receipt, found by the
+	receipt number it is stamped with. Covers entries minted before the register row was
+	linked at mint time (a checkout that failed after minting)."""
+	if not transid or not frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number"):
+		return None
+	return frappe.db.get_value(
+		"Payment Entry", {"custom_mpesa_receipt_number": transid, "docstatus": 1}, "name"
+	)
+
+
+def _receipt_balance(register: str) -> frappe._dict:
+	"""What one M-Pesa receipt can still pay, and for whom.
+
+	A receipt that has a submitted Payment Entry is that entry: `open` while the entry has
+	unallocated money, `spent` once it has none, and held by the entry's customer. A receipt
+	with no entry yet is `new` for its whole amount, for any customer. Anything else - a
+	cancelled row, a cancelled or draft entry, a supplier entry, another company - is
+	`unusable`. The register row's own docstatus says only whether it has been consumed
+	once, not whether money is left.
+	"""
+	row = frappe.db.get_value(
+		"Mpesa C2B Payment Register",
+		register,
+		["name", "docstatus", "transamount", "transid", "company", "payment_entry"],
+		as_dict=True,
+	)
+	out = frappe._dict(state=_UNUSABLE, open_amount=0.0, payment_entry=None, held_by=None, transid=None)
+	if not row:
+		return out
+	out.transid = row.transid
+	if row.docstatus == 2:
+		return out
+
+	pe_name = row.payment_entry or _klik_entry_for_transid(row.transid)
+	if pe_name:
+		pe = frappe.db.get_value(
+			"Payment Entry",
+			pe_name,
+			["docstatus", "party_type", "party", "unallocated_amount", "company"],
+			as_dict=True,
+		)
+		out.payment_entry = pe_name
+		if not pe or pe.docstatus != 1 or pe.party_type != "Customer" or (row.company and pe.company != row.company):
+			return out
+		out.held_by = pe.party
+		out.open_amount = flt(pe.unallocated_amount)
+		out.state = "open" if out.open_amount > 0 else "spent"
+		return out
+
+	if row.docstatus == 0 and flt(row.transamount) > 0:
+		out.state = "new"
+		out.open_amount = flt(row.transamount)
+	return out
+
+
+def _stk_used_transids(transids: list[str]) -> set[str]:
+	"""Receipt numbers that already paid a live sale through a completed STK push. The same
+	money often lands in the register as a C2B row too; offering that row again would let
+	one payment pay twice."""
+	if not transids:
+		return set()
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT req.transaction_id
+		FROM `tabMpesa Express Request` req
+		INNER JOIN `tabSales Invoice Payment` sip ON sip.custom_reference_text = req.name
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE req.status = 'Completed' AND req.transaction_id IN %(ids)s AND si.docstatus = 1
+		""",
+		{"ids": tuple(transids)},
+	)
+	return {r[0] for r in rows}
+
+
+
+def _mpesa_modes() -> set[str]:
+	"""Modes whose money is M-Pesa: Phone-type Modes of Payment, and whatever a register URL
+	maps a shortcode to. A bank's own M-Pesa collection mode (Bank type) is not one."""
+	cached = getattr(frappe.local, "_klik_mpesa_modes", None)
+	if cached is None:
+		cached = set(frappe.get_all("Mode of Payment", filters={"type": "Phone"}, pluck="name"))
+		cached |= {m for m in frappe.get_all("Mpesa C2B Payment Register URL", pluck="mode_of_payment") if m}
+		# ERPNext's M-Pesa integration names the mode it creates after the settings record.
+		settings_modes = [f"Mpesa-{name}" for name in frappe.get_all("Mpesa Settings", pluck="name")]
+		cached |= set(frappe.get_all("Mode of Payment", filters={"name": ["in", settings_modes]}, pluck="name"))
+		frappe.local._klik_mpesa_modes = cached
+	return cached
+
+
+def is_mpesa_mode(mode: str | None) -> bool:
+	return bool(mode) and mode in _mpesa_modes()
+
+
+def _stk_backs(payment_row, invoice_name: str) -> bool:
+	"""A completed STK push for at least this row's amount, not already used on another sale.
+
+	klik names the request in `custom_reference_text`; the desk's own STK flow puts the
+	request's M-Pesa transaction id in `reference_no` instead. Either identifies it.
+	"""
+	refs = {r for r in (payment_row.get("custom_reference_text"), payment_row.get("reference_no")) if r}
+	if not refs:
+		return False
+	req = frappe.db.get_value(
+		"Mpesa Express Request",
+		{"name": ["in", list(refs)]},
+		["name", "status", "transaction_id", "amount"],
+		as_dict=True,
+	) or frappe.db.get_value(
+		"Mpesa Express Request",
+		{"transaction_id": ["in", list(refs)], "status": "Completed"},
+		["name", "status", "transaction_id", "amount"],
+		as_dict=True,
+	)
+	if not req or req.status != "Completed" or not req.transaction_id or flt(req.amount) < flt(payment_row.amount):
+		return False
+	used_elsewhere = frappe.db.sql(
+		"""SELECT 1 FROM `tabSales Invoice Payment` sip
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE (sip.custom_reference_text IN %(ids)s OR sip.reference_no IN %(ids)s)
+			AND si.name != %(invoice)s AND si.docstatus = 1 LIMIT 1""",
+		{"ids": (req.name, req.transaction_id), "invoice": invoice_name},
+	)
+	return not used_elsewhere
+
+
+def _register_backs(payment_row) -> bool:
+	"""The M-Pesa app's own quick-pay names the register receipt it consumed on the row."""
+	refs = [r for r in (payment_row.get("custom_reference_text"), payment_row.get("reference_no")) if r]
+	if not refs:
+		return False
+	return bool(
+		frappe.db.exists("Mpesa C2B Payment Register", {"name": ["in", refs], "docstatus": ["<", 2]})
+		or frappe.db.exists("Mpesa C2B Payment Register", {"transid": ["in", refs], "docstatus": ["<", 2]})
+	)
+
+
+def assert_mpesa_rows_backed(invoice) -> None:
+	"""Refuse M-Pesa money that no receipt stands behind.
+
+	Receipt-paid M-Pesa reaches a sale as an advance from the receipt's Payment Entry and
+	leaves only a zero placeholder row here; an amount typed straight into an M-Pesa row
+	posts to the M-Pesa account on its own, and when the real receipt is later reconciled
+	the same money is counted twice. So a positive M-Pesa payment row passes only when it is
+	a completed STK push not already used on another sale, or names a register receipt the
+	M-Pesa app's quick-pay consumed. Returns are refunds and exempt.
+	"""
+	# A consolidated invoice is ERPNext merging POS Invoices at closing; its rows are sums
+	# of rows each checked on their own invoice.
+	if not cint(invoice.get("is_pos")) or cint(invoice.get("is_return")) or cint(invoice.get("is_consolidated")):
+		return
+	unbacked = [
+		p
+		for p in invoice.get("payments") or []
+		if is_mpesa_mode(p.mode_of_payment)
+		and flt(p.amount) > 0
+		and not _stk_backs(p, invoice.name)
+		and not _register_backs(p)
+	]
+	if unbacked:
+		frappe.throw(
+			"<br>".join(
+				_(
+					"{0} shows {1} with no M-Pesa receipt behind it. Pick the receipt from M-Pesa options, or send an STK push."
+				).format(p.mode_of_payment, frappe.format_value(p.amount, {"fieldtype": "Currency"}))
+				for p in unbacked
+			),
+			title=_("M-Pesa not received"),
+		)
+
 @frappe.whitelist()
 def get_mpesa_payments(
 	company: str,
 	pos_profile: str | None = None,
 	mode_of_payment: str | None = None,
 	search: str | None = None,
+	customer: str | None = None,
 ) -> dict:
-	"""Return pending Mpesa C2B Payment Register rows for `company`, optionally
-	filtered by a 3+ character `search` term.
+	"""Receipts with money left for `company`: untouched register rows at their full
+	amount, and rows already used once whose Payment Entry still has unallocated money, at
+	that amount. `customer` does not filter - another customer's receipt is still listed so
+	the cashier can see it, with `selectable` false (a leftover can pay only the customer
+	its entry belongs to). A 3+ character `search` returns rows; without one only the count.
 
-	`mode_of_payment` is accepted for query-string compatibility with the
-	frontend but is intentionally NOT used to filter: a pending row's
-	`mode_of_payment` is only populated later, via a separate
-	`Mpesa C2B Payment Register URL` lookup in that doctype's
-	`set_missing_values()`, so it's NULL on most pending rows pre-reconciliation.
-	Filtering on it would exclude every unassigned row.
+	`mode_of_payment` is accepted for query-string compatibility and not used to filter: a
+	pending row's mode is only filled in later (see set_missing_values), so filtering on it
+	would drop every unassigned row.
 	"""
 	shortcodes = _mpesa_shortcodes_for_company(company)
 	if not shortcodes:
 		return {"count": 0, "payments": [], "shortcodes": []}
 
-	base_filters = {"docstatus": 0, "businessshortcode": ["in", shortcodes]}
-	total_count = frappe.db.count("Mpesa C2B Payment Register", base_filters)
+	has_money_left = """
+		reg.businessshortcode IN %(codes)s
+		AND reg.docstatus < 2
+		AND (
+			(reg.docstatus = 0 AND IFNULL(reg.payment_entry, '') = '' AND reg.transamount > 0)
+			OR (pe.docstatus = 1 AND pe.unallocated_amount > 0)
+		)
+	"""
+	params = {"codes": tuple(shortcodes)}
+	total_count = frappe.db.sql(
+		f"""SELECT COUNT(*) FROM `tabMpesa C2B Payment Register` reg
+		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
+		WHERE {has_money_left}""",
+		params,
+	)[0][0]
 
 	payments = []
 	search = (search or "").strip()
 	if len(search) >= 3:
-		s = f"%{search}%"
-		payments = frappe.get_all(
-			"Mpesa C2B Payment Register",
-			filters=base_filters,
-			or_filters=[
-				["full_name", "like", s],
-				["transid", "like", s],
-				["billrefnumber", "like", s],
-				["msisdn", "like", s],
-			],
-			fields=[
-				"name",
-				"full_name",
-				"transamount",
-				"transid",
-				"msisdn",
-				"posting_date",
-				"billrefnumber",
-				"businessshortcode",
-				"creation",
-			],
-			order_by="creation desc",
-			limit_page_length=100,
+		params["s"] = f"%{search}%"
+		rows = frappe.db.sql(
+			f"""
+			SELECT reg.name, reg.full_name, reg.transamount, reg.transid, reg.msisdn,
+				reg.posting_date, reg.billrefnumber, reg.businessshortcode, reg.creation
+			FROM `tabMpesa C2B Payment Register` reg
+			LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
+			WHERE {has_money_left}
+				AND (reg.full_name LIKE %(s)s OR reg.transid LIKE %(s)s
+					OR reg.billrefnumber LIKE %(s)s OR reg.msisdn LIKE %(s)s)
+			ORDER BY reg.creation DESC
+			LIMIT 100
+			""",
+			params,
+			as_dict=True,
 		)
+		stk_used = _stk_used_transids([r.transid for r in rows if r.transid])
+		for r in rows:
+			if r.transid in stk_used:
+				continue
+			bal = _receipt_balance(r.name)
+			if bal.state not in ("new", "open"):
+				continue
+			used_count = (
+				frappe.db.count(
+					"Payment Entry Reference",
+					{
+						"parent": bal.payment_entry,
+						"reference_doctype": "Sales Invoice",
+						"allocated_amount": [">", 0],
+					},
+				)
+				if bal.payment_entry
+				else 0
+			)
+			payments.append(
+				{
+					**r,
+					"state": bal.state,
+					"open_amount": bal.open_amount,
+					"payment_entry": bal.payment_entry,
+					"held_by": bal.held_by,
+					"used_count": used_count,
+					"selectable": not bal.held_by or not customer or bal.held_by == customer,
+				}
+			)
 
 	return {"count": total_count, "payments": payments, "shortcodes": shortcodes}
 
@@ -167,43 +376,54 @@ def process_mpesa(
 			)
 		)
 
-	register_rows = []
+	on_invoice = {c.mpesa_c2b_payment_register for c in invoice.get("custom_mpesa_reconciled_payments") or []}
+	picked = []
 	invalid = []
 	for name in names:
 		if not frappe.db.exists("Mpesa C2B Payment Register", name):
 			invalid.append(_("{0} (not found)").format(name))
 			continue
-		row = frappe.get_doc("Mpesa C2B Payment Register", name)
-		if row.docstatus != 0:
-			invalid.append(_("{0} (already consumed, docstatus={1})").format(name, row.docstatus))
-			continue
-		if not flt(row.transamount) > 0:
-			invalid.append(_("{0} (invalid amount: {1})").format(name, row.transamount))
-			continue
-		register_rows.append(row)
+		bal = _receipt_balance(name)
+		label = bal.transid or name
+		if name in on_invoice:
+			invalid.append(_("{0} (already on this invoice)").format(label))
+		elif bal.state == "spent":
+			invalid.append(_("{0} (nothing left on it)").format(label))
+		elif bal.state not in ("new", "open"):
+			invalid.append(
+				_("{0} (cannot be used: cancelled, or its Payment Entry is not a submitted customer receipt)").format(
+					label
+				)
+			)
+		elif bal.held_by and bal.held_by != invoice.customer:
+			invalid.append(
+				_("{0} (held by {1}; switch the sale to that customer to use it)").format(label, bal.held_by)
+			)
+		else:
+			picked.append((frappe.get_doc("Mpesa C2B Payment Register", name), bal))
 
 	if invalid:
-		frappe.throw(_("Cannot reconcile the following Mpesa payment(s): {0}").format("; ".join(invalid)))
+		frappe.throw(_("Cannot use these M-Pesa receipts: {0}").format("; ".join(invalid)))
 
-	total_amount = sum(flt(row.transamount) for row in register_rows)
+	total_amount = sum(flt(bal.open_amount) for _row, bal in picked)
 
 	payments_added = [
-		{"mode_of_payment": mode_of_payment, "amount": row.transamount, "reference": row.transid}
-		for row in register_rows
+		{"mode_of_payment": mode_of_payment, "amount": bal.open_amount, "reference": row.transid}
+		for row, bal in picked
 	]
 
-	# Traceability only -- the register rows themselves stay untouched
-	# (docstatus=0) until the invoice is actually submitted; see
-	# `_finalize_mpesa_reconciliation`.
-	for row in register_rows:
+	# Traceability only: a new receipt's register row stays a draft until the invoice is
+	# submitted (see `_finalize_mpesa_reconciliation`); an open one already names its entry.
+	for row, bal in picked:
 		invoice.append(
 			"custom_mpesa_reconciled_payments",
 			{
 				"mpesa_c2b_payment_register": row.name,
 				"transid": row.transid,
-				"amount": row.transamount,
+				"amount": bal.open_amount,
 				"msisdn": row.msisdn,
 				"mode_of_payment": mode_of_payment,
+				"payment_entry": bal.payment_entry,
 			},
 		)
 
@@ -212,7 +432,7 @@ def process_mpesa(
 	result = {
 		"success": True,
 		"payments_added": payments_added,
-		"mpesa_payments": [{"name": row.name, "amount": row.transamount} for row in register_rows],
+		"mpesa_payments": [{"name": row.name, "amount": bal.open_amount} for row, bal in picked],
 		"total_amount": total_amount,
 		"saved": True,
 		"submitted": False,
@@ -234,6 +454,39 @@ def _pending_mpesa_rows(invoice) -> list:
 		child
 		for child in invoice.get("custom_mpesa_reconciled_payments") or []
 		if frappe.db.get_value("Mpesa C2B Payment Register", child.mpesa_c2b_payment_register, "docstatus") == 0
+	]
+
+
+def _refuse_if_used_meanwhile(doctype: str, name: str, field: str, current, transid: str | None):
+	"""Refuse when another till changed this receipt after our transaction began.
+
+	The row lock (`FOR UPDATE`) returns the row as it is now, but MariaDB's repeatable-read
+	snapshot keeps showing every other read in this transaction the row as it was when the
+	transaction started. ERPNext's reconciliation reads the Payment Entry that way, so going
+	on would either trip its "modified after you pulled it" check or, worse, write the entry
+	back from stale figures and undo the other till's allocation. A resubmit runs in a fresh
+	transaction and sees the receipt as it now stands.
+	"""
+	snapshot = frappe.db.sql(f"SELECT `{field}` FROM `tab{doctype}` WHERE name=%s", name)
+	was = snapshot[0][0] if snapshot else None
+	same = (flt(was) == flt(current)) if field == "unallocated_amount" else ((was or None) == (current or None))
+	if not same or not snapshot:
+		frappe.throw(
+			_("{0} was used on another sale a moment ago. Submit again to use what is left on it.").format(
+				transid or name
+			),
+			title=_("Receipt just used"),
+		)
+
+
+def _usable_mpesa_rows(invoice) -> list:
+	"""Recorded trace rows whose receipt can still pay: new (no entry yet) or open (its
+	entry has money left). Minting and allocation go by this; finalise still consumes only
+	the draft register rows (`_pending_mpesa_rows`)."""
+	return [
+		child
+		for child in invoice.get("custom_mpesa_reconciled_payments") or []
+		if _receipt_balance(child.mpesa_c2b_payment_register).state in ("new", "open")
 	]
 
 
@@ -267,20 +520,28 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 	whatever its billref happens to match. Returns {register_row_name: payment_entry_name}
 	and sets `child.payment_entry` on the draft; the caller saves the draft.
 
-	Only receipts whose register row is still unconsumed are minted, the same filter the
-	caller allocates by: a trace row whose receipt was spent elsewhere is stale, and an
-	entry for it would be money nothing ever allocates.
+	Only receipts that can still pay are minted or reused, the same filter the caller
+	allocates by: a trace row whose receipt was spent elsewhere is stale.
 	"""
 	from frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry import create_payment_entry
 
 	by_register = {}
-	for child in _pending_mpesa_rows(invoice):
+	for child in _usable_mpesa_rows(invoice):
 		register = child.mpesa_c2b_payment_register
-		existing = child.payment_entry or frappe.db.get_value(
-			"Mpesa C2B Payment Register", register, "payment_entry"
+		# Lock the register row: two tills picking the same new receipt must end up on one
+		# entry, so the second waits here and then finds the entry the first linked.
+		locked = frappe.db.sql(
+			"SELECT payment_entry FROM `tabMpesa C2B Payment Register` WHERE name=%s FOR UPDATE", register
 		)
+		linked = locked[0][0] if locked else None
+		_refuse_if_used_meanwhile("Mpesa C2B Payment Register", register, "payment_entry", linked, child.transid)
+		existing = linked or child.payment_entry or _klik_entry_for_transid(child.transid)
 		if existing and frappe.db.get_value("Payment Entry", existing, "docstatus") == 1:
 			child.payment_entry = existing
+			if not linked:
+				frappe.db.set_value(
+					"Mpesa C2B Payment Register", register, "payment_entry", existing, update_modified=False
+				)
 			by_register[register] = existing
 			continue
 
@@ -297,6 +558,8 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 			submit=1,
 		)
 		_stamp_klik_fields(pe, invoice, child)
+		# Linked now, not at finalise: the register row is how the next till finds this entry.
+		frappe.db.set_value("Mpesa C2B Payment Register", register, "payment_entry", pe.name, update_modified=False)
 		child.payment_entry = pe.name
 		by_register[register] = pe.name
 
@@ -343,29 +606,83 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		)
 
-	children = _pending_mpesa_rows(invoice)
+	children = _usable_mpesa_rows(invoice)
 	if not children:
 		return empty
 
 	_assert_cancellation_releases_payments()
 
-	by_register = _ensure_receipt_payment_entries(invoice)
+	balances = {c.name: _receipt_balance(c.mpesa_c2b_payment_register) for c in children}
+
+	# A retry re-enters with the advances of an earlier attempt still on the draft. They
+	# recorded what each receipt held then; another till may have drawn on it since, and a
+	# stale advance fails ERPNext's reconciliation after the invoice is already submitted.
+	# So the receipts' advances are rebuilt from the locked balances every time.
+	receipt_entries = {b.payment_entry for b in balances.values() if b.payment_entry}
+	receipt_entries |= {c.payment_entry for c in children if c.payment_entry}
+	invoice.set(
+		"advances",
+		[a for a in invoice.get("advances") or [] if a.reference_name not in receipt_entries],
+	)
 
 	payable = flt(invoice.rounded_total) or flt(invoice.grand_total)
 	already_paid = sum(flt(p.amount) for p in invoice.get("payments") or [])
 	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
 	remaining = max(payable - already_paid - already_advanced, 0.0)
 
-	# A retry re-enters here with the advances of the last attempt still on the draft.
-	existing_refs = {a.reference_name for a in invoice.get("advances") or []}
+	# A receipt the sale turns out not to need - the cashier took cash instead, or picked
+	# one receipt too many - is let go before anything is minted: an entry for it would
+	# consume the receipt and tie it to this customer for money this sale never took.
+	planned = remaining
+	for child in list(children):
+		share = min(flt(balances[child.name].open_amount), planned)
+		planned -= share
+		if share <= 0:
+			invoice.remove(child)
+			children.remove(child)
+	if not children:
+		invoice.save(ignore_permissions=True)
+		return empty
+
+	by_register = _ensure_receipt_payment_entries(invoice)
 
 	summary = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
 	for child in children:
 		pe_name = by_register[child.mpesa_c2b_payment_register]
-		pe = frappe.get_doc("Payment Entry", pe_name)
-		available = flt(pe.unallocated_amount)
+		# Lock the entry and read what is left under the lock: another till drawing on the
+		# same receipt waits here until this sale commits, then sees the reduced balance.
+		pe_row = frappe.db.sql(
+			"""SELECT unallocated_amount, party, source_exchange_rate, remarks
+			FROM `tabPayment Entry` WHERE name=%s FOR UPDATE""",
+			pe_name,
+			as_dict=True,
+		)[0]
+		if pe_row.party != invoice.customer:
+			frappe.throw(
+				_("{0} is held by {1}; switch the sale to that customer to use it.").format(
+					child.transid, pe_row.party
+				)
+			)
+		available = flt(pe_row.unallocated_amount)
+		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
+		if available < flt(child.amount) and remaining > available:
+			last = frappe.db.get_value(
+				"Payment Entry Reference",
+				{"parent": pe_name, "reference_doctype": "Sales Invoice"},
+				"reference_name",
+				order_by="creation desc",
+			)
+			frappe.throw(
+				_(
+					"{0} has only {1} left now; it was used on {2} a moment ago. Pick another receipt or take the rest another way."
+				).format(
+					child.transid,
+					frappe.format_value(available, {"fieldtype": "Currency"}),
+					last or _("another sale"),
+				)
+			)
 		take = min(available, remaining) if remaining > 0 else 0.0
-		if take > 0 and pe_name not in existing_refs:
+		if take > 0:
 			invoice.append(
 				"advances",
 				{
@@ -374,12 +691,12 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 					"reference_row": None,
 					"advance_amount": available,
 					"allocated_amount": take,
-					"ref_exchange_rate": flt(pe.source_exchange_rate) or 1,
-					"remarks": pe.remarks,
+					"ref_exchange_rate": flt(pe_row.source_exchange_rate) or 1,
+					"remarks": pe_row.remarks,
 				},
 			)
 			remaining -= take
-		child.allocated_amount = take if pe_name not in existing_refs else child.allocated_amount
+		child.allocated_amount = take
 		summary["received_total"] += flt(child.amount)
 		summary["allocated_total"] += flt(child.allocated_amount)
 		summary["by_register"][child.mpesa_c2b_payment_register] = {
