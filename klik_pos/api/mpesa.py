@@ -27,7 +27,7 @@ from contextlib import contextmanager
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 def _mpesa_shortcodes_for_company(company: str) -> list[str]:
@@ -119,6 +119,68 @@ def _stk_used_transids(transids: list[str]) -> set[str]:
 	)
 	return {r[0] for r in rows}
 
+
+
+def _mpesa_modes() -> set[str]:
+	"""Modes whose money is M-Pesa: Phone-type Modes of Payment, and whatever a register URL
+	maps a shortcode to. A bank's own M-Pesa collection mode (Bank type) is not one."""
+	cached = getattr(frappe.local, "_klik_mpesa_modes", None)
+	if cached is None:
+		cached = set(frappe.get_all("Mode of Payment", filters={"type": "Phone"}, pluck="name"))
+		cached |= {m for m in frappe.get_all("Mpesa C2B Payment Register URL", pluck="mode_of_payment") if m}
+		frappe.local._klik_mpesa_modes = cached
+	return cached
+
+
+def is_mpesa_mode(mode: str | None) -> bool:
+	return bool(mode) and mode in _mpesa_modes()
+
+
+def _stk_backs(payment_row, invoice_name: str) -> bool:
+	"""A completed STK push for at least this row's amount, not already used on another sale."""
+	request = payment_row.get("custom_reference_text")
+	if not request or not frappe.db.exists("Mpesa Express Request", request):
+		return False
+	req = frappe.db.get_value(
+		"Mpesa Express Request", request, ["status", "transaction_id", "amount"], as_dict=True
+	)
+	if req.status != "Completed" or not req.transaction_id or flt(req.amount) < flt(payment_row.amount):
+		return False
+	used_elsewhere = frappe.db.sql(
+		"""SELECT 1 FROM `tabSales Invoice Payment` sip
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE sip.custom_reference_text = %s AND si.name != %s AND si.docstatus = 1 LIMIT 1""",
+		(request, invoice_name),
+	)
+	return not used_elsewhere
+
+
+def assert_mpesa_rows_backed(invoice) -> None:
+	"""Refuse M-Pesa money that no receipt stands behind.
+
+	Receipt-paid M-Pesa reaches a sale as an advance from the receipt's Payment Entry and
+	leaves only a zero placeholder row here; an amount typed straight into an M-Pesa row
+	posts to the M-Pesa account on its own, and when the real receipt is later reconciled
+	the same money is counted twice. So a positive M-Pesa payment row passes only when it is
+	a completed STK push not already used on another sale. Returns are refunds and exempt.
+	"""
+	if not cint(invoice.get("is_pos")) or cint(invoice.get("is_return")):
+		return
+	unbacked = [
+		p
+		for p in invoice.get("payments") or []
+		if is_mpesa_mode(p.mode_of_payment) and flt(p.amount) > 0 and not _stk_backs(p, invoice.name)
+	]
+	if unbacked:
+		frappe.throw(
+			"<br>".join(
+				_(
+					"{0} shows {1} with no M-Pesa receipt behind it. Pick the receipt from M-Pesa options, or send an STK push."
+				).format(p.mode_of_payment, frappe.format_value(p.amount, {"fieldtype": "Currency"}))
+				for p in unbacked
+			),
+			title=_("M-Pesa not received"),
+		)
 
 @frappe.whitelist()
 def get_mpesa_payments(

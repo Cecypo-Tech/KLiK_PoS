@@ -4307,6 +4307,10 @@ def _needs_shift_check(doc):
 
 class CustomSalesInvoice(SalesInvoice):
 	def before_submit(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		assert_mpesa_rows_backed(self)
+
 		if _needs_shift_check(self):
 			# ERPNext only runs this from validate_created_using_pos, which klik never
 			# reaches (it never sets is_created_using_pos). Call it directly so a klik

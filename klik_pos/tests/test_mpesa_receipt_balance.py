@@ -213,3 +213,109 @@ class TestDrawDown(ReceiptCase):
 		second = self._sell(200, receipt)
 		second.cancel()
 		self.assertEqual(flt(_receipt_balance(receipt.name).open_amount), 700)
+
+
+PHONE_MODE = "_Test Klik Mpesa Phone"
+
+
+def _ensure_phone_mode():
+	if not frappe.db.exists("Mode of Payment", PHONE_MODE):
+		frappe.get_doc(
+			{
+				"doctype": "Mode of Payment",
+				"mode_of_payment": PHONE_MODE,
+				"type": "Phone",
+				"accounts": [{"company": COMPANY, "default_account": "_Test Bank - _TC"}],
+			}
+		).insert(ignore_permissions=True)
+	frappe.local._klik_mpesa_modes = None
+
+
+class TestNoReceiptNoMpesa(ReceiptCase):
+	def setUp(self):
+		_ensure_phone_mode()
+
+	def _typed(self, amount=100, reference=None):
+		invoice = self._draft(rate=amount)
+		invoice.set("payments", [{"mode_of_payment": PHONE_MODE, "amount": amount, "custom_reference_text": reference}])
+		return invoice
+
+	def _stk(self, status="Completed", amount=100, transaction_id="STKTX1"):
+		doc = frappe.get_doc(
+			{
+				"doctype": "Mpesa Express Request",
+				"status": status,
+				"amount": amount,
+				"transaction_id": transaction_id,
+				"phone_number": "254700000001",
+			}
+		)
+		doc.name = f"MEXP-TEST-{frappe.generate_hash(length=8)}"
+		doc.db_insert()
+		return doc.name
+
+	def test_a_typed_mpesa_amount_is_refused(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			assert_mpesa_rows_backed(self._typed())
+
+	def test_a_completed_stk_push_backs_the_row(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		assert_mpesa_rows_backed(self._typed(reference=self._stk()))
+
+	def test_a_failed_stk_push_does_not(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			assert_mpesa_rows_backed(self._typed(reference=self._stk(status="Failed", transaction_id=None)))
+
+	def test_an_stk_push_smaller_than_the_row_does_not(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			assert_mpesa_rows_backed(self._typed(amount=500, reference=self._stk(amount=100)))
+
+	def test_a_zero_placeholder_row_passes(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		invoice = self._typed()
+		invoice.payments[0].amount = 0
+		assert_mpesa_rows_backed(invoice)
+
+	def test_a_return_is_exempt(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		invoice = self._typed()
+		invoice.is_return = 1
+		assert_mpesa_rows_backed(invoice)
+
+	def test_non_mpesa_modes_are_untouched(self):
+		from klik_pos.api.mpesa import is_mpesa_mode
+
+		self.assertTrue(is_mpesa_mode(PHONE_MODE))
+		self.assertFalse(is_mpesa_mode("Cash"))
+
+	def test_submit_runs_the_check(self):
+		invoice = self._typed()
+		invoice.save()
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			invoice.submit()
+
+	def test_an_stk_push_already_used_on_another_sale_does_not(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		req = self._stk()
+		first = self._typed(reference=req)
+		first.save()
+		first.submit()
+		with self.assertRaisesRegex(frappe.ValidationError, "no M-Pesa receipt behind it"):
+			assert_mpesa_rows_backed(self._typed(reference=req))
+
+	def test_search_hides_a_receipt_already_paid_by_stk(self):
+		receipt = self._receipt(100)
+		paid = self._typed(reference=self._stk(transaction_id=receipt.transid))
+		paid.save()
+		paid.submit()
+		self.assertNotIn(receipt.name, self._search(receipt))
