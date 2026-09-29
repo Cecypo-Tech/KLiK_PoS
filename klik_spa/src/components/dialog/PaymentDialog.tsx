@@ -1019,7 +1019,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setPaymentAmounts((amts) => ({ ...amts, [methodId]: 0 }));
     } else {
       // turn on: fill what is owed, or take over from a single row holding the whole sale
-      setPaymentAmounts((amts) => toggleOn(amts, methodId, checkoutPayableTotal));
+      const backedByMpesa =
+        mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "completed") ? [mpesaFlow.modeOfPayment] : [];
+      setPaymentAmounts((amts) => toggleOn(amts, methodId, checkoutPayableTotal, backedByMpesa));
       setLastModifiedMethodId(methodId);
       setActiveMethodId(methodId);
     }

@@ -23,4 +23,10 @@ describe("toggleOn", () => {
     // Cash tendered 5000 for a 4002 sale is change for the customer, not M-Pesa money.
     expect(toggleOn({ Cash: 5000, "Mpesa-1": 0 }, "Mpesa-1", 4002)).toEqual({ Cash: 5000, "Mpesa-1": 0 });
   });
+
+  it("never takes over from a row that picked receipts or a completed STK push stand behind", () => {
+    // M-Pesa holds the sale from a picked receipt; ticking Cash must not quietly move it,
+    // or the receipt is consumed for a sale that took nothing from it.
+    expect(toggleOn({ Cash: 0, "Mpesa-1": 4002 }, "Cash", 4002, ["Mpesa-1"])).toEqual({ Cash: 0, "Mpesa-1": 4002 });
+  });
 });

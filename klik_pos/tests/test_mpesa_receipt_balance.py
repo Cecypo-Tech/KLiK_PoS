@@ -431,3 +431,28 @@ class TestTillKnowsTheMpesaModes(NoReceiptCase):
 			frappe.form_dict.pop("pos_profile", None)
 		self.assertIs(modes[PHONE_MODE]["is_mpesa"], True)
 		self.assertIs(modes["Cash"]["is_mpesa"], False)
+
+
+class TestUnneededReceipt(ReceiptCase):
+	def test_a_picked_receipt_the_sale_does_not_need_stays_untouched(self):
+		needed, spare = self._receipt(500), self._receipt(400)
+		invoice = self._record(self._draft(rate=300), needed, spare)
+		summary = _allocate_receipts_before_submit(invoice)
+		invoice.reload()
+		invoice.submit()
+		_finalize_mpesa_reconciliation(invoice, summary)
+
+		self.assertEqual(flt(summary["allocated_total"]), 300)
+		self.assertEqual(_receipt_balance(spare.name).state, "new", "no entry minted for it, not held by anyone")
+		self.assertEqual(frappe.db.get_value("Mpesa C2B Payment Register", spare.name, "docstatus"), 0)
+		self.assertEqual(
+			[c.mpesa_c2b_payment_register for c in invoice.custom_mpesa_reconciled_payments], [needed.name]
+		)
+
+	def test_cash_that_covers_the_sale_leaves_the_picked_receipt_untouched(self):
+		receipt = self._receipt(500)
+		invoice = self._record(self._draft(rate=300), receipt)
+		invoice.set("payments", [{"mode_of_payment": "Cash", "amount": 300}])
+		invoice.save()
+		_allocate_receipts_before_submit(invoice)
+		self.assertEqual(_receipt_balance(receipt.name).state, "new")

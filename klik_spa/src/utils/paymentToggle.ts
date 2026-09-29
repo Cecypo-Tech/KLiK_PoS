@@ -6,10 +6,17 @@ import { roundCurrency } from "./currencyMath";
  * Ticking a row fills what the sale still owes. When nothing is owed because one other
  * row already holds exactly the whole sale - the default Cash row is pre-filled with the
  * total - ticking means "pay this way instead", so that amount moves to the ticked row.
- * A split across several rows, or a row holding more than the sale (cash tendered with
- * change), is the cashier's own arithmetic and stays as it is.
+ * A split across several rows, a row holding more than the sale (cash tendered with
+ * change), or a row money already arrived for (picked receipts, a completed STK push) is
+ * left as it is.
  */
-export function toggleOn(amounts: Record<string, number>, methodId: string, payable: number): Record<string, number> {
+export function toggleOn(
+  amounts: Record<string, number>,
+  methodId: string,
+  payable: number,
+  /** Rows backed by picked receipts or a completed STK push: never emptied by a toggle. */
+  lockedIds: string[] = [],
+): Record<string, number> {
   const others = Object.entries(amounts).filter(([id, v]) => id !== methodId && (Number(v) || 0) > 0);
   const othersTotal = others.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
   const remaining = roundCurrency(Math.max(0, payable - othersTotal));
@@ -18,5 +25,6 @@ export function toggleOn(amounts: Record<string, number>, methodId: string, paya
   const holder = others[0];
   if (!holder || roundCurrency(Number(holder[1])) !== roundCurrency(payable)) return { ...amounts, [methodId]: 0 };
   const [holderId] = holder;
+  if (lockedIds.includes(holderId)) return { ...amounts, [methodId]: 0 };
   return { ...amounts, [holderId]: 0, [methodId]: roundCurrency(payable) };
 }

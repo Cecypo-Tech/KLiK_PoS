@@ -612,13 +612,14 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 
 	_assert_cancellation_releases_payments()
 
-	by_register = _ensure_receipt_payment_entries(invoice)
+	balances = {c.name: _receipt_balance(c.mpesa_c2b_payment_register) for c in children}
 
 	# A retry re-enters with the advances of an earlier attempt still on the draft. They
 	# recorded what each receipt held then; another till may have drawn on it since, and a
 	# stale advance fails ERPNext's reconciliation after the invoice is already submitted.
 	# So the receipts' advances are rebuilt from the locked balances every time.
-	receipt_entries = set(by_register.values())
+	receipt_entries = {b.payment_entry for b in balances.values() if b.payment_entry}
+	receipt_entries |= {c.payment_entry for c in children if c.payment_entry}
 	invoice.set(
 		"advances",
 		[a for a in invoice.get("advances") or [] if a.reference_name not in receipt_entries],
@@ -628,6 +629,22 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	already_paid = sum(flt(p.amount) for p in invoice.get("payments") or [])
 	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
 	remaining = max(payable - already_paid - already_advanced, 0.0)
+
+	# A receipt the sale turns out not to need - the cashier took cash instead, or picked
+	# one receipt too many - is let go before anything is minted: an entry for it would
+	# consume the receipt and tie it to this customer for money this sale never took.
+	planned = remaining
+	for child in list(children):
+		share = min(flt(balances[child.name].open_amount), planned)
+		planned -= share
+		if share <= 0:
+			invoice.remove(child)
+			children.remove(child)
+	if not children:
+		invoice.save(ignore_permissions=True)
+		return empty
+
+	by_register = _ensure_receipt_payment_entries(invoice)
 
 	summary = {"received_total": 0.0, "allocated_total": 0.0, "by_register": {}}
 	for child in children:
