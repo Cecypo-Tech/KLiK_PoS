@@ -5,7 +5,7 @@ import type { PaymentMethod } from "./types";
 import { isReferenceMethod } from "./paymentIcons";
 import { partitionPaymentMethods } from "../../utils/paymentMethodVisibility";
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
-import { clickCameFromControl } from "../../utils/rowClick";
+import { clickCameFromControl, isIncidentalClick } from "../../utils/rowClick";
 
 interface PaymentMethodsProps {
   paymentMethods: PaymentMethod[];
@@ -76,6 +76,7 @@ export default function PaymentMethods({
               key={method.id}
               onClick={(e) => {
                 if (disabled || clickCameFromControl(e.target, e.currentTarget)) return;
+                if (isIncidentalClick(e.detail, window.getSelection()?.toString() ?? "")) return;
                 onToggle(method.id);
               }}
               className={`flex flex-wrap items-center gap-3 px-3 py-2 transition-colors ${
@@ -86,7 +87,10 @@ export default function PaymentMethods({
             >
               <button
                 type="button"
-                onClick={() => onToggle(method.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(method.id);
+                }}
                 disabled={disabled}
                 title="Use this method (fill outstanding)"
                 className={`shrink-0 ${disabled ? "cursor-not-allowed opacity-50" : "hover:text-beveren-600"} ${isActive ? "text-beveren-600" : "text-gray-400"}`}

@@ -14,3 +14,12 @@ export function clickCameFromControl(target: EventTarget | null, row: Element): 
   const control = el.closest(CONTROLS);
   return !!control && row.contains(control);
 }
+
+/**
+ * True for a click the cashier did not mean as a toggle: the second (or third) click of a
+ * double-click, which would flip the row straight back, and the click that ends a drag to
+ * select text such as the method name.
+ */
+export function isIncidentalClick(detail: number, selectedText: string): boolean {
+  return detail > 1 || selectedText.length > 0;
+}

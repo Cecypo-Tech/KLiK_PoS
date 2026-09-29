@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clickCameFromControl } from "./rowClick";
+import { clickCameFromControl, isIncidentalClick } from "./rowClick";
 
 // A stand-in for the DOM: each node knows its tag and parent, which is all closest() and
 // contains() need.
@@ -56,5 +56,20 @@ describe("clickCameFromControl", () => {
 
   it("is false when the target is not an element", () => {
     expect(clickCameFromControl(null, asElement(row))).toBe(false);
+  });
+});
+
+describe("isIncidentalClick", () => {
+  it("is false for an ordinary single click", () => {
+    expect(isIncidentalClick(1, "")).toBe(false);
+  });
+
+  it("is true for the second click of a double-click, so the row toggles once, not twice", () => {
+    expect(isIncidentalClick(2, "")).toBe(true);
+    expect(isIncidentalClick(3, "")).toBe(true);
+  });
+
+  it("is true when the click ends a text selection, such as dragging across the method name", () => {
+    expect(isIncidentalClick(1, "Mpesa-160745")).toBe(true);
   });
 });
