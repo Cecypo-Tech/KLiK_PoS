@@ -17,11 +17,15 @@ export interface SummaryInput {
  *
  * ERPNext spreads an order discount over the lines in proportion, so its pre-tax share is
  * the entered amount scaled by net / (grand - shipping); the subtotal before the discount
- * is net_total plus that share.
+ * is net_total plus that share, and the discount is what balances the rows to the total.
  */
 export function summaryFigures(p: SummaryInput): { subtotal: number; discount: number; tax: number } {
   const tax = roundCurrency(Math.max(0, p.taxTotal - p.shipping));
   const taxedBase = p.grandTotal - p.shipping;
-  const discount = p.discount > 0 && taxedBase > 0 ? roundCurrency((p.discount * p.netTotal) / taxedBase) : 0;
-  return { subtotal: roundCurrency(p.netTotal + discount), discount, tax };
+  if (!(p.discount > 0 && taxedBase > 0)) return { subtotal: roundCurrency(p.netTotal), discount: 0, tax };
+  const subtotal = roundCurrency(p.netTotal + (p.discount * p.netTotal) / taxedBase);
+  // The discount balances the rows: ERPNext's own net + taxes can sit a cent off its grand
+  // total once a discount is spread over the lines, and the summary must add up exactly.
+  const discount = roundCurrency(subtotal + tax + p.shipping - p.grandTotal);
+  return { subtotal, discount, tax };
 }

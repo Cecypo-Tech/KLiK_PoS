@@ -25,4 +25,12 @@ describe("summaryFigures", () => {
     expect(f).toEqual({ subtotal: 100, discount: 0, tax: 16 });
     expect(adds(f, 100)).toBe(216);
   });
+
+  it("adds up to the cent even where ERPNext's own figures are a cent apart", () => {
+    // Real dev preview: 850 exclusive sale, 50 off. net 689.66 + tax 110.35 = 800.01, yet
+    // ERPNext's grand total is 800.00; the discount takes the cent.
+    const f = summaryFigures({ netTotal: 689.66, taxTotal: 110.35, grandTotal: 800, discount: 50, shipping: 0 });
+    expect(f.subtotal).toBe(732.76);
+    expect(adds(f)).toBe(800);
+  });
 });
