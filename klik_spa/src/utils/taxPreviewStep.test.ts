@@ -18,6 +18,14 @@ describe("taxPreviewStep", () => {
     expect(taxPreviewStep({ ...ready, isOpen: false })).toBe("clear");
     expect(taxPreviewStep({ ...ready, hasCustomer: false })).toBe("clear");
     expect(taxPreviewStep({ ...ready, cartCount: 0 })).toBe("clear");
-    expect(taxPreviewStep({ ...ready, invoiceSubmitted: true, cartCount: 0 })).toBe("clear");
+  });
+
+  it("keeps it after submit even when Print empties the cart behind the completed screen", () => {
+    expect(taxPreviewStep({ ...ready, invoiceSubmitted: true, cartCount: 0 })).toBe("keep");
+    expect(taxPreviewStep({ ...ready, invoiceSubmitted: true, hasCustomer: false })).toBe("keep");
+  });
+
+  it("clears once the completed checkout closes", () => {
+    expect(taxPreviewStep({ ...ready, invoiceSubmitted: true, isOpen: false })).toBe("clear");
   });
 });

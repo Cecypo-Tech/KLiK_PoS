@@ -14,7 +14,10 @@ export interface TaxPreviewState {
  * and the tax as "change due".
  */
 export function taxPreviewStep(s: TaxPreviewState): "fetch" | "keep" | "clear" {
-  if (!s.isOpen || !s.hasCustomer || s.cartCount === 0) return "clear";
+  if (!s.isOpen) return "clear";
+  // Printing from the completed screen empties the cart behind it; the totals shown must
+  // still be the sale's, until the checkout closes.
   if (s.invoiceSubmitted) return "keep";
+  if (!s.hasCustomer || s.cartCount === 0) return "clear";
   return "fetch";
 }
