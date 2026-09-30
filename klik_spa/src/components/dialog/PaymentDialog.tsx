@@ -35,6 +35,10 @@ import {
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
+import { taxPreviewStep } from "../../utils/taxPreviewStep";
+import { creditSalesAllowed } from "../../utils/creditSales";
+import { exclusiveSubtotal } from "../../utils/taxLabel";
+import { summaryFigures } from "../../utils/summaryFigures";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -263,6 +267,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     || posDetails?.allow_discount_change === "1"
     || posDetails?.allow_discount_change === true;
   const allowPartialPayments = Boolean(posDetails?.allow_partial_payment);
+  const allowCreditSales = creditSalesAllowed(posDetails);
   const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
   const allow_holding_invoices = Boolean(posDetails?.allow_holding_invoices);
   const isShippingRuleEnabled =
@@ -452,14 +457,33 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Tax amount = inclusive grand total minus exclusive subtotal (works for both item templates and global taxes)
   const localTaxTotal = roundCurrency(checkoutGrandTotal - calculations.subtotal - (calculations.couponDiscount > 0 ? 0 : 0));
 
-  const displaySubtotal = hasBackendTaxPreview
-    ? Number(backendTaxPreview?.net_total || calculations.subtotal)
-    : calculations.subtotal;
+  // Before tax, always: the summary reads Subtotal + Tax = Grand Total. The server's
+  // net_total already is; the local figure carries the tax inside on an inclusive till.
+  const localSubtotal = exclusiveSubtotal(
+    calculations.subtotal,
+    calculations.isInclusive,
+    calculations.selectedTax?.rate ?? null,
+  );
+  // A Shipping Rule's charge is a row in the taxes table, but it is not tax.
+  const shippingAmount = hasBackendTaxPreview ? roundCurrency(Number(backendTaxPreview?.shipping_amount || 0)) : 0;
+  const serverFigures = hasBackendTaxPreview
+    ? summaryFigures({
+        netTotal: Number(backendTaxPreview?.net_total || 0),
+        taxTotal: Number(backendTaxPreview?.total_taxes_and_charges || 0),
+        grandTotal: Number(backendTaxPreview?.grand_total || 0),
+        discount: Number(backendTaxPreview?.discount_amount || 0),
+        shipping: shippingAmount,
+      })
+    : null;
+  const displaySubtotal = serverFigures && serverFigures.subtotal > 0 ? serverFigures.subtotal : localSubtotal;
+  // Before tax too, so Subtotal - Discount + Tax = Grand Total. The local figure is the
+  // entered amounts; it is only used while the server's preview is missing.
+  const displayDiscount = serverFigures
+    ? serverFigures.discount
+    : roundCurrency((calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0));
   const displayTaxIsIncluded = hasBackendTaxBreakdown
     ? backendTaxLines.some((line) => Number(line.included_in_print_rate) === 1)
     : calculations.isInclusive;
-  // A Shipping Rule's charge is a row in the taxes table, but it is not tax.
-  const shippingAmount = hasBackendTaxPreview ? roundCurrency(Number(backendTaxPreview?.shipping_amount || 0)) : 0;
   const displayTaxTotal = hasBackendTaxPreview
     ? roundCurrency(Math.max(0, Number(backendTaxPreview?.total_taxes_and_charges || 0) - shippingAmount))
     : calculations.taxAmount > 0 ? calculations.taxAmount : Math.max(0, localTaxTotal);
@@ -1117,7 +1141,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const previewCacheKey = JSON.stringify(previewPayload);
 
     const fetchBackendTaxPreview = async () => {
-      if (!isOpen || invoiceSubmitted || !selectedCustomer?.id || cartItems.length === 0) {
+      const step = taxPreviewStep({
+        isOpen,
+        invoiceSubmitted,
+        hasCustomer: Boolean(selectedCustomer?.id),
+        cartCount: cartItems.length,
+      });
+      if (step === "keep") return;
+      if (step === "clear" || !selectedCustomer?.id) {
         setBackendTaxPreview(null);
         backendTaxPreviewRef.current = null;
         setTaxPreviewError(null);
@@ -1918,7 +1949,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
 
-    const shouldDefaultToCredit = allowPartialPayments && defaultSalesType === "credit";
+    const shouldDefaultToCredit = allowCreditSales && defaultSalesType === "credit";
     setIsCreditSale(shouldDefaultToCredit);
 
     if (shouldDefaultToCredit) {
@@ -1927,7 +1958,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
 
     initializedCreditDefaultRef.current = true;
-  }, [isOpen, allowPartialPayments, defaultSalesType]);
+  }, [isOpen, allowCreditSales, defaultSalesType]);
 
   useEffect(() => {
     if (isOpen && defaultTax && !selectedSalesTaxCharges) {
@@ -2395,7 +2426,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
                   headerRight={
-                    allowPartialPayments ? (
+                    allowCreditSales ? (
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
@@ -2427,8 +2458,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                         onClick={() =>
                           toast.info(
                             posDetails?.name
-                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
-                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" to use them.',
                           )
                         }
                         className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
@@ -2464,8 +2495,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 <TotalsSection
                   calculations={calculations}
                   displaySubtotal={displaySubtotal}
+                  displayDiscount={displayDiscount}
                   displayTaxTotal={displayTaxTotal}
-                  displayTaxIsIncluded={displayTaxIsIncluded}
                   checkoutGrandTotal={checkoutGrandTotal}
                   loyaltyAmount={loyaltyAmount}
                   checkoutPayableTotal={checkoutPayableTotal}
@@ -2643,7 +2674,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
                   headerRight={
-                    allowPartialPayments ? (
+                    allowCreditSales ? (
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
@@ -2675,8 +2706,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                         onClick={() =>
                           toast.info(
                             posDetails?.name
-                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" on ${posDetails.name} to use them.`
-                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Partial Payment" to use them.',
+                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" on ${posDetails.name} to use them.`
+                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" to use them.',
                           )
                         }
                         className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
@@ -2735,8 +2766,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     <TotalsSection
                       calculations={calculations}
                       displaySubtotal={displaySubtotal}
+                      displayDiscount={displayDiscount}
                       displayTaxTotal={displayTaxTotal}
-                      displayTaxIsIncluded={displayTaxIsIncluded}
                       checkoutGrandTotal={checkoutGrandTotal}
                       loyaltyAmount={loyaltyAmount}
                       checkoutPayableTotal={checkoutPayableTotal}
@@ -2783,8 +2814,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               cartItems={cartItems}
               calculations={calculations}
               displaySubtotal={displaySubtotal}
+              displayDiscount={displayDiscount}
               displayTaxTotal={displayTaxTotal}
-              displayTaxIsIncluded={displayTaxIsIncluded}
               checkoutGrandTotal={checkoutGrandTotal}
               paymentAmounts={paymentAmounts}
               displayCurrencySymbol={displayCurrencySymbol}

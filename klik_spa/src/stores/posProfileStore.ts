@@ -56,6 +56,8 @@ export interface POSProfile {
   restrict_cost_visibility_in_tooltip?: boolean;
   is_default?: boolean;
   custom_autofetch_batchserial_?: boolean | number;
+  /** "Allow Credit Sales": whether the checkout offers "Is Credit Sale". */
+  custom_allow_credit_sales?: boolean | number;
   [key: string]: unknown;
 }
 

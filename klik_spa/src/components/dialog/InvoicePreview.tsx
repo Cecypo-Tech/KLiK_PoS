@@ -2,7 +2,7 @@ import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveItemRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { getItemDiscountTotal, getLineDiscount } from "../../utils/receiptDiscounts";
-import { formatTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
+import { formatSummaryTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
 import type { Calculations, PaymentAmount } from "./types";
 import type { CartItem } from "../../../types";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -18,8 +18,9 @@ interface InvoicePreviewProps {
   cartItems: CartItem[];
   calculations: Calculations;
   displaySubtotal: number;
+  /** Before tax: Subtotal - Discount + Tax = Total. */
+  displayDiscount: number;
   displayTaxTotal: number;
-  displayTaxIsIncluded: boolean;
   checkoutGrandTotal: number;
   paymentAmounts: PaymentAmount;
   displayCurrencySymbol: string;
@@ -59,8 +60,8 @@ export default function InvoicePreview({
   cartItems,
   calculations,
   displaySubtotal,
+  displayDiscount,
   displayTaxTotal,
-  displayTaxIsIncluded,
   checkoutGrandTotal,
   paymentAmounts,
   displayCurrencySymbol,
@@ -87,8 +88,9 @@ export default function InvoicePreview({
     );
   }
 
-  // Per-item and rule discounts are already inside the Subtotal, exactly as they are in
-  // the cart footer; the row exists so the customer can see what they were given.
+  // Per-item and rule discounts are already inside the line prices and so the Subtotal;
+  // they are named under the lines so the customer sees what they were given, and kept out
+  // of the Discount row, which must add up.
   const itemDiscountTotal = getItemDiscountTotal(
     cartItems.map((item) => ({
       quantity: item.quantity,
@@ -96,15 +98,9 @@ export default function InvoicePreview({
       sellRate: getEffectiveItemRate(item, { itemDiscounts, isTaxIncludedInBasicRate }),
     })),
   );
-  const totalDiscount = roundCurrency(
-    itemDiscountTotal + (calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0),
-  );
   // selectedTax only exists when a template is picked in the POS; with the company
   // default template the receipt used to print "Tax (% Excl.)" at the customer.
-  const taxLabel = formatTaxLabel(
-    getTaxRateForDisplay(taxBreakdown, calculations.selectedTax?.rate),
-    displayTaxIsIncluded,
-  );
+  const taxLabel = formatSummaryTaxLabel(getTaxRateForDisplay(taxBreakdown, calculations.selectedTax?.rate));
 
   return (
     <>
@@ -195,6 +191,11 @@ export default function InvoicePreview({
             </p>
           </div>
         ))}
+        {itemDiscountTotal > 0 && (
+          <p className="text-xs text-green-600 dark:text-green-400">
+            Includes item discounts of {formatCurrencyWithSymbol(itemDiscountTotal, displayCurrencySymbol)}
+          </p>
+        )}
       </div>
 
       <div className="border-t border-gray-200 dark:border-gray-600 pt-2 space-y-1 text-sm">
@@ -202,19 +203,15 @@ export default function InvoicePreview({
           <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
           <span className="text-gray-900 dark:text-white">{formatCurrencyWithSymbol(displaySubtotal, displayCurrencySymbol)}</span>
         </div>
-        {totalDiscount > 0 && (
+        {displayDiscount > 0 && (
           <div className="flex justify-between text-green-600 dark:text-green-400">
             <span>Discount</span>
-            <span>-{formatCurrencyWithSymbol(totalDiscount, displayCurrencySymbol)}</span>
+            <span>-{formatCurrencyWithSymbol(displayDiscount, displayCurrencySymbol)}</span>
           </div>
         )}
         <div className="flex justify-between">
           <span className="text-gray-600 dark:text-gray-400">{taxLabel}</span>
-          <span className={`${displayTaxIsIncluded ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
-            {displayTaxIsIncluded
-              ? `(${formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)})`
-              : formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}
-          </span>
+          <span className="text-gray-900 dark:text-white">{formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}</span>
         </div>
         {shippingAmount > 0 && (
           <div className="flex justify-between">

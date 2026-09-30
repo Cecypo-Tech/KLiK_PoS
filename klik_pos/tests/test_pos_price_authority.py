@@ -166,6 +166,23 @@ class TestPosPriceAuthority(FrappeTestCase):
 		self.assertEqual(flt(lines[0]["rate"]), TILL_RATE)
 		self.assertEqual(flt(lines[0]["amount"]), TILL_RATE * QTY)
 
+	def test_the_checkout_preview_returns_the_order_discount(self):
+		"""The summary splits Subtotal and Discount before tax from this figure; without it an
+		order discount was subtracted from a net_total that already had it taken out."""
+		from klik_pos.api.sales_invoice import validate_checkout_invoice
+
+		result = validate_checkout_invoice(
+			{
+				"customer": {"id": self.customer},
+				"items": [{"id": ITEM_CODE, "quantity": QTY, "price": TILL_RATE, "uom": "Nos"}],
+				"orderDiscountAmount": 10,
+				"status": "held",
+			}
+		)
+
+		self.assertTrue(result["success"], result.get("message"))
+		self.assertEqual(flt(result["tax_preview"]["discount_amount"]), 10)
+
 	def test_reasserting_prices_leaves_the_delivery_row_alone(self):
 		from klik_pos.api.sales_invoice import _reassert_pos_line_prices
 
