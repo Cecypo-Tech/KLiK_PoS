@@ -215,10 +215,19 @@ class TestDrawDown(ReceiptCase):
 		self.assertEqual(flt(_receipt_balance(receipt.name).open_amount), 700)
 
 
-PHONE_MODE = "_Test Klik Mpesa Phone"
+# ERPNext's M-Pesa integration names its mode after the Mpesa Settings record; only such a
+# configured mode is held to a receipt.
+PHONE_SETTINGS = "_Test Klik Phone"
+PHONE_MODE = f"Mpesa-{PHONE_SETTINGS}"
 
 
 def _ensure_phone_mode():
+	if not frappe.db.exists("Mpesa Settings", PHONE_SETTINGS):
+		settings = frappe.get_doc(
+			{"doctype": "Mpesa Settings", "payment_gateway_name": PHONE_SETTINGS, "company": COMPANY}
+		)
+		settings.name = PHONE_SETTINGS
+		settings.db_insert()
 	if not frappe.db.exists("Mode of Payment", PHONE_MODE):
 		frappe.get_doc(
 			{
@@ -456,3 +465,68 @@ class TestUnneededReceipt(ReceiptCase):
 		invoice.save()
 		_allocate_receipts_before_submit(invoice)
 		self.assertEqual(_receipt_balance(receipt.name).state, "new")
+
+
+class TestSitesWithoutTheMpesaApp(NoReceiptCase):
+	"""A site without frappe_mpsa_payments has no receipts to pick, and not even the register
+	tables: the no-receipt rule must stand down there, not refuse or crash."""
+
+	def _without_mpesa_app(self):
+		from unittest.mock import patch
+
+		apps = [a for a in frappe.get_installed_apps() if a != "frappe_mpsa_payments"]
+		frappe.local._klik_mpesa_modes = None
+		self.addCleanup(setattr, frappe.local, "_klik_mpesa_modes", None)
+		return patch("frappe.get_installed_apps", return_value=apps)
+
+	def test_no_mode_is_held_to_a_receipt(self):
+		from klik_pos.api.mpesa import is_mpesa_mode
+
+		with self._without_mpesa_app():
+			self.assertFalse(is_mpesa_mode(PHONE_MODE))
+
+	def test_a_phone_mode_amount_submits(self):
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed
+
+		with self._without_mpesa_app():
+			assert_mpesa_rows_backed(self._typed())
+
+	def test_the_register_url_table_is_not_read(self):
+		from unittest.mock import patch
+
+		from klik_pos.api.mpesa import is_mpesa_mode
+
+		real_get_all = frappe.get_all
+
+		def get_all(doctype, *args, **kwargs):
+			if doctype in ("Mpesa C2B Payment Register URL", "Mpesa Settings"):
+				raise frappe.DoesNotExistError(f"DocType {doctype} not found")
+			return real_get_all(doctype, *args, **kwargs)
+
+		with self._without_mpesa_app(), patch("frappe.get_all", side_effect=get_all):
+			is_mpesa_mode("Cash")
+
+
+class TestOnlyConfiguredMpesaIsHeld(ReceiptCase):
+	def test_a_phone_mode_no_mpesa_integration_maps_is_not_held_to_a_receipt(self):
+		"""With the M-Pesa app installed but not set up for a mode, that mode's money has no
+		receipts to come from: a manual 'M-Pesa' or Airtel Money mode keeps working."""
+		from klik_pos.api.mpesa import assert_mpesa_rows_backed, is_mpesa_mode
+
+		mode = "_Test Klik Unmapped Phone"
+		if not frappe.db.exists("Mode of Payment", mode):
+			frappe.get_doc(
+				{
+					"doctype": "Mode of Payment",
+					"mode_of_payment": mode,
+					"type": "Phone",
+					"accounts": [{"company": COMPANY, "default_account": "_Test Bank - _TC"}],
+				}
+			).insert(ignore_permissions=True)
+		frappe.local._klik_mpesa_modes = None
+		self.addCleanup(setattr, frappe.local, "_klik_mpesa_modes", None)
+
+		self.assertFalse(is_mpesa_mode(mode))
+		invoice = self._draft(rate=100)
+		invoice.set("payments", [{"mode_of_payment": mode, "amount": 100}])
+		assert_mpesa_rows_backed(invoice)

@@ -122,16 +122,23 @@ def _stk_used_transids(transids: list[str]) -> set[str]:
 
 
 def _mpesa_modes() -> set[str]:
-	"""Modes whose money is M-Pesa: Phone-type Modes of Payment, and whatever a register URL
-	maps a shortcode to. A bank's own M-Pesa collection mode (Bank type) is not one."""
+	"""Modes an M-Pesa integration is set up for - whose money must therefore come from a
+	receipt or an STK push: the mode a register URL maps a shortcode to, and the mode ERPNext's
+	M-Pesa integration names after each Mpesa Settings record.
+
+	A Phone-type mode on its own is not one: a manual "M-Pesa" or Airtel Money mode has no
+	receipts behind it to pick. Nor is a bank's own M-Pesa collection mode (Bank type). And
+	without frappe_mpsa_payments there is no integration - not even the register tables.
+	"""
 	cached = getattr(frappe.local, "_klik_mpesa_modes", None)
-	if cached is None:
-		cached = set(frappe.get_all("Mode of Payment", filters={"type": "Phone"}, pluck="name"))
+	if cached is not None:
+		return cached
+	cached = set()
+	if "frappe_mpsa_payments" in frappe.get_installed_apps():
 		cached |= {m for m in frappe.get_all("Mpesa C2B Payment Register URL", pluck="mode_of_payment") if m}
-		# ERPNext's M-Pesa integration names the mode it creates after the settings record.
 		settings_modes = [f"Mpesa-{name}" for name in frappe.get_all("Mpesa Settings", pluck="name")]
 		cached |= set(frappe.get_all("Mode of Payment", filters={"name": ["in", settings_modes]}, pluck="name"))
-		frappe.local._klik_mpesa_modes = cached
+	frappe.local._klik_mpesa_modes = cached
 	return cached
 
 
