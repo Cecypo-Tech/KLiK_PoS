@@ -1,7 +1,6 @@
 import json
 import re
 
-import erpnext
 import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.stock.get_item_details import get_item_details
@@ -4479,37 +4478,6 @@ class CustomSalesInvoice(SalesInvoice):
 				msg=_("Partial Payment in POS Transactions are not allowed."),
 				exc=PartialPaymentValidationError,
 			)
-
-	def get_gl_entries(self, warehouse_account=None):
-		from erpnext.accounts.general_ledger import merge_similar_entries
-
-		gl_entries = []
-
-		self.make_customer_gl_entry(gl_entries)
-
-		self.make_tax_gl_entries(gl_entries)
-		self.make_internal_transfer_gl_entries(gl_entries)
-
-		self.make_item_gl_entries(gl_entries)
-		self.make_precision_loss_gl_entry(gl_entries)
-		self.make_discount_gl_entries(gl_entries)
-
-		gl_entries = make_regional_gl_entries(gl_entries, self)
-
-		# merge gl entries before adding pos entries
-		gl_entries = merge_similar_entries(gl_entries)
-
-		self.make_loyalty_point_redemption_gle(gl_entries)
-		self.make_pos_gl_entries(gl_entries)
-
-		self.make_write_off_gl_entry(gl_entries)
-		self.make_gle_for_rounding_adjustment(gl_entries)
-
-		return gl_entries
-
-@erpnext.allow_regional
-def make_regional_gl_entries(gl_entries, doc):
-	return gl_entries
 
 
 def create_payment_entry(sales_invoice, mode_of_payment, amount_paid):
