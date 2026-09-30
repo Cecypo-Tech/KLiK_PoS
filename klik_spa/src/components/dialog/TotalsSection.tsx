@@ -1,13 +1,12 @@
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { subtractCurrency } from "../../utils/currencyMath";
 import type { BackendTaxPreview, Calculations } from "./types";
-import { formatTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
+import { formatSummaryTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabel";
 
 interface TotalsSectionProps {
   calculations: Calculations;
   displaySubtotal: number;
   displayTaxTotal: number;
-  displayTaxIsIncluded: boolean;
   checkoutGrandTotal: number;
   loyaltyAmount?: number;
   checkoutPayableTotal?: number;
@@ -28,7 +27,6 @@ export default function TotalsSection({
   calculations,
   displaySubtotal,
   displayTaxTotal,
-  displayTaxIsIncluded,
   checkoutGrandTotal,
   loyaltyAmount = 0,
   checkoutPayableTotal,
@@ -67,15 +65,12 @@ export default function TotalsSection({
             )}
             <div className="flex justify-between">
               <span className="text-gray-600 dark:text-gray-400">
-                {formatTaxLabel(
+                {formatSummaryTaxLabel(
                   getTaxRateForDisplay(backendTaxPreview?.tax_breakdown, calculations.selectedTax?.rate),
-                  displayTaxIsIncluded,
                 )}
               </span>
-              <span className={`font-medium ${displayTaxIsIncluded ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"}`}>
-                {displayTaxIsIncluded
-                  ? `(${formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)})`
-                  : formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}
+              <span className="font-medium text-gray-900 dark:text-white">
+                {formatCurrencyWithSymbol(displayTaxTotal, displayCurrencySymbol)}
               </span>
             </div>
             {shippingAmount > 0 && (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTaxRateForDisplay, formatTaxLabel } from "./taxLabel";
+import { exclusiveSubtotal, formatSummaryTaxLabel, formatTaxLabel, getTaxRateForDisplay } from "./taxLabel";
 
 describe("getTaxRateForDisplay", () => {
   it("reads the rate off a single backend tax line", () => {
@@ -61,5 +61,27 @@ describe("formatTaxLabel", () => {
   it("drops the percentage rather than printing an empty one", () => {
     expect(formatTaxLabel(null, true)).toBe("Tax (Incl.)");
     expect(formatTaxLabel(null, false)).toBe("Tax (Excl.)");
+  });
+});
+
+describe("formatSummaryTaxLabel", () => {
+  it("names the rate without Incl./Excl. - the summary adds the tax to a pre-tax subtotal either way", () => {
+    expect(formatSummaryTaxLabel(16)).toBe("Tax (16%)");
+    expect(formatSummaryTaxLabel(12.5)).toBe("Tax (12.5%)");
+    expect(formatSummaryTaxLabel(null)).toBe("Tax");
+  });
+});
+
+describe("exclusiveSubtotal", () => {
+  it("takes the tax out of a tax-inclusive subtotal", () => {
+    expect(exclusiveSubtotal(250, true, 16)).toBe(215.52);
+  });
+
+  it("leaves a tax-exclusive subtotal alone", () => {
+    expect(exclusiveSubtotal(250, false, 16)).toBe(250);
+  });
+
+  it("leaves it alone when the rate is unknown", () => {
+    expect(exclusiveSubtotal(250, true, null)).toBe(250);
   });
 });

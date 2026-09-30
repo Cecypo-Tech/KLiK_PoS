@@ -36,6 +36,7 @@ import {
 } from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
+import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -453,9 +454,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Tax amount = inclusive grand total minus exclusive subtotal (works for both item templates and global taxes)
   const localTaxTotal = roundCurrency(checkoutGrandTotal - calculations.subtotal - (calculations.couponDiscount > 0 ? 0 : 0));
 
+  // Before tax, always: the summary reads Subtotal + Tax = Grand Total. The server's
+  // net_total already is; the local figure carries the tax inside on an inclusive till.
+  const localSubtotal = exclusiveSubtotal(
+    calculations.subtotal,
+    calculations.isInclusive,
+    calculations.selectedTax?.rate ?? null,
+  );
   const displaySubtotal = hasBackendTaxPreview
-    ? Number(backendTaxPreview?.net_total || calculations.subtotal)
-    : calculations.subtotal;
+    ? Number(backendTaxPreview?.net_total || localSubtotal)
+    : localSubtotal;
   const displayTaxIsIncluded = hasBackendTaxBreakdown
     ? backendTaxLines.some((line) => Number(line.included_in_print_rate) === 1)
     : calculations.isInclusive;
@@ -2473,7 +2481,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   calculations={calculations}
                   displaySubtotal={displaySubtotal}
                   displayTaxTotal={displayTaxTotal}
-                  displayTaxIsIncluded={displayTaxIsIncluded}
                   checkoutGrandTotal={checkoutGrandTotal}
                   loyaltyAmount={loyaltyAmount}
                   checkoutPayableTotal={checkoutPayableTotal}
@@ -2744,7 +2751,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       calculations={calculations}
                       displaySubtotal={displaySubtotal}
                       displayTaxTotal={displayTaxTotal}
-                      displayTaxIsIncluded={displayTaxIsIncluded}
                       checkoutGrandTotal={checkoutGrandTotal}
                       loyaltyAmount={loyaltyAmount}
                       checkoutPayableTotal={checkoutPayableTotal}
@@ -2792,7 +2798,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               calculations={calculations}
               displaySubtotal={displaySubtotal}
               displayTaxTotal={displayTaxTotal}
-              displayTaxIsIncluded={displayTaxIsIncluded}
               checkoutGrandTotal={checkoutGrandTotal}
               paymentAmounts={paymentAmounts}
               displayCurrencySymbol={displayCurrencySymbol}
