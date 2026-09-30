@@ -1842,6 +1842,9 @@ def validate_checkout_invoice(data):
 					for row in preview_doc.get("items") or []
 				],
 				"net_total": flt(preview_doc.net_total or 0),
+				# The order discount, applied on the grand total: net_total already has its
+				# pre-tax share taken out, so the till needs it to show Subtotal - Discount.
+				"discount_amount": flt(preview_doc.discount_amount or 0),
 				"total_taxes_and_charges": flt(preview_doc.total_taxes_and_charges or 0),
 				"grand_total": flt(preview_doc.grand_total or 0),
 				"rounded_total": flt(preview_doc.rounded_total or 0),

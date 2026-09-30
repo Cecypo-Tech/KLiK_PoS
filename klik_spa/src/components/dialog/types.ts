@@ -72,6 +72,8 @@ export interface BackendTaxPreview {
   /** The lines the preview invoice actually priced. Absent on an older backend. */
   items?: BackendTaxPreviewLine[];
   net_total: number;
+  /** The order discount as entered (on the grand total). Absent on an older backend. */
+  discount_amount?: number;
   total_taxes_and_charges: number;
   grand_total: number;
   rounded_total: number;

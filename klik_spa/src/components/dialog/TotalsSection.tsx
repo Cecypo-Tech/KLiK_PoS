@@ -6,6 +6,8 @@ import { formatSummaryTaxLabel, getTaxRateForDisplay } from "../../utils/taxLabe
 interface TotalsSectionProps {
   calculations: Calculations;
   displaySubtotal: number;
+  /** Before tax: Subtotal - Discount + Tax = Grand Total. */
+  displayDiscount: number;
   displayTaxTotal: number;
   checkoutGrandTotal: number;
   loyaltyAmount?: number;
@@ -26,6 +28,7 @@ interface TotalsSectionProps {
 export default function TotalsSection({
   calculations,
   displaySubtotal,
+  displayDiscount,
   displayTaxTotal,
   checkoutGrandTotal,
   loyaltyAmount = 0,
@@ -41,7 +44,6 @@ export default function TotalsSection({
 }: TotalsSectionProps) {
   const amountDue = checkoutPayableTotal ?? checkoutGrandTotal;
   const changeDue = totalPaidAmount > amountDue ? subtractCurrency(totalPaidAmount, amountDue) : 0;
-  const totalDiscount = (calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0);
 
   return (
     <div>
@@ -57,10 +59,10 @@ export default function TotalsSection({
                 {formatCurrencyWithSymbol(displaySubtotal, displayCurrencySymbol)}
               </span>
             </div>
-            {totalDiscount > 0 && (
+            {displayDiscount > 0 && (
               <div className="flex justify-between text-green-600 dark:text-green-400">
                 <span>Discount</span>
-                <span>-{formatCurrencyWithSymbol(totalDiscount, displayCurrencySymbol)}</span>
+                <span>-{formatCurrencyWithSymbol(displayDiscount, displayCurrencySymbol)}</span>
               </div>
             )}
             <div className="flex justify-between">

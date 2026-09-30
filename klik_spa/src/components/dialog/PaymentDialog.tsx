@@ -38,6 +38,7 @@ import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
+import { summaryFigures } from "../../utils/summaryFigures";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -463,14 +464,26 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     calculations.isInclusive,
     calculations.selectedTax?.rate ?? null,
   );
-  const displaySubtotal = hasBackendTaxPreview
-    ? Number(backendTaxPreview?.net_total || localSubtotal)
-    : localSubtotal;
+  // A Shipping Rule's charge is a row in the taxes table, but it is not tax.
+  const shippingAmount = hasBackendTaxPreview ? roundCurrency(Number(backendTaxPreview?.shipping_amount || 0)) : 0;
+  const serverFigures = hasBackendTaxPreview
+    ? summaryFigures({
+        netTotal: Number(backendTaxPreview?.net_total || 0),
+        taxTotal: Number(backendTaxPreview?.total_taxes_and_charges || 0),
+        grandTotal: Number(backendTaxPreview?.grand_total || 0),
+        discount: Number(backendTaxPreview?.discount_amount || 0),
+        shipping: shippingAmount,
+      })
+    : null;
+  const displaySubtotal = serverFigures && serverFigures.subtotal > 0 ? serverFigures.subtotal : localSubtotal;
+  // Before tax too, so Subtotal - Discount + Tax = Grand Total. The local figure is the
+  // entered amounts; it is only used while the server's preview is missing.
+  const displayDiscount = serverFigures
+    ? serverFigures.discount
+    : roundCurrency((calculations.couponDiscount || 0) + (calculations.orderDiscountAmount || 0));
   const displayTaxIsIncluded = hasBackendTaxBreakdown
     ? backendTaxLines.some((line) => Number(line.included_in_print_rate) === 1)
     : calculations.isInclusive;
-  // A Shipping Rule's charge is a row in the taxes table, but it is not tax.
-  const shippingAmount = hasBackendTaxPreview ? roundCurrency(Number(backendTaxPreview?.shipping_amount || 0)) : 0;
   const displayTaxTotal = hasBackendTaxPreview
     ? roundCurrency(Math.max(0, Number(backendTaxPreview?.total_taxes_and_charges || 0) - shippingAmount))
     : calculations.taxAmount > 0 ? calculations.taxAmount : Math.max(0, localTaxTotal);
@@ -2482,6 +2495,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 <TotalsSection
                   calculations={calculations}
                   displaySubtotal={displaySubtotal}
+                  displayDiscount={displayDiscount}
                   displayTaxTotal={displayTaxTotal}
                   checkoutGrandTotal={checkoutGrandTotal}
                   loyaltyAmount={loyaltyAmount}
@@ -2752,6 +2766,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     <TotalsSection
                       calculations={calculations}
                       displaySubtotal={displaySubtotal}
+                      displayDiscount={displayDiscount}
                       displayTaxTotal={displayTaxTotal}
                       checkoutGrandTotal={checkoutGrandTotal}
                       loyaltyAmount={loyaltyAmount}
@@ -2799,6 +2814,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               cartItems={cartItems}
               calculations={calculations}
               displaySubtotal={displaySubtotal}
+              displayDiscount={displayDiscount}
               displayTaxTotal={displayTaxTotal}
               checkoutGrandTotal={checkoutGrandTotal}
               paymentAmounts={paymentAmounts}
