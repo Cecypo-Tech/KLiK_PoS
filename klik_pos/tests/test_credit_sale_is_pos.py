@@ -67,7 +67,7 @@ class TestCreditSaleNeedsNoPartialPayment(FrappeTestCase):
     """A credit sale is unpaid by design; 'Allow Credit Sales' alone must let it through,
     without also switching on 'Allow Partial Payment' for every sale on the till."""
 
-    def _unpaid_invoice(self, allow_credit_sales):
+    def _unpaid_invoice(self, allow_credit_sales, customer="_Test Customer"):
         import frappe
         from erpnext.accounts.doctype.pos_profile.test_pos_profile import make_pos_profile
 
@@ -78,6 +78,7 @@ class TestCreditSaleNeedsNoPartialPayment(FrappeTestCase):
         profile.insert(ignore_permissions=True)
         invoice = frappe.new_doc("Sales Invoice")
         invoice.pos_profile = profile.name
+        invoice.customer = customer
         invoice.grand_total = invoice.rounded_total = 100
         invoice.paid_amount = 0
         invoice.total_advance = 0
@@ -91,3 +92,29 @@ class TestCreditSaleNeedsNoPartialPayment(FrappeTestCase):
 
         with self.assertRaises(PartialPaymentValidationError):
             self._unpaid_invoice(allow_credit_sales=0).validate_full_payment()
+
+    def test_an_unpaid_walk_in_sale_is_refused_even_on_a_credit_till(self):
+        """A credit sale needs a named customer, so an unpaid walk-in invoice is not one."""
+        import frappe
+
+        from klik_pos.api.sales_invoice import PartialPaymentValidationError
+
+        walk_in = frappe.db.get_value("Customer", {"custom_is_walkin": 1}, "name")
+        if not walk_in:
+            self.skipTest("no walk-in customer on this site")
+        with self.assertRaises(PartialPaymentValidationError):
+            self._unpaid_invoice(allow_credit_sales=1, customer=walk_in).validate_full_payment()
+
+    def test_a_credit_sale_that_redeems_loyalty_points_passes(self):
+        invoice = self._unpaid_invoice(allow_credit_sales=1)
+        invoice.loyalty_amount = 20
+        invoice.validate_full_payment()
+
+
+class TestCreditSalesGateAllows(TestCreditSalesGate):
+    def test_an_explicit_credit_sale_on_a_credit_till_passes_the_gate(self):
+        import frappe
+
+        profile = frappe._dict(name="Till Y", custom_allow_credit_sales=1, default_sales_type="Cash")
+        parsed = self._parse(profile, isCreditSale=True)
+        self.assertTrue(parsed[9], "is_credit_sale")

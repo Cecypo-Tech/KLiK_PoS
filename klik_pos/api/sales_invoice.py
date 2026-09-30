@@ -4438,18 +4438,22 @@ class CustomSalesInvoice(SalesInvoice):
 		# Money that arrived as an advance from a Payment Entry - every M-Pesa receipt now -
 		# is paid, even though ERPNext keeps it out of paid_amount.
 		paid_amount = flt(flt(self.paid_amount) + flt(self.total_advance), precision)
-		if paid_amount < invoice_total and flt(getattr(self, "loyalty_amount", 0)):
-			paid_amount = flt(paid_amount + flt(self.loyalty_amount, precision), precision)
 
-		# A credit sale takes nothing at the till by design; a till that allows credit sales
-		# lets an unpaid invoice through without allowing part payment on every other sale.
-		# (The checkout refuses a zero-payment sale that is not a credit sale before here.)
+		# A credit sale takes no money at the till by design (loyalty points may still be
+		# redeemed on it) and always has a named customer. A till that allows credit sales
+		# lets such an invoice through without allowing part payment on every other sale; an
+		# unpaid walk-in invoice is not a credit sale and is still refused.
 		if (
 			not allow_partial_payment
 			and paid_amount == 0
+			and self.customer
+			and not _is_walkin_customer(self.customer)
 			and _credit_sales_allowed(frappe.get_cached_doc("POS Profile", self.pos_profile))
 		):
 			return
+
+		if paid_amount < invoice_total and flt(getattr(self, "loyalty_amount", 0)):
+			paid_amount = flt(paid_amount + flt(self.loyalty_amount, precision), precision)
 
 		if not allow_partial_payment and paid_amount < invoice_total:
 			frappe.throw(
