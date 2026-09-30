@@ -714,15 +714,19 @@ def _change_given_by_mode(where_sql, params):
 
 	A payment row keeps what the customer tendered; the change is on the invoice, paid out
 	of `account_for_change_amount`. ERPNext's POS Closing Entry takes it off the payment row
-	paying into that account (pos_closing_entry.get_payments); this is the same rule, applied
-	per invoice, so a shift expects the cash that stayed in the drawer.
+	paying into that account (pos_closing_entry.get_payments). Here it is taken per invoice
+	off the row the change actually left through: change is always cash (ERPNext computes it
+	only against a Cash-type row), so the invoice's Cash row first - several modes can share
+	the change account, and one may have none - then the row paying into that account.
 	"""
 	rows = frappe.db.sql(
 		f"""
 		SELECT si.change_amount,
 			(SELECT sip.mode_of_payment FROM `tabSales Invoice Payment` sip
-			 WHERE sip.parent = si.name AND sip.account = si.account_for_change_amount
-			 ORDER BY sip.idx LIMIT 1) AS mode_of_payment
+			 WHERE sip.parent = si.name
+				AND (sip.type = 'Cash' OR sip.account = si.account_for_change_amount)
+			 ORDER BY (sip.type = 'Cash') DESC, (sip.account = si.account_for_change_amount) DESC, sip.idx
+			 LIMIT 1) AS mode_of_payment
 		FROM `tabSales Invoice` si
 		WHERE {where_sql} AND si.docstatus = 1 AND si.change_amount > 0
 		""",
