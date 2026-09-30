@@ -6,6 +6,8 @@ import { stepValue } from "../../utils/stepValue";
 interface StepperInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   /** Called with the new value when an arrow is pressed. Typing still goes through onChange. */
   onStep: (next: number) => void;
+  /** What one arrow press adds or takes away. Whole units by default - a money field's
+   * arrows are for nudging by a shilling; the keyboard keeps the input's own fine step. */
   stepBy?: number;
   minValue?: number;
   maxValue?: number;
@@ -23,6 +25,8 @@ const StepperInput = forwardRef<HTMLInputElement, StepperInputProps>(function St
   { onStep, stepBy = 1, minValue = 0, maxValue, wrapperClassName = "", className = "", disabled, value, ...rest },
   ref,
 ) {
+  const name = (rest["aria-label"] as string | undefined) || (rest.placeholder as string | undefined) || "value";
+  const locked = disabled || rest.readOnly;
   const step = (direction: 1 | -1) =>
     onStep(stepValue((value as number | string | undefined) ?? 0, direction, stepBy, minValue, maxValue));
 
@@ -43,8 +47,8 @@ const StepperInput = forwardRef<HTMLInputElement, StepperInputProps>(function St
         <button
           type="button"
           tabIndex={-1}
-          aria-label="Increase"
-          disabled={disabled}
+          aria-label={`Increase ${name}`}
+          disabled={locked}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => step(1)}
           className={`${arrow} rounded-tr-md`}
@@ -54,8 +58,8 @@ const StepperInput = forwardRef<HTMLInputElement, StepperInputProps>(function St
         <button
           type="button"
           tabIndex={-1}
-          aria-label="Decrease"
-          disabled={disabled}
+          aria-label={`Decrease ${name}`}
+          disabled={locked}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => step(-1)}
           className={`${arrow} rounded-br-md`}

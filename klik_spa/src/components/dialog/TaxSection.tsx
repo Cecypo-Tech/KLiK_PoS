@@ -74,7 +74,8 @@ export default function TaxSection({
   return (
     <div className="min-w-[10rem] flex-1">
       <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount</label>
-      <div className="grid grid-cols-2 gap-1.5">
+      {/* One per row: each field keeps room for its digits beside the arrows. */}
+      <div className="grid grid-cols-1 gap-1.5">
         <StepperInput
           min="0"
           step="0.01"

@@ -2210,6 +2210,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value || 0)))}
           onStep={(next) => setDeliveryCharge(next)}
           wrapperClassName={inline ? "w-32" : "w-full"}
+          readOnly={chargedByRule}
           disabled={locked}
           title={
             chargedByRule

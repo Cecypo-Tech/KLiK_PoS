@@ -116,6 +116,7 @@ export default function PaymentMethods({
                   onAmountChange(method.id, next.toString());
                 }}
                 wrapperClassName="w-32 shrink-0"
+                aria-label={`${method.name} amount`}
                 min="0"
                 step="0.01"
                 value={method.amount || ""}
