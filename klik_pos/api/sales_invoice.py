@@ -2564,6 +2564,19 @@ def parse_invoice_data(data):
 		).strip().lower()
 		is_credit_sale = default_sales_type == "credit"
 
+	if is_credit_sale:
+		pos_profile = get_current_pos_profile()
+		if not _credit_sales_allowed(pos_profile):
+			if raw_credit_sale_flag is None:
+				# The till's default sale type, not the cashier's choice: sell for cash.
+				is_credit_sale = False
+			else:
+				frappe.throw(
+					_(
+						'Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" on {0} to use them.'
+					).format(getattr(pos_profile, "name", None) or _("this POS Profile"))
+				)
+
 	allow_zero_rate_sales = cint(
 		getattr(get_current_pos_profile(), "allow_zero_rate_sales", 0) or 0
 	)
@@ -3419,6 +3432,15 @@ def _determine_is_pos(customer, business_type):
 		return _check_customer_type_for_pos(customer)
 	else:
 		return 0
+
+
+def _credit_sales_allowed(pos_profile):
+	"""Whether this till may sell on credit at all - its "Allow Credit Sales" checkbox.
+
+	"Allow Credit Sales as POS Sales" is a different question: whether a credit sale that is
+	allowed gets is_pos=1.
+	"""
+	return 1 if cint(getattr(pos_profile, "custom_allow_credit_sales", 0) or 0) else 0
 
 
 def _is_pos_for_credit_sale(pos_profile):
@@ -4415,6 +4437,16 @@ class CustomSalesInvoice(SalesInvoice):
 		paid_amount = flt(flt(self.paid_amount) + flt(self.total_advance), precision)
 		if paid_amount < invoice_total and flt(getattr(self, "loyalty_amount", 0)):
 			paid_amount = flt(paid_amount + flt(self.loyalty_amount, precision), precision)
+
+		# A credit sale takes nothing at the till by design; a till that allows credit sales
+		# lets an unpaid invoice through without allowing part payment on every other sale.
+		# (The checkout refuses a zero-payment sale that is not a credit sale before here.)
+		if (
+			not allow_partial_payment
+			and paid_amount == 0
+			and _credit_sales_allowed(frappe.get_cached_doc("POS Profile", self.pos_profile))
+		):
+			return
 
 		if not allow_partial_payment and paid_amount < invoice_total:
 			frappe.throw(

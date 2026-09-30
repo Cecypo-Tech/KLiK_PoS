@@ -134,6 +134,8 @@ class TestHeldOrderTaxTreatment(SettingsSnapshot, FrappeTestCase):
 			{
 				"is_tax_included_in_basic_rate": 1,
 				"allow_partial_payment": 1,
+				# These tests sell on credit; the till must allow it.
+				"custom_allow_credit_sales": 1,
 				"taxes_and_charges": cls.tax_template,
 			},
 		)
