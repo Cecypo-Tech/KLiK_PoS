@@ -46,6 +46,17 @@ export function returnedValue(invoice: ReturnBasis): number {
   return round2(items + returnedFixedChargesAmount(invoice));
 }
 
+/**
+ * What a return is worth to the customer: the share of the sale's grand total coming back,
+ * tax included - the amount the credit note will carry. Line rates can be before tax (a
+ * tax-added till), so summing them undercounts by the VAT.
+ */
+export function returnedValueWithTax(invoice: ReturnBasis): number {
+  const sold = invoice.items.reduce((sum, item) => sum + item.qty * item.rate, 0) + soldFixedChargesAmount(invoice);
+  if (sold <= 0) return returnedValue(invoice);
+  return round2((invoice.grand_total || 0) * (returnedValue(invoice) / sold));
+}
+
 /** Default refund: what the customer paid, scaled by the share of the sale coming back. */
 export function refundDefault(invoice: ReturnBasis): number {
   const sold = invoice.items.reduce((sum, item) => sum + item.qty * item.rate, 0) + soldFixedChargesAmount(invoice);
