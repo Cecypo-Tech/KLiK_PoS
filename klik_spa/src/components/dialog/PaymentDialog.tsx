@@ -35,6 +35,7 @@ import {
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
 import { toggleOn } from "../../utils/paymentToggle";
+import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
@@ -1117,7 +1118,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const previewCacheKey = JSON.stringify(previewPayload);
 
     const fetchBackendTaxPreview = async () => {
-      if (!isOpen || invoiceSubmitted || !selectedCustomer?.id || cartItems.length === 0) {
+      const step = taxPreviewStep({
+        isOpen,
+        invoiceSubmitted,
+        hasCustomer: Boolean(selectedCustomer?.id),
+        cartCount: cartItems.length,
+      });
+      if (step === "keep") return;
+      if (step === "clear" || !selectedCustomer) {
         setBackendTaxPreview(null);
         backendTaxPreviewRef.current = null;
         setTaxPreviewError(null);
