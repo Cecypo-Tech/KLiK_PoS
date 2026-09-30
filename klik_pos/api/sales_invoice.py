@@ -631,6 +631,38 @@ def _get_prior_return_adjustments(invoice_name):
 	return credit_already_applied, cash_already_refunded
 
 
+def _is_cash_mode(mode_of_payment):
+	"""A Cash-type Mode of Payment: money in the drawer, the only kind the till can hand back.
+	Card, M-Pesa and bank money go back through accounts, as a Payment Entry reversal."""
+	return bool(mode_of_payment) and frappe.get_cached_value("Mode of Payment", mode_of_payment, "type") == "Cash"
+
+
+def _cash_row(invoice):
+	"""The invoice's first Cash-type payment row, or None."""
+	return next((p for p in invoice.get("payments") or [] if _is_cash_mode(p.mode_of_payment)), None)
+
+
+def _cash_kept(invoice):
+	"""Cash the drawer kept from a sale: its Cash-type rows, less the change handed back."""
+	tendered = sum(flt(p.amount) for p in invoice.get("payments") or [] if _is_cash_mode(p.mode_of_payment))
+	if tendered <= 0:
+		return 0.0
+	return max(0.0, tendered - flt(invoice.get("change_amount")))
+
+
+def _cash_refunded_by_prior_returns(invoice_name):
+	"""Cash already handed back by earlier returns against ``invoice_name``."""
+	return flt(
+		frappe.db.sql(
+			"""SELECT SUM(ABS(sip.amount)) FROM `tabSales Invoice Payment` sip
+			INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+			INNER JOIN `tabMode of Payment` mop ON mop.name = sip.mode_of_payment
+			WHERE si.return_against = %s AND si.is_return = 1 AND si.docstatus = 1 AND mop.type = 'Cash'""",
+			invoice_name,
+		)[0][0]
+	)
+
+
 def _get_refundable_cash(original_invoice, return_doc=None):
 	"""Maximum cash that may be paid back for a return against ``original_invoice``.
 
@@ -657,7 +689,11 @@ def _get_refundable_cash(original_invoice, return_doc=None):
 		credit_already_applied,
 		cash_already_refunded,
 	)
-	return max(0.0, held - flt(getattr(original_invoice, "total_advance", 0)))
+	paid_back_ceiling = held - flt(getattr(original_invoice, "total_advance", 0))
+	# And only cash goes back at the till: card, M-Pesa and bank money is refunded by accounts
+	# (a Payment Entry reversal), so it stays on the credit note as the customer's credit.
+	cash_ceiling = _cash_kept(original_invoice) - _cash_refunded_by_prior_returns(original_invoice.name)
+	return max(0.0, min(paid_back_ceiling, cash_ceiling))
 
 
 def _allocate_return_against_original(return_doc, original_invoice, refunded_cash):
@@ -4295,28 +4331,29 @@ def return_sales_invoice(invoice_name):
 		for item in return_doc.items:
 			item.qty = -abs(item.qty)
 
-		# Cash back is capped at what the customer actually handed over, so a credit sale refunds
-		# nothing and its credit note keeps an outstanding balance to allocate.
+		# The return counts in the shift it happens in: the cash leaves today's drawer, and a
+		# closed shift is never changed after the fact.
+		current_opening_entry = get_current_pos_opening_entry()
+		if current_opening_entry:
+			return_doc.custom_pos_opening_entry = current_opening_entry
+
+		# Only cash the drawer kept goes back, in one Cash row. A credit sale refunds nothing,
+		# and card or M-Pesa money stays on the note as credit for accounts to refund.
 		refundable_cash = _get_refundable_cash(original_invoice, return_doc)
 		refunded_cash = 0.0
 
 		return_doc.payments = []
-		for p in original_invoice.payments:
-			remaining = refundable_cash - refunded_cash
-			if remaining <= 0:
-				break
-			amount = min(abs(flt(p.amount)), remaining)
-			if amount <= 0:
-				continue
+		cash_row = _cash_row(original_invoice)
+		if cash_row and refundable_cash > 0:
 			return_doc.append(
 				"payments",
 				{
-					"mode_of_payment": p.mode_of_payment,
-					"amount": -abs(amount),
-					"account": p.account,
+					"mode_of_payment": cash_row.mode_of_payment,
+					"amount": -abs(refundable_cash),
+					"account": cash_row.account,
 				},
 			)
-			refunded_cash += amount
+			refunded_cash = refundable_cash
 
 		return_doc.calculate_taxes_and_totals()
 
@@ -4935,6 +4972,12 @@ def create_partial_return(
 			pass
 
 		if refunded_cash > 0:
+			if not _is_cash_mode(final_payment_method):
+				frappe.throw(
+					_(
+						"Only cash can be refunded at the till. {0} money goes back through accounts as a Payment Entry reversal; choose a cash mode or refund nothing."
+					).format(final_payment_method)
+				)
 			return_doc.append(
 				"payments",
 				{
