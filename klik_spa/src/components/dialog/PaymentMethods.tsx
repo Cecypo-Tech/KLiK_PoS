@@ -6,6 +6,7 @@ import { isReferenceMethod } from "./paymentIcons";
 import { partitionPaymentMethods } from "../../utils/paymentMethodVisibility";
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
 import { clickCameFromControl, isIncidentalClick } from "../../utils/rowClick";
+import StepperInput from "../common/StepperInput";
 
 interface PaymentMethodsProps {
   paymentMethods: PaymentMethod[];
@@ -106,11 +107,15 @@ export default function PaymentMethods({
                 {method.name}
               </span>
 
-              <input
+              <StepperInput
                 ref={(el) => {
                   amountInputRefs.current[method.id] = el;
                 }}
-                type="number"
+                onStep={(next) => {
+                  setActiveMethodId(method.id);
+                  onAmountChange(method.id, next.toString());
+                }}
+                wrapperClassName="w-32 shrink-0"
                 min="0"
                 step="0.01"
                 value={method.amount || ""}
@@ -130,7 +135,7 @@ export default function PaymentMethods({
                 }}
                 placeholder="0.00"
                 disabled={disabled}
-                className={`w-28 shrink-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm text-right ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+                className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm text-right ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
               />
 
               {showRef && (

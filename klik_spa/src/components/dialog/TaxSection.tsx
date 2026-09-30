@@ -1,4 +1,5 @@
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
+import StepperInput from "../common/StepperInput";
 
 interface TaxSectionProps {
   invoiceSubmitted: boolean;
@@ -37,8 +38,7 @@ export default function TaxSection({
       <div className="flex items-center justify-between gap-3">
         <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Discount</label>
         <div className="flex gap-1.5">
-          <input
-            type="number"
+          <StepperInput
             min="0"
             step="0.01"
             placeholder="Amount"
@@ -46,11 +46,12 @@ export default function TaxSection({
             value={orderDiscountAmount || ""}
             {...selectAllOnFocus}
             onChange={(e) => onOrderDiscountAmountChange(Number(e.target.value || 0))}
+            onStep={onOrderDiscountAmountChange}
             disabled={locked}
-            className={`w-28 text-right ${inputClass}`}
+            wrapperClassName="w-32"
+            className={`w-full text-right ${inputClass}`}
           />
-          <input
-            type="number"
+          <StepperInput
             min="0"
             max="100"
             step="0.1"
@@ -59,8 +60,11 @@ export default function TaxSection({
             value={orderDiscountPercentInput || ""}
             {...selectAllOnFocus}
             onChange={(e) => onOrderDiscountPercentChange(Number(e.target.value || 0))}
+            onStep={onOrderDiscountPercentChange}
+            maxValue={100}
             disabled={locked}
-            className={`w-20 text-right ${inputClass}`}
+            wrapperClassName="w-24"
+            className={`w-full text-right ${inputClass}`}
           />
         </div>
       </div>
@@ -71,19 +75,18 @@ export default function TaxSection({
     <div className="min-w-[10rem] flex-1">
       <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount</label>
       <div className="grid grid-cols-2 gap-1.5">
-        <input
-          type="number"
+        <StepperInput
           min="0"
           step="0.01"
           placeholder="Amount"
           value={orderDiscountAmount || ""}
           {...selectAllOnFocus}
           onChange={(e) => onOrderDiscountAmountChange(Number(e.target.value || 0))}
+          onStep={onOrderDiscountAmountChange}
           disabled={locked}
           className={`w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
         />
-        <input
-          type="number"
+        <StepperInput
           min="0"
           max="100"
           step="0.1"
@@ -91,6 +94,8 @@ export default function TaxSection({
           value={orderDiscountPercentInput || ""}
           {...selectAllOnFocus}
           onChange={(e) => onOrderDiscountPercentChange(Number(e.target.value || 0))}
+          onStep={onOrderDiscountPercentChange}
+          maxValue={100}
           disabled={locked}
           className={`w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
         />
