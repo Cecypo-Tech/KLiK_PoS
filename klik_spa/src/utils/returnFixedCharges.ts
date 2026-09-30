@@ -6,6 +6,8 @@ export interface ReturnBasis {
   fixed_charges?: FixedCharge[];
   grand_total: number;
   paid_amount?: number;
+  /** The most cash the till may hand back for this sale (card and M-Pesa money excluded). */
+  refundable_cash?: number;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -49,4 +51,14 @@ export function refundDefault(invoice: ReturnBasis): number {
   const sold = invoice.items.reduce((sum, item) => sum + item.qty * item.rate, 0) + soldFixedChargesAmount(invoice);
   const share = sold > 0 ? returnedValue(invoice) / sold : 0;
   return round2((invoice.paid_amount || invoice.grand_total) * share);
+}
+
+/**
+ * Default cash refund for a return: the scaled payment, but never more than the cash the
+ * sale can give back - card and M-Pesa money stays as customer credit for accounts.
+ */
+export function cashRefundDefault(invoice: ReturnBasis): number {
+  const scaled = refundDefault(invoice);
+  if (invoice.refundable_cash === undefined || invoice.refundable_cash === null) return scaled;
+  return round2(Math.max(0, Math.min(scaled, Number(invoice.refundable_cash))));
 }

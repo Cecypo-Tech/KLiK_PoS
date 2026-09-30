@@ -3,6 +3,7 @@ import type { FixedCharge, InvoiceForReturn, ReturnItem } from "../services/retu
 import {
   everyAvailableQtySelected,
   fixedChargeReturned,
+  cashRefundDefault,
   refundDefault,
   returnedValue,
   returnsAnyFixedCharge,
@@ -94,5 +95,18 @@ describe("returnedValue and refundDefault", () => {
 
   it("falls back to the grand total when nothing was recorded as paid", () => {
     expect(refundDefault(invoice([item("A", 2, 100, { return_qty: 2 })]))).toBe(200);
+  });
+});
+
+describe("cashRefundDefault", () => {
+  it("never offers more cash back than the sale can give", () => {
+    // A card sale: the server says no cash can go back, whatever was paid.
+    const inv = { ...invoice([item("A", 1, 500, { return_qty: 1 })]), refundable_cash: 0 };
+    expect(cashRefundDefault(inv)).toBe(0);
+  });
+
+  it("is the scaled payment when that is within the cash refundable", () => {
+    const inv = { ...invoice([item("A", 2, 100, { return_qty: 1 })]), refundable_cash: 1000 };
+    expect(cashRefundDefault(inv)).toBe(refundDefault(inv));
   });
 });

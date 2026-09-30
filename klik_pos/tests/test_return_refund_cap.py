@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.sales_invoice import (
@@ -83,14 +84,18 @@ class TestAllocateReturnAgainstOriginal(FrappeTestCase):
 	def test_an_advance_settled_sale_holds_no_refundable_cash(self):
 		# M-Pesa: the money is on a Payment Entry, so grand_total - outstanding reads 300 as
 		# cash in a drawer that never took any.
-		original = SimpleNamespace(
-			name="INV-ADV-0001", grand_total=300, outstanding_amount=0, total_advance=300
+		original = frappe._dict(
+			name="INV-ADV-0001", grand_total=300, outstanding_amount=0, total_advance=300, payments=[]
 		)
 		self.assertEqual(_get_refundable_cash(original, SimpleNamespace(is_pos=1)), 0)
 
 	def test_a_part_cash_part_advance_sale_refunds_only_the_cash(self):
-		original = SimpleNamespace(
-			name="INV-ADV-0002", grand_total=300, outstanding_amount=0, total_advance=200
+		original = frappe._dict(
+			name="INV-ADV-0002",
+			grand_total=300,
+			outstanding_amount=0,
+			total_advance=200,
+			payments=[frappe._dict(mode_of_payment="Cash", amount=100)],
 		)
 		self.assertEqual(_get_refundable_cash(original, SimpleNamespace(is_pos=1)), 100)
 

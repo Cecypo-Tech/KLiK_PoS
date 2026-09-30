@@ -37,6 +37,7 @@ import {
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
+import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { summaryFigures } from "../../utils/summaryFigures";
 import { extractErrorFromException } from "../../utils/errorExtraction";
@@ -1966,16 +1967,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   }, [isOpen, defaultTax, selectedSalesTaxCharges]);
 
+  const setGrandTotalToDefaultMop = Boolean(Number(posDetails?.set_grand_total_to_default_mop || 0));
+
   useEffect(() => {
-    if (isOpen && modes.length > 0 && !isCreditSale) {
-      const defaultMode = modes.find((mode) => mode.default === 1);
-      if (defaultMode && Object.keys(paymentAmounts).length === 0) {
-        const defaultAmount = parseFloat(checkoutPayableTotal.toFixed(2));
-        setLastModifiedMethodId(defaultMode.mode_of_payment);
-        setPaymentAmounts({ [defaultMode.mode_of_payment]: defaultAmount });
+    if (isOpen && modes.length > 0 && !isCreditSale && Object.keys(paymentAmounts).length === 0) {
+      const opening = openingPaymentAmounts(modes, checkoutPayableTotal, setGrandTotalToDefaultMop);
+      const [method] = Object.keys(opening);
+      if (method) {
+        setLastModifiedMethodId(method);
+        setPaymentAmounts(opening);
       }
     }
-  }, [isOpen, modes, checkoutPayableTotal, isB2B, isB2C, paymentAmounts, isCreditSale]);
+  }, [isOpen, modes, checkoutPayableTotal, paymentAmounts, isCreditSale, setGrandTotalToDefaultMop]);
 
   useEffect(() => {
     if (!isOpen || invoiceSubmitted || isProcessingPayment || isCreditSale) {

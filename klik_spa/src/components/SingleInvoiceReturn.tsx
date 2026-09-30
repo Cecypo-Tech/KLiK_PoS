@@ -13,6 +13,7 @@ import { toast } from "react-toastify";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
+import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
 import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem } from "../services/returnService";
 import { fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
@@ -104,11 +105,8 @@ export default function SingleInvoiceReturn({
   // Set default payment method when payment modes are loaded
   useEffect(() => {
     if (paymentModes.length > 0 && !selectedPaymentMethod) {
-      // Find default payment method or use first one
-      const defaultMode = paymentModes.find(mode => mode.default === 1);
-      const firstMode = paymentModes[0];
-      const resolved = defaultMode?.mode_of_payment || firstMode?.mode_of_payment || "";
-      setSelectedPaymentMethod(resolved);
+      // Only cash is handed back at the till.
+      setSelectedPaymentMethod(defaultCashRefundMode(paymentModes));
     }
   }, [paymentModes, selectedPaymentMethod]);
 
@@ -576,12 +574,12 @@ export default function SingleInvoiceReturn({
             {refundableCash <= 0 ? (
               <div className="mb-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                 <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">
-                  Credit note - no refund
+                  Credit note - no cash refund
                 </h3>
                 <p className="text-xs text-blue-800 dark:text-blue-300 mt-1">
-                  This sale was on credit, so there is no payment to hand back.{" "}
-                  {formatCurrencyWithSymbol(totalReturnAmount, currency)} will be credited against the
-                  invoice, reducing the customer's outstanding balance.
+                  No cash was kept from this sale, so there is nothing to hand back at the till.{" "}
+                  {formatCurrencyWithSymbol(totalReturnAmount, currency)} stays with the customer as credit. A credit
+                  sale's balance is reduced; card or M-Pesa money is refunded by accounts.
                 </p>
               </div>
             ) : (
@@ -596,7 +594,7 @@ export default function SingleInvoiceReturn({
                     <span className="font-semibold">{formatCurrencyWithSymbol(cashRefundAmount, currency)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Credited against invoice:</span>
+                    <span>Left as customer credit:</span>
                     <span className="font-semibold">{formatCurrencyWithSymbol(creditNoteAmount, currency)}</span>
                   </div>
                 </div>
@@ -614,8 +612,7 @@ export default function SingleInvoiceReturn({
                       <option>Loading payment methods...</option>
                     ) : (
                       <>
-                        <option value="">{""}</option>
-                        {paymentModes.map((mode) => {
+                        {cashRefundModes(paymentModes).map((mode) => {
                           const val = mode.mode_of_payment;
                           return (
                             <option key={val} value={val}>
