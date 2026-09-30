@@ -15,7 +15,7 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
 import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem } from "../services/returnService";
-import { fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
+import { fixedChargeReturned, returnedValue, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
 import { returnNotice } from "../utils/returnNotice";
 
@@ -83,8 +83,9 @@ export default function SingleInvoiceReturn({
       let calculatedReturnAmount;
 
       if (ignoreWriteoffOnPartialReturns && isPartialReturn) {
-        // For partial returns when checkbox is ticked: ignore writeoff, use original item rates
-        calculatedReturnAmount = returnedItemsAmount;
+        // For partial returns when checkbox is ticked: ignore writeoff - the lines' value at
+        // the sale's prices, tax included.
+        calculatedReturnAmount = returnedValueWithTax(basis);
       } else {
         // Original logic: Calculate percentage of items being returned
         const returnPercentage = totalItemsAmount > 0 ? returnedItemsAmount / totalItemsAmount : 0;
@@ -96,7 +97,7 @@ export default function SingleInvoiceReturn({
       setReturnAmount(Math.round(calculatedReturnAmount * 100) / 100);
     } else {
       // Fallback to item-based calculation if paid amount is not available
-      setReturnAmount(returnedValue({ items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal }));
+      setReturnAmount(returnedValueWithTax({ items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal }));
     }
   }, [returnItems, fixedCharges, originalInvoiceGrandTotal, originalInvoicePaidAmount, posDetails?.custom_ignore_write_off_on_partial_returns]);
 
@@ -272,7 +273,8 @@ export default function SingleInvoiceReturn({
   };
 
   const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
-  const totalReturnAmount = returnedValue(returnBasis);
+  // Tax included: the amount the credit note carries. The lines' rates can be before tax.
+  const totalReturnAmount = returnedValueWithTax(returnBasis);
 
   const hasItemsToReturn = returnItems.some(item => (item.return_qty || 0) > 0);
 

@@ -6,6 +6,7 @@ import {
   cashRefundDefault,
   refundDefault,
   returnedValue,
+  returnedValueWithTax,
   returnsAnyFixedCharge,
 } from "./returnFixedCharges";
 
@@ -108,5 +109,23 @@ describe("cashRefundDefault", () => {
   it("is the scaled payment when that is within the cash refundable", () => {
     const inv = { ...invoice([item("A", 2, 100, { return_qty: 1 })]), refundable_cash: 1000 };
     expect(cashRefundDefault(inv)).toBe(refundDefault(inv));
+  });
+});
+
+describe("returnedValueWithTax", () => {
+  it("prices a return as its share of the grand total, tax included", () => {
+    // A 16% tax-added till: the line rate is 732.76, the sale 850 with VAT.
+    const inv = { ...invoice([item("A", 1, 732.76, { return_qty: 1 })]), grand_total: 850 };
+    expect(returnedValueWithTax(inv)).toBe(850);
+  });
+
+  it("scales for a part of the sale", () => {
+    const inv = { ...invoice([item("A", 2, 100, { return_qty: 1 })]), grand_total: 232 };
+    expect(returnedValueWithTax(inv)).toBe(116);
+  });
+
+  it("is 0 when nothing is returned", () => {
+    const inv = { ...invoice([item("A", 2, 100)]), grand_total: 232 };
+    expect(returnedValueWithTax(inv)).toBe(0);
   });
 });

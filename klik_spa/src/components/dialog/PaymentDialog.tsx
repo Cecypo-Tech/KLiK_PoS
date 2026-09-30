@@ -56,6 +56,7 @@ import SharingInterface from "./SharingInterface";
 import DeliveryPersonnelModal from "./DeliveryPersonnelModal";
 import MpesaOptionsModal from "./MpesaOptionsModal";
 import OtherCharges from "./OtherCharges";
+import StepperInput from "../common/StepperInput";
 import type { PaymentDialogProps, PaymentAmount, Calculations, BackendTaxPreview } from "./types";
 import { reconcileCheckout } from "../../utils/checkoutReconciliation";
 import DisplayPrintPreview from "../../utils/invoicePrint";
@@ -2201,13 +2202,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         >
           Delivery charge
         </label>
-        <input
-          type="number"
+        <StepperInput
           min="0"
           step="0.01"
           value={chargedByRule ? 0 : deliveryCharge}
           {...selectAllOnFocus}
           onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value || 0)))}
+          onStep={(next) => setDeliveryCharge(next)}
+          wrapperClassName={inline ? "w-32" : "w-full"}
+          readOnly={chargedByRule}
           disabled={locked}
           title={
             chargedByRule
@@ -2217,7 +2220,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 : "Set Delivery Charge Item on POS Profile to post this amount as a service item."
           }
           aria-label="Delivery charge"
-          className={`${inline ? "w-28 text-right" : "w-full"} px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
+          className={`w-full ${inline ? "text-right" : ""} px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${locked ? "cursor-not-allowed opacity-50" : ""}`}
         />
       </div>
     );

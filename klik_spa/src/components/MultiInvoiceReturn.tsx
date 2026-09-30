@@ -22,7 +22,7 @@ import {
 } from "../services/returnService";
 
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
-import { cashRefundDefault, fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
+import { cashRefundDefault, fixedChargeReturned, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
@@ -337,7 +337,8 @@ export default function MultiInvoiceReturn({
 
       invoices.forEach(invoice => {
         if (selectedInvoices.has(invoice.name)) {
-          const amount = returnedValue(invoice);
+          // The cash that may go back, never card or M-Pesa money.
+          const amount = cashRefundDefault(invoice);
 
           // Update the payment amount for this invoice
           const invoiceName = invoice.name;
@@ -421,7 +422,7 @@ export default function MultiInvoiceReturn({
   );
 
   const totalReturnAmount = invoices.reduce((total, invoice) =>
-    total + (selectedInvoices.has(invoice.name) ? returnedValue(invoice) : 0), 0
+    total + (selectedInvoices.has(invoice.name) ? returnedValueWithTax(invoice) : 0), 0
   );
 
   const handleSubmitReturn = async () => {
@@ -434,7 +435,7 @@ export default function MultiInvoiceReturn({
         // These fields are expected by backend to process per-invoice return payments
         // If backend ignores them, it's backward-compatible
         payment_method: invoicePayments[invoice.name]?.method,
-        return_amount: invoicePayments[invoice.name]?.amount ?? returnedValue(invoice),
+        return_amount: invoicePayments[invoice.name]?.amount ?? cashRefundDefault(invoice),
         // The courier fee is the cashier's call, like an item: 1 reverses it, 0 leaves it off.
         return_fixed_charges: (returnsAnyFixedCharge(invoice) ? 1 : 0) as 0 | 1,
       }))
@@ -1243,7 +1244,7 @@ export default function MultiInvoiceReturn({
                       </div>
                       {(() => {
                         // What goes back in cash, and what stays as the customer's credit.
-                        const value = returnedValue(invoice);
+                        const value = returnedValueWithTax(invoice);
                         const cash = invoicePayments[invoice.name]?.amount ?? cashRefundDefault(invoice);
                         const credit = Math.max(0, Math.round((value - cash) * 100) / 100);
                         return credit > 0 ? (
