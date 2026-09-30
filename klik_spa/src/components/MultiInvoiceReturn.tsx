@@ -22,7 +22,7 @@ import {
 } from "../services/returnService";
 
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
-import { fixedChargeReturned, refundDefault, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
+import { cashRefundDefault, fixedChargeReturned, returnedValue, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
@@ -273,7 +273,7 @@ export default function MultiInvoiceReturn({
           const next = { ...prev } as Record<string, { method: string; amount: number }>;
           for (const inv of filteredInvoices) {
             if (selectedInvoices.has(inv.name)) {
-              const amount = refundDefault(inv);
+              const amount = cashRefundDefault(inv);
 
               // Only cash is handed back at the till, whatever the sale was paid with.
               const defaultMode = defaultCashRefundMode(paymentModes) || 'Cash';
@@ -380,7 +380,7 @@ export default function MultiInvoiceReturn({
         // Initialize payment config when selecting
         const inv = invoices.find(i => i.name === invoiceName);
         if (inv) {
-          const amount = refundDefault(inv);
+          const amount = cashRefundDefault(inv);
 
           // Only cash is handed back at the till, whatever the sale was paid with.
           const defaultMode = defaultCashRefundMode(paymentModes) || 'Cash';
@@ -454,14 +454,21 @@ export default function MultiInvoiceReturn({
     try {
       const result = await createMultiInvoiceReturn(returnData);
 
-      if (result.success) {
-        toast.success(result.message || 'Returns created successfully');
-        onSuccess(result.createdReturns || []);
+      const created = result.createdReturns || [];
+      if (created.length) {
+        // Whatever went through is done: close on it, and name only what failed so the
+        // cashier does not return the successful ones a second time.
+        if (result.failed?.length) {
+          toast.warning(result.message || `${result.failed.length} return(s) failed`, { autoClose: 12000 });
+        } else {
+          toast.success(result.message || 'Returns created successfully');
+        }
+        onSuccess(created);
         onClose();
         // Reload the page to refresh all data
         window.location.reload();
       } else {
-        toast.error(result.error || 'Failed to create returns');
+        toast.error(result.error || result.message || 'Failed to create returns');
       }
     } catch (error) {
       console.error('Error creating returns:', error);
@@ -1192,7 +1199,7 @@ export default function MultiInvoiceReturn({
                                 ...prev,
                                 [invoice.name]: {
                                   method,
-                                  amount: prev[invoice.name]?.amount ?? refundDefault(invoice)
+                                  amount: prev[invoice.name]?.amount ?? cashRefundDefault(invoice)
                                 }
                               }));
                             }}
@@ -1213,11 +1220,13 @@ export default function MultiInvoiceReturn({
                               type="number"
                               step="0.01"
                               min="0"
-                              value={invoicePayments[invoice.name]?.amount ?? returnedValue(invoice)}
+                              max={invoice.refundable_cash ?? undefined}
+                              value={invoicePayments[invoice.name]?.amount ?? cashRefundDefault(invoice)}
                               onChange={(e) => {
                                 const value = parseFloat(e.target.value) || 0;
-                                // Round to 2 decimal places to avoid floating point precision issues
-                                const roundedValue = Math.round(value * 100) / 100;
+                                // Never more cash than the sale can give back; round to cents.
+                                const capped = Math.min(value, invoice.refundable_cash ?? value);
+                                const roundedValue = Math.round(capped * 100) / 100;
                                 setInvoicePayments(prev => ({
                                   ...prev,
                                   [invoice.name]: {
@@ -1232,6 +1241,18 @@ export default function MultiInvoiceReturn({
                           </div>
                         </div>
                       </div>
+                      {(() => {
+                        // What goes back in cash, and what stays as the customer's credit.
+                        const value = returnedValue(invoice);
+                        const cash = invoicePayments[invoice.name]?.amount ?? cashRefundDefault(invoice);
+                        const credit = Math.max(0, Math.round((value - cash) * 100) / 100);
+                        return credit > 0 ? (
+                          <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            Cash back {formatCurrencyWithSymbol(cash, currency)} · left as customer credit{" "}
+                            {formatCurrencyWithSymbol(credit, currency)} (card or M-Pesa money is refunded by accounts)
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
                   )}
                 </div>

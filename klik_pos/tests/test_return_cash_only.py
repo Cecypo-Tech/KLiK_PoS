@@ -185,3 +185,38 @@ class TestReturnsInTheShiftFigures(CashOnlyReturnCase):
 		self.assertFalse(expected(today).get(CARD), "no card money moved at the till")
 		self.assertEqual(expected(yesterday).get("Cash"), 600, "yesterday's drawer is untouched")
 		self.assertEqual(expected(yesterday).get(CARD), 500)
+
+
+class TestReturnPickerAndDefaults(CashOnlyReturnCase):
+	def test_the_return_picker_says_how_much_cash_each_sale_can_give_back(self):
+		from klik_pos.api.sales_invoice import get_customer_invoices_for_return
+
+		cash_sale, card_sale = self._sale(600, cash=650), self._sale(500, card=500)
+		for sale in (cash_sale, card_sale):
+			frappe.db.set_value("Sales Invoice", sale.name, "custom_pos_opening_entry", "POS-OPE-TEST-PICKER", update_modified=False)
+
+		result = get_customer_invoices_for_return(CUSTOMER)
+
+		self.assertTrue(result["success"], result.get("error"))
+		by_name = {inv["name"]: inv for inv in result["data"]}
+		self.assertEqual(flt(by_name[cash_sale.name]["refundable_cash"]), 600)
+		self.assertEqual(flt(by_name[card_sale.name]["refundable_cash"]), 0)
+
+	def test_a_zero_cash_row_is_not_the_one_refunded_through(self):
+		from klik_pos.api.sales_invoice import _cash_row
+
+		invoice = frappe._dict(payments=[frappe._dict(mode_of_payment="Cash", amount=0), frappe._dict(mode_of_payment="Cheque", amount=300)])
+		frappe.db.set_value("Mode of Payment", "Cheque", "type", "Cash")
+		self.assertEqual(_cash_row(invoice).mode_of_payment, "Cheque")
+
+	def test_no_refund_mode_given_uses_a_cash_mode(self):
+		sale = self._sale(300, cash=300)
+		result = create_partial_return(
+			invoice_name=sale.name,
+			return_items=[{"item_code": sale.items[0].item_code, "return_qty": 1}],
+			payment_method=None,
+			return_amount=300,
+		)
+		self.assertTrue(result.get("success"), result)
+		credit = frappe.get_doc("Sales Invoice", result["return_invoice"])
+		self.assertEqual(self._refund_rows(credit), [("Cash", -300)])

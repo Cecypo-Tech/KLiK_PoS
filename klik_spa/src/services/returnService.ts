@@ -27,6 +27,8 @@ export interface InvoiceForReturn {
   customer: string;
   grand_total: number;
   paid_amount?: number;
+  /** The most cash the till may hand back for this sale (card and M-Pesa money excluded). */
+  refundable_cash?: number;
   status: string;
   items: ReturnItem[];
   fixed_charges?: FixedCharge[];
@@ -173,7 +175,14 @@ export async function createPartialReturn(
 
 export async function createMultiInvoiceReturn(
   returnData: ReturnData
-): Promise<{success: boolean; createdReturns?: string[]; message?: string; error?: string}> {
+): Promise<{
+  success: boolean;
+  createdReturns?: string[];
+  /** Returns that did not go through, each with the server's reason. */
+  failed?: Array<{ invoice_name: string; message: string }>;
+  message?: string;
+  error?: string;
+}> {
   const csrfToken = window.csrf_token;
   try {
     const response = await fetch(`/api/method/klik_pos.api.sales_invoice.create_multi_invoice_return`, {
@@ -197,13 +206,17 @@ export async function createMultiInvoiceReturn(
     // Handle both response formats
     const result = data.message || data;
 
-    if (!result.success) {
+    // Some returns may have gone through before one failed. Those are real and committed,
+    // so they are reported alongside the failures - never as a plain error, which would
+    // invite the cashier to return them again.
+    if (!result.success && !(result.created_returns || []).length) {
       throw new Error(result.message || 'Failed to create multi-invoice return');
     }
 
     return {
-      success: true,
+      success: Boolean(result.success),
       createdReturns: result.created_returns,
+      failed: result.failed || [],
       message: result.message
     };
 

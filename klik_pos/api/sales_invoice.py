@@ -638,8 +638,11 @@ def _is_cash_mode(mode_of_payment):
 
 
 def _cash_row(invoice):
-	"""The invoice's first Cash-type payment row, or None."""
-	return next((p for p in invoice.get("payments") or [] if _is_cash_mode(p.mode_of_payment)), None)
+	"""The invoice's first Cash-type payment row that took money, or None."""
+	return next(
+		(p for p in invoice.get("payments") or [] if flt(p.amount) > 0 and _is_cash_mode(p.mode_of_payment)),
+		None,
+	)
 
 
 def _cash_kept(invoice):
@@ -4753,6 +4756,10 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 				"grand_total",
 				"paid_amount",
 				"status",
+				"outstanding_amount",
+				"total_advance",
+				"change_amount",
+				"is_pos",
 			],
 			order_by="posting_date desc",
 		)
@@ -4839,6 +4846,19 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 
 			payment_methods = payment_methods_map.get(invoice.name, [])
 			invoice.payment_methods = payment_methods
+			# What the till may hand back in cash for this sale - the same ceiling a return
+			# applies - so the picker never offers card or M-Pesa money as a cash refund.
+			invoice.refundable_cash = _get_refundable_cash(
+				frappe._dict(
+					name=invoice.name,
+					grand_total=invoice.get("grand_total"),
+					outstanding_amount=invoice.get("outstanding_amount"),
+					total_advance=invoice.get("total_advance"),
+					change_amount=invoice.get("change_amount"),
+					payments=[frappe._dict(r) for r in payment_methods if not r.get("payment_entry")],
+				),
+				frappe._dict(is_pos=invoice.get("is_pos")),
+			)
 			# Keep backward compatibility - the same label Invoice History shows.
 			invoice.payment_method = mode_label(payment_methods)
 
@@ -4951,7 +4971,10 @@ def create_partial_return(
 
 		final_return_amount = return_amount if return_amount is not None else total_returned_amount
 
-		final_payment_method = payment_method if payment_method else "Cash"
+		# No mode given: refund through the sale's own cash mode - not a mode assumed to be
+		# named "Cash", which a till may not have.
+		sale_cash_row = _cash_row(original_invoice)
+		final_payment_method = payment_method or (sale_cash_row.mode_of_payment if sale_cash_row else "Cash")
 
 		# Cash back is capped at what the customer actually handed over. A credit sale refunds
 		# nothing: the return then carries no payment rows, so the credit note keeps a real

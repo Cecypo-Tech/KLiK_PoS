@@ -594,7 +594,7 @@ export default function SingleInvoiceReturn({
                     <span className="font-semibold">{formatCurrencyWithSymbol(cashRefundAmount, currency)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Left as customer credit (card/M-Pesa, refunded by accounts):</span>
+                    <span>Left as customer credit:</span>
                     <span className="font-semibold">{formatCurrencyWithSymbol(creditNoteAmount, currency)}</span>
                   </div>
                 </div>
@@ -612,7 +612,6 @@ export default function SingleInvoiceReturn({
                       <option>Loading payment methods...</option>
                     ) : (
                       <>
-                        <option value="">{""}</option>
                         {cashRefundModes(paymentModes).map((mode) => {
                           const val = mode.mode_of_payment;
                           return (
