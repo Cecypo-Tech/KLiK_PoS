@@ -1511,20 +1511,39 @@ def _batch_fetch_payment_methods(invoice_names):
 
 	placeholders, params = _sql_in_clause(invoice_names)
 	payment_query = """
-		SELECT parent, mode_of_payment, amount
-		FROM `tabSales Invoice Payment`
-		WHERE parent IN ({})
+		SELECT sip.parent, sip.mode_of_payment, sip.amount, sip.account, sip.type,
+			si.change_amount, si.account_for_change_amount
+		FROM `tabSales Invoice Payment` sip
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE sip.parent IN ({})
+		ORDER BY sip.parent, sip.idx
 	""".format(placeholders)
 	payment_results = frappe.db.sql(payment_query, params, as_dict=True)
 
-	# Group by parent invoice
+	# Group by parent invoice. The row keeps what was tendered; the change handed back is
+	# named on the row it left through - the Cash row first, else the row paying into
+	# account_for_change_amount (payment._change_given_by_mode, same rule) - so the Closing
+	# Shift cards count what stayed in the drawer.
 	payment_methods_map = {}
+	by_invoice = {}
 	for payment in payment_results:
-		if payment.parent not in payment_methods_map:
-			payment_methods_map[payment.parent] = []
-		payment_methods_map[payment.parent].append(
-			{"mode_of_payment": payment.mode_of_payment, "amount": payment.amount}
-		)
+		by_invoice.setdefault(payment.parent, []).append(payment)
+	for parent, payments in by_invoice.items():
+		change = flt(payments[0].change_amount)
+		change_row = None
+		if change > 0:
+			candidates = [
+				p for p in payments if p.type == "Cash" or (p.account and p.account == p.account_for_change_amount)
+			]
+			candidates.sort(key=lambda p: (p.type != "Cash", p.account != p.account_for_change_amount))
+			change_row = candidates[0] if candidates else None
+		rows = []
+		for payment in payments:
+			row = {"mode_of_payment": payment.mode_of_payment, "amount": payment.amount}
+			if payment is change_row:
+				row["change_amount"] = change
+			rows.append(row)
+		payment_methods_map[parent] = rows
 
 	from klik_pos.api.payment_rows import advance_payment_rows, merge_payment_rows
 

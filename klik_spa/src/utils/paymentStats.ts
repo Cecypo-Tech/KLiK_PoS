@@ -59,7 +59,9 @@ export function computePaymentStats(
         if (!stat) return;
 
         const isReturn = invoice.status === "Return";
-        const amount = isReturn ? -Math.abs(payment.amount || 0) : (payment.amount || 0);
+        // The row holds what was tendered; the change handed back left the drawer.
+        const kept = (payment.amount || 0) - (payment.change_amount || 0);
+        const amount = isReturn ? -Math.abs(payment.amount || 0) : kept;
         stat.amount += amount;
 
         if (index === 0) {

@@ -292,21 +292,28 @@ def _reset():
 		stand_down_shifts()
 		frappe.get_doc("POS Closing Entry", closing).cancel()
 	stand_down_shifts()
-	invoices = frappe.get_all("Sales Invoice", filters={"pos_profile": PROFILE, "docstatus": 1}, pluck="name")
-	# Order matters both ways round: the register row refuses to cancel while its invoice
-	# is live, and the Payment Entry refuses while the register row still links it.
+	invoices = frappe.get_all(
+		"Sales Invoice",
+		filters={"pos_profile": PROFILE, "docstatus": 1},
+		pluck="name",
+		order_by="is_return desc, creation desc",
+	)
+	# Every sale first: a receipt that paid several sales refuses to cancel while any of them
+	# is live, and its Payment Entry refuses while the receipt still links it.
+	links = []
 	for name in invoices:
 		si = frappe.get_doc("Sales Invoice", name)
-		rows = [
+		links += [
 			(c.mpesa_c2b_payment_register, c.payment_entry)
 			for c in si.get("custom_mpesa_reconciled_payments") or []
 		]
 		si.cancel()
-		for register, entry in rows:
-			if register and frappe.db.get_value("Mpesa C2B Payment Register", register, "docstatus") == 1:
-				frappe.get_doc("Mpesa C2B Payment Register", register).cancel()
-			if entry and frappe.db.get_value("Payment Entry", entry, "docstatus") == 1:
-				frappe.get_doc("Payment Entry", entry).cancel()
+	for register, _entry in links:
+		if register and frappe.db.get_value("Mpesa C2B Payment Register", register, "docstatus") == 1:
+			frappe.get_doc("Mpesa C2B Payment Register", register).cancel()
+	for _register, entry in links:
+		if entry and frappe.db.get_value("Payment Entry", entry, "docstatus") == 1:
+			frappe.get_doc("Payment Entry", entry).cancel()
 	for row in frappe.get_all(
 		"Mpesa C2B Payment Register", filters={"billrefnumber": ["like", "SHIFTQA-%"]}, pluck="name"
 	):

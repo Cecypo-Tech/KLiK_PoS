@@ -258,6 +258,8 @@ export interface SalesInvoice {
     payment_entry?: string
     /** The shift that Payment Entry was stamped with; null for money from outside the POS. */
     pos_opening_entry?: string | null
+    /** Of `amount` (what was tendered), what went back to the customer as change. */
+    change_amount?: number
   }>
   amountPaid: number
   changeGiven: number

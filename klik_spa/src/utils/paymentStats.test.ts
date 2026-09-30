@@ -106,4 +106,18 @@ describe("computePaymentStats and money from outside the POS", () => {
     expect(statFor(stats, "Cash").amount).toBe(100);
     expect(statFor(stats, "Cheque").amount).toBe(100);
   });
+
+  it("takes the change handed back out of the drawer", () => {
+    // 650 tendered for a 600 sale, 50 back: the drawer holds 600 more, not 650.
+    const invoices = [
+      invoice({
+        payment_methods: [{ mode_of_payment: "Cash", amount: 650, change_amount: 50 }],
+        totalAmount: 600,
+      }),
+    ];
+
+    const stats = computePaymentStats([mode({ name: "Cash", openingAmount: 0 })], invoices);
+
+    expect(statFor(stats, "Cash").amount).toBe(600);
+  });
 });

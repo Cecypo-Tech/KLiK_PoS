@@ -708,6 +708,45 @@ def _fetch_sales_data(pos_profile, opening_entry_name, opening_date, is_admin):
 	return _fetch_opening_sales_data(opening_entry_name)
 
 
+def _change_given_by_mode(where_sql, params):
+	"""{mode_of_payment: change handed back} for the submitted invoices matching `where_sql`
+	(the invoice table is aliased `si`).
+
+	A payment row keeps what the customer tendered; the change is on the invoice, paid out
+	of `account_for_change_amount`. ERPNext's POS Closing Entry takes it off the payment row
+	paying into that account (pos_closing_entry.get_payments). Here it is taken per invoice
+	off the row the change actually left through: change is always cash (ERPNext computes it
+	only against a Cash-type row), so the invoice's Cash row first - several modes can share
+	the change account, and one may have none - then the row paying into that account.
+	"""
+	rows = frappe.db.sql(
+		f"""
+		SELECT si.change_amount,
+			(SELECT sip.mode_of_payment FROM `tabSales Invoice Payment` sip
+			 WHERE sip.parent = si.name
+				AND (sip.type = 'Cash' OR sip.account = si.account_for_change_amount)
+			 ORDER BY (sip.type = 'Cash') DESC, (sip.account = si.account_for_change_amount) DESC, sip.idx
+			 LIMIT 1) AS mode_of_payment
+		FROM `tabSales Invoice` si
+		WHERE {where_sql} AND si.docstatus = 1 AND si.change_amount > 0
+		""",
+		params,
+		as_dict=True,
+	)
+	change = {}
+	for row in rows:
+		if row.mode_of_payment:
+			change[row.mode_of_payment] = flt(change.get(row.mode_of_payment, 0)) + flt(row.change_amount)
+	return change
+
+
+def _less_change(rows, change):
+	"""Payment rows summed per mode, with the change handed back taken off."""
+	for row in rows:
+		row.total_amount = flt(row.total_amount) - flt(change.get(row.mode_of_payment, 0))
+	return rows
+
+
 def _fetch_daily_sales_data(pos_profile, opening_date):
 	"""Fetch all sales data for the day (admin view)."""
 	rows = frappe.db.sql(
@@ -727,6 +766,13 @@ def _fetch_daily_sales_data(pos_profile, opening_date):
         """,
 		(pos_profile, opening_date),
 		as_dict=True,
+	)
+	rows = _less_change(
+		rows,
+		_change_given_by_mode(
+			"si.pos_profile = %s AND si.posting_date = %s AND IFNULL(si.custom_pos_opening_entry, '') != ''",
+			(pos_profile, opening_date),
+		),
 	)
 	return _merge_payment_entry_rows(rows, _fetch_daily_payment_entry_data(opening_date))
 
@@ -748,6 +794,7 @@ def _fetch_opening_sales_data(opening_entry_name):
 		(opening_entry_name,),
 		as_dict=True,
 	)
+	rows = _less_change(rows, _change_given_by_mode("si.custom_pos_opening_entry = %s", (opening_entry_name,)))
 	return _merge_payment_entry_rows(rows, _fetch_opening_payment_entry_data(opening_entry_name))
 
 

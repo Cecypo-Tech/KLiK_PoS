@@ -417,7 +417,13 @@ def _calculate_payment_reconciliation(opening_entry, data):
 		(opening_entry_name,),
 		as_dict=True,
 	)
-	sales_map = {row.mode_of_payment: row.total_amount for row in sales_data}
+	from klik_pos.api.payment import _change_given_by_mode
+
+	# The rows hold what was tendered; the change handed back left the drawer.
+	change = _change_given_by_mode("si.custom_pos_opening_entry = %s", (opening_entry_name,))
+	sales_map = {
+		row.mode_of_payment: flt(row.total_amount) - flt(change.get(row.mode_of_payment, 0)) for row in sales_data
+	}
 
 	# Money that reached the till as a Payment Entry stamped with this shift - every M-Pesa
 	# receipt now - belongs in the expected amount exactly as a payment row would.
