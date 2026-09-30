@@ -5044,6 +5044,7 @@ def create_multi_invoice_return(return_data):
 		invoice_returns = return_data.get("invoice_returns", [])
 
 		created_returns = []
+		failed = []
 
 		for _i, invoice_return in enumerate(invoice_returns):
 			invoice_name = invoice_return.get("invoice_name")
@@ -5063,12 +5064,23 @@ def create_multi_invoice_return(return_data):
 				if result.get("success"):
 					created_returns.append(result.get("return_invoice"))
 				else:
-					frappe.log_error(f"Failed to create return for {invoice_name}: {result.get('message')}")
+					failed.append({"invoice_name": invoice_name, "message": result.get("message")})
 
+		# Every return that did not go through is named: reporting success while some quietly
+		# failed left the cashier believing goods were returned that were not.
+		if failed:
+			message = _("Created {0} return(s); {1} failed: {2}").format(
+				len(created_returns),
+				len(failed),
+				"; ".join(f"{f['invoice_name']}: {f['message']}" for f in failed),
+			)
+		else:
+			message = _("Created {0} return invoices successfully").format(len(created_returns))
 		return {
-			"success": True,
+			"success": not failed,
 			"created_returns": created_returns,
-			"message": f"Created {len(created_returns)} return invoices successfully",
+			"failed": failed,
+			"message": message,
 		}
 
 	except Exception as e:

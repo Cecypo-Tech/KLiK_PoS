@@ -140,3 +140,48 @@ class TestPartialReturn(CashOnlyReturnCase):
 		self.assertEqual(self._refund_rows(first), [("Cash", -300)])
 		self.assertEqual(self._refund_rows(second), [], "the card half is not paid out in cash")
 		self.assertEqual(flt(abs(second.outstanding_amount)), 300)
+
+
+class TestMultiInvoiceReturn(CashOnlyReturnCase):
+	def test_a_return_that_fails_is_reported_not_swallowed(self):
+		from klik_pos.api.sales_invoice import create_multi_invoice_return
+
+		good, bad = self._sale(300, cash=300), self._sale(300, cash=300)
+		result = create_multi_invoice_return(
+			{
+				"invoice_returns": [
+					{"invoice_name": good.name, "return_items": [{"item_code": good.items[0].item_code, "return_qty": 1}], "payment_method": "Cash", "return_amount": 300},
+					{"invoice_name": bad.name, "return_items": [{"item_code": bad.items[0].item_code, "return_qty": 1}], "payment_method": CARD, "return_amount": 300},
+				]
+			}
+		)
+		self.assertFalse(result["success"])
+		self.assertEqual(len(result["created_returns"]), 1)
+		self.assertEqual([f["invoice_name"] for f in result["failed"]], [bad.name])
+		self.assertIn("Only cash", result["failed"][0]["message"])
+
+
+class TestReturnsInTheShiftFigures(CashOnlyReturnCase):
+	def test_a_return_today_lowers_todays_cash_and_leaves_yesterday_alone(self):
+		from klik_pos.api.pos_entry import _calculate_payment_reconciliation
+		from klik_pos.tests.test_opening_conflict import _profile, _shift
+
+		profile = _profile()
+		yesterday, today = _shift(profile, "Administrator", status="Closed", days_ago=1), _shift(profile, "Administrator")
+		cash_sale = self._sale(600, cash=650)  # 50 change: the drawer kept 600
+		card_sale = self._sale(500, card=500)
+		for sale in (cash_sale, card_sale):
+			frappe.db.set_value("Sales Invoice", sale.name, "custom_pos_opening_entry", yesterday, update_modified=False)
+
+		with patch("klik_pos.api.sales_invoice.get_current_pos_opening_entry", return_value=today):
+			self._full_return(cash_sale)
+			self._full_return(card_sale)
+
+		def expected(shift):
+			rows = _calculate_payment_reconciliation(frappe._dict(name=shift), {"closing_balance": {}})
+			return {r["mode_of_payment"]: flt(r["expected_amount"]) for r in rows}
+
+		self.assertEqual(expected(today).get("Cash"), -600, "the 600 handed back left today's drawer")
+		self.assertFalse(expected(today).get(CARD), "no card money moved at the till")
+		self.assertEqual(expected(yesterday).get("Cash"), 600, "yesterday's drawer is untouched")
+		self.assertEqual(expected(yesterday).get(CARD), 500)

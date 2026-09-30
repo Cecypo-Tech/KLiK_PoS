@@ -26,6 +26,7 @@ import { fixedChargeReturned, refundDefault, returnedValue, returnsAnyFixedCharg
 import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
+import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
 
 interface MultiInvoiceReturnProps {
   customer?: string;
@@ -274,10 +275,9 @@ export default function MultiInvoiceReturn({
             if (selectedInvoices.has(inv.name)) {
               const amount = refundDefault(inv);
 
-              const defaultMode = paymentModes.find((m) => m.default === 1)?.mode_of_payment || paymentModes[0]?.mode_of_payment || 'Cash';
-              // @ts-expect-error backend may provide payments array
-              const inferred = inv.payments?.[0]?.mode_of_payment || defaultMode;
-              next[inv.name] = next[inv.name] || { method: inferred, amount };
+              // Only cash is handed back at the till, whatever the sale was paid with.
+              const defaultMode = defaultCashRefundMode(paymentModes) || 'Cash';
+              next[inv.name] = next[inv.name] || { method: defaultMode, amount };
             }
           }
           return next;
@@ -382,12 +382,11 @@ export default function MultiInvoiceReturn({
         if (inv) {
           const amount = refundDefault(inv);
 
-          const defaultMode = paymentModes.find((m) => m.default === 1)?.mode_of_payment || paymentModes[0]?.mode_of_payment || 'Cash';
-          // @ts-expect-error backend may provide payments array
-          const inferred = inv.payments?.[0]?.mode_of_payment || defaultMode;
+          // Only cash is handed back at the till, whatever the sale was paid with.
+          const defaultMode = defaultCashRefundMode(paymentModes) || 'Cash';
           setInvoicePayments((prev) => ({
             ...prev,
-            [invoiceName]: prev[invoiceName] || { method: inferred, amount },
+            [invoiceName]: prev[invoiceName] || { method: defaultMode, amount },
           }));
         }
       }
@@ -1186,7 +1185,7 @@ export default function MultiInvoiceReturn({
                         <div className="md:col-span-2">
                           <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Mode of Payment</label>
                           <select
-                            value={invoicePayments[invoice.name]?.method || (paymentModes.find(m=>m.default===1)?.mode_of_payment || paymentModes[0]?.mode_of_payment || 'Cash')}
+                            value={invoicePayments[invoice.name]?.method || (defaultCashRefundMode(paymentModes) || 'Cash')}
                             onChange={(e) => {
                               const method = e.target.value;
                               setInvoicePayments(prev => ({
@@ -1199,7 +1198,7 @@ export default function MultiInvoiceReturn({
                             }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500"
                           >
-                            {paymentModes.map((mode) => (
+                            {cashRefundModes(paymentModes).map((mode) => (
                               <option key={mode.mode_of_payment} value={mode.mode_of_payment}>{mode.mode_of_payment}</option>
                             ))}
                           </select>
@@ -1222,7 +1221,7 @@ export default function MultiInvoiceReturn({
                                 setInvoicePayments(prev => ({
                                   ...prev,
                                   [invoice.name]: {
-                                    method: prev[invoice.name]?.method || (paymentModes.find(m=>m.default===1)?.mode_of_payment || paymentModes[0]?.mode_of_payment || 'Cash'),
+                                    method: prev[invoice.name]?.method || (defaultCashRefundMode(paymentModes) || 'Cash'),
                                     amount: roundedValue
                                   }
                                 }));
