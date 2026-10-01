@@ -126,6 +126,12 @@ describe("loadCachedItemsToCart and checkout's own state", () => {
     expect((await stateAfterLoad()).checkoutExtras).toEqual({ ...EMPTY_CHECKOUT_EXTRAS, orderDiscountAmount: 10 });
   });
 
+  it("brings a recalled draft's own remarks back, so submitting it does not clear them", async () => {
+    cacheDraftInvoiceItems("ACC-SINV-1", [item], null, 0, "Paid by cheque 0012");
+
+    expect((await stateAfterLoad()).checkoutExtras).toEqual({ ...EMPTY_CHECKOUT_EXTRAS, remarks: "Paid by cheque 0012" });
+  });
+
   it("leaves a resumed held order's restored checkout state alone", async () => {
     cacheHeldOrder("SAL-ORD-1", [item], null, 10);
 

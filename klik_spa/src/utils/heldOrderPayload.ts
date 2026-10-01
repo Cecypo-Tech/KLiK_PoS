@@ -90,6 +90,7 @@ export function checkoutExtrasFromHeldOrder(
     deliveryPersonnel: clean(meta.deliveryPersonnel as string | null | undefined),
     orderDiscountAmount: flags.discountChange ? money(details.discount_amount) : 0,
     salesTaxCharges: typeof meta.SalesTaxCharges === "string" ? meta.SalesTaxCharges : "",
-    remarks: details.remarks || (typeof meta.remarks === "string" ? meta.remarks : ""),
+    // The order's own field wins - even emptied in desk; the cart copy only for an older server.
+    remarks: typeof details.remarks === "string" ? details.remarks : typeof meta.remarks === "string" ? meta.remarks : "",
   };
 }

@@ -107,6 +107,11 @@ describe("checkoutExtrasFromHeldOrder", () => {
     expect(out.remarks).toBe("From meta");
   });
 
+  it("keeps a note cleared in desk cleared, whatever the cart copy says", () => {
+    const out = checkoutExtrasFromHeldOrder({ remarks: "", cart_meta: { remarks: "Stale" } }, allOn);
+    expect(out.remarks).toBe("");
+  });
+
   it("copes with an order held before any of this existed", () => {
     expect(checkoutExtrasFromHeldOrder({ cart_meta: null }, allOn)).toEqual(EMPTY_CHECKOUT_EXTRAS);
   });

@@ -227,6 +227,7 @@ export async function addDraftInvoiceToCart(invoiceId: string): Promise<boolean>
       cartItems as RootCartItem[],
       customer,
       Number(invoiceData.discount_amount) || 0,
+      typeof invoiceData.remarks === "string" ? invoiceData.remarks : "",
     );
 
     return true;

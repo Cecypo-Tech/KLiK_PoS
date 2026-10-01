@@ -2658,7 +2658,7 @@ def create_draft_invoice(data):
 
 		if tax_id:
 			doc.db_set("tax_id", tax_id)
-		if target_draft_invoice_id and _parse_remarks(data):
+		if target_draft_invoice_id and isinstance(data, dict) and "remarks" in data:
 			# The existing draft was saved above; its note goes on as it is.
 			doc.db_set("remarks", _parse_remarks(data))
 
@@ -4410,27 +4410,32 @@ REMARKS_MAX_LENGTH = 2000
 
 
 def _parse_remarks(data):
-	"""The checkout's remarks as plain text, or None when there are none."""
+	"""The checkout's remarks as plain text, or None when there are none.
+
+	Markup is taken out as markup only where there is a tag, so "Price < 100 and qty > 2"
+	keeps its words; any angle bracket left is dropped, so no tag can survive into a print.
+	"""
 	raw = data.get("remarks") if isinstance(data, dict) else None
 	if not isinstance(raw, str):
 		return None
-	text = strip_html_tags(raw).strip()
+	if re.search(r"<[A-Za-z/!][^>]*>", raw):
+		raw = strip_html_tags(raw)
+	text = re.sub(r"[ \t]{2,}", " ", raw.replace("<", "").replace(">", "")).strip()
 	return text[:REMARKS_MAX_LENGTH] or None
 
 
 def _apply_remarks(doc, data):
-	"""Write the checkout's remarks onto an invoice or held order.
-
-	A held order takes the cart's remarks whenever the cart sends the key - an empty one
-	clears it. An invoice only ever takes a non-empty note, leaving ERPNext's default.
-	"""
-	if not doc.meta.has_field("remarks") or not isinstance(data, dict):
+	"""Write the checkout's remarks onto an invoice or held order whenever the cart sends
+	the key; an empty one clears them. A site's own shorter `remarks` field is respected."""
+	if not isinstance(data, dict) or "remarks" not in data:
+		return
+	field = doc.meta.get_field("remarks")
+	if not field:
 		return
 	remarks = _parse_remarks(data)
-	if remarks:
-		doc.remarks = remarks
-	elif doc.doctype == "Sales Order" and "remarks" in data:
-		doc.remarks = None
+	if remarks and field.fieldtype not in ("Small Text", "Text", "Long Text", "Text Editor"):
+		remarks = remarks[: cint(field.length) or 140]
+	doc.remarks = remarks or None
 
 
 def _stamp_return_with_refunding_shift(return_doc):
@@ -5434,7 +5439,7 @@ def delete_draft_invoice(invoice_id):
 
 
 @frappe.whitelist()
-def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
+def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None):
 	"""
 	Submit a draft sales invoice directly without payment dialog.
 	This converts a draft invoice to submitted status.
@@ -5442,6 +5447,9 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 	held_order_id: the held Sales Order this draft was paid for (M-Pesa makes its draft before
 	the money moves). It is finished as checkout_held_order would: locked, access-checked,
 	linked, price-approval checked, and taken off the Held tab once the invoice goes through.
+
+	remarks: the checkout's note, applied whether or not `data` comes - an M-Pesa sale paid
+	wholly from receipts sends no cart data, and a note typed after picking them must land.
 	"""
 	draft_touched = False
 	try:
@@ -5581,6 +5589,9 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 			invoice_doc.calculate_taxes_and_totals()
 
 			invoice_doc.save(ignore_permissions=True)
+
+		if remarks is not None:
+			_apply_remarks(invoice_doc, {"remarks": remarks})
 
 		if held_order_id:
 			if not data:

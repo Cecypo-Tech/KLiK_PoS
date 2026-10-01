@@ -82,6 +82,51 @@ class TestRemarksTravel(FrappeTestCase):
 class TestParseRemarks(FrappeTestCase):
 	def test_trims_strips_markup_and_caps(self):
 		self.assertEqual(_parse_remarks({"remarks": "  <b>hi</b>  "}), "hi")
+		# Ordinary text with angle brackets keeps its words; no tag can survive.
+		self.assertEqual(_parse_remarks({"remarks": "Price < 100 and qty > 2"}), "Price 100 and qty 2")
+		self.assertNotIn("<", _parse_remarks({"remarks": "<img src=x onerror=alert(1) "}))
 		self.assertIsNone(_parse_remarks({"remarks": "   "}))
 		self.assertIsNone(_parse_remarks({}))
 		self.assertEqual(len(_parse_remarks({"remarks": "x" * 5000})), 2000)
+
+
+class TestRemarksEdges(FrappeTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		install_sales_order_remarks()
+
+	def test_a_re_hold_from_a_pos_that_sends_no_remarks_keeps_them(self):
+		held = create_held_order(_payload(remarks="Keep me"))
+		payload = _payload(held_order_id=held["order_name"])
+		self.assertNotIn("remarks", payload)
+		create_held_order(payload)
+		self.assertEqual(_so_remarks(held["order_name"]), "Keep me")
+
+	def test_an_emptied_box_stops_the_held_order_s_note_reaching_the_invoice(self):
+		held = create_held_order(_payload(remarks="Old note"))
+		with patch("klik_pos.api.sales_invoice._queue_sales_invoice", return_value={"success": False}) as queue, patch.object(
+			sales_order, "_active_till", return_value=None
+		):
+			checkout_held_order(held["order_name"], {"checkout_request_id": None, "remarks": ""})
+		self.assertEqual(queue.call_args.args[0].get("remarks"), "")
+
+	def test_submitting_a_draft_takes_the_remarks_even_with_no_other_data(self):
+		"""The M-Pesa receipt-only submit sends no cart data; the note must still land."""
+		from klik_pos.api.sales_invoice import submit_draft_invoice
+		from klik_pos.tests.test_held_order_mpesa_checkout import _draft
+
+		draft = _draft()
+		frappe.db.set_value("Sales Invoice", draft.name, "remarks", "Typed before the receipts")
+		result = submit_draft_invoice(draft.name, remarks="Typed after the receipts")
+		self.assertTrue(result["success"], result)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", draft.name, "remarks"), "Typed after the receipts")
+
+	def test_an_emptied_box_clears_a_draft_s_remarks(self):
+		from klik_pos.api.sales_invoice import submit_draft_invoice
+		from klik_pos.tests.test_held_order_mpesa_checkout import _draft
+
+		draft = _draft()
+		frappe.db.set_value("Sales Invoice", draft.name, "remarks", "To be cleared")
+		result = submit_draft_invoice(draft.name, remarks="")
+		self.assertTrue(result["success"], result)
+		self.assertIn(frappe.db.get_value("Sales Invoice", draft.name, "remarks") or "", ("", "No Remarks"))

@@ -12,6 +12,7 @@ interface DraftInvoiceCache {
   originalHeldOrderApprovalState?: string | null; // price approval workflow_state as loaded
   originalHeldOrderPriceBreach?: number;          // price breach flag as loaded
   orderDiscountAmount?: number;   // additional discount amount carried over from hold/draft
+  remarks?: string;               // a recalled draft invoice's own remarks
 }
 
 const CACHE_KEY = 'draft-invoice-cache';
@@ -27,6 +28,7 @@ export function cacheDraftInvoiceItems(
   items: CartItem[],
   customer: Customer | null,
   orderDiscountAmount = 0,
+  remarks = "",
 ): void {
   const cache: DraftInvoiceCache = {
     items,
@@ -35,6 +37,7 @@ export function cacheDraftInvoiceItems(
     customer,
     originalDraftInvoiceId: invoiceId,
     orderDiscountAmount,
+    remarks,
   };
 
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
@@ -161,7 +164,13 @@ export async function loadCachedItemsToCart(): Promise<boolean> {
     // last sale's delivery charge, person and tax template must not ride along onto it. A
     // held order sets its own checkout state just before this, so it is left alone.
     ...(cachedData.originalDraftInvoiceId
-      ? { checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS, orderDiscountAmount: Number(cachedData.orderDiscountAmount) || 0 } }
+      ? {
+          checkoutExtras: {
+            ...EMPTY_CHECKOUT_EXTRAS,
+            orderDiscountAmount: Number(cachedData.orderDiscountAmount) || 0,
+            remarks: cachedData.remarks || "",
+          },
+        }
       : {}),
   }));
 

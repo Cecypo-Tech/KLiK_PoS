@@ -45,6 +45,16 @@ describe("submitDraftInvoice for a held order paid by M-Pesa", () => {
     expect(body).toEqual({ invoice_id: "POS-01500", data: { items: [] }, held_order_id: "SAL-ORD-2026-00034" });
   });
 
+  it("sends the remarks on their own, even with no cart data", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const fetch = reply({ success: true, invoice_name: "POS-01500" });
+    vi.stubGlobal("fetch", fetch);
+
+    await submitDraftInvoice("POS-01500", undefined, null, "");
+
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ invoice_id: "POS-01500", remarks: "" });
+  });
+
   it("sends no held order for an ordinary draft", async () => {
     vi.stubGlobal("window", { csrf_token: "t" });
     const fetch = reply({ success: true, invoice_name: "POS-01500" });

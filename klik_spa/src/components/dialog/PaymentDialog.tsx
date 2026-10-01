@@ -1558,6 +1558,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           mpesaDraftInvoiceName,
           receiptData && { ...receiptData, enable_background_invoice_submission: enableBackgroundSubmission },
           originalHeldOrderId,
+          remarks.trim(),
         );
       } else if (originalHeldOrderId) {
         // Checkout from a held Sales Order — convert it to a submitted Sales Invoice

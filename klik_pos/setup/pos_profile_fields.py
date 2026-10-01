@@ -491,9 +491,19 @@ def install_sales_order_remarks():
     """Give Sales Order a Remarks field, as Sales Invoice has, so a held order's note survives
     to the invoice. Only where the site has none - a standard or custom `remarks` is kept.
     Placed in More Info, by the status, as on Sales Invoice. Returns True when created."""
-    if frappe.db.exists("DocField", {"parent": "Sales Order", "fieldname": "remarks"}) or frappe.db.exists(
-        "Custom Field", {"dt": "Sales Order", "fieldname": "remarks"}
-    ):
+    ours = frappe.db.get_value(
+        "Custom Field", {"dt": "Sales Order", "fieldname": "remarks", "module": "KLiK PoS"}, "name"
+    )
+    if frappe.db.exists("DocField", {"parent": "Sales Order", "fieldname": "remarks"}):
+        # ERPNext has its own now: ours would show the field twice.
+        if ours:
+            frappe.delete_doc("Custom Field", ours, ignore_permissions=True)
+        return False
+    if ours:
+        # Like Sales Invoice's, a cashier's note stays off printed orders.
+        frappe.db.set_value("Custom Field", ours, "print_hide", 1)
+        return False
+    if frappe.db.exists("Custom Field", {"dt": "Sales Order", "fieldname": "remarks"}):
         return False
     create_custom_fields(
         {
@@ -503,6 +513,7 @@ def install_sales_order_remarks():
                     "label": "Remarks",
                     "fieldtype": "Small Text",
                     "insert_after": "advance_payment_status",
+                    "print_hide": 1,
                     "module": "KLiK PoS",
                 }
             ]
