@@ -13,7 +13,8 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
-from klik_pos.api.opening_balances import carries_float, enforce, last_closing, opening_suggestion
+from klik_pos.api.opening_balances import carries_float, enforce, enforce_banking, last_closing, opening_suggestion
+from klik_pos.api.pos_entry import _parse_request_data
 
 COMPANY = "Dev Co"
 CASH = "Cash"
@@ -37,9 +38,11 @@ def _profile_with_modes(name, modes):
 	return profile.name
 
 
-def _file_closing(profile, counted):
-	"""A submitted POS Closing Entry counting `counted` per mode, without driving the
-	whole close: what is under test reads the filed figures, not how they got there."""
+def _file_closing(profile, counted, banked=None):
+	"""A submitted POS Closing Entry counting `counted` per mode, with `banked` handed over
+	for banking, without driving the whole close: what is under test reads the filed
+	figures, not how they got there."""
+	banked = banked or {}
 	closing = frappe.get_doc(
 		{
 			"doctype": "POS Closing Entry",
@@ -50,7 +53,13 @@ def _file_closing(profile, counted):
 			"period_end_date": frappe.utils.add_to_date(None, hours=-1),
 			"posting_date": frappe.utils.nowdate(),
 			"payment_reconciliation": [
-				{"mode_of_payment": mode, "opening_amount": 0, "expected_amount": amount, "closing_amount": amount}
+				{
+					"mode_of_payment": mode,
+					"opening_amount": 0,
+					"expected_amount": amount,
+					"closing_amount": amount,
+					"custom_banked_amount": banked.get(mode, 0),
+				}
 				for mode, amount in counted.items()
 			],
 		}
@@ -201,3 +210,87 @@ class TestWhatTheTillWillAccept(OpeningCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			doc.insert(ignore_permissions=True)
+
+
+class TestBankingAtClosing(OpeningCase):
+	"""A closing counts 100,000 and most of it goes to the bank. The next opening must offer
+	the float left behind, not the whole count, or every morning opens on a 'difference'."""
+
+	def test_the_next_opening_suggests_what_was_left_after_banking(self):
+		profile = _profile_with_modes(f"OB Bank {frappe.generate_hash(length=5)}", [CASH, PHONE])
+		_file_closing(profile, {CASH: 100000, PHONE: 40000}, banked={CASH: 95000})
+
+		modes = {m["mode_of_payment"]: m for m in opening_suggestion(profile)["modes"]}
+
+		self.assertEqual(flt(modes[CASH]["suggested_amount"]), 5000.0)
+		self.assertEqual(flt(modes[CASH]["previous_counted_amount"]), 100000.0)
+		self.assertEqual(flt(modes[CASH]["previous_banked_amount"]), 95000.0)
+		self.assertEqual(flt(modes[PHONE]["suggested_amount"]), 0.0)
+
+	def test_opening_at_the_float_left_needs_no_reason(self):
+		profile = _profile_with_modes(f"OB BankOpen {frappe.generate_hash(length=5)}", [CASH])
+		_file_closing(profile, {CASH: 100000}, banked={CASH: 95000})
+		doc = self._opening(profile, [{"mode_of_payment": CASH, "opening_amount": 5000}])
+
+		enforce(doc)  # no throw
+
+	def test_opening_at_the_full_count_after_banking_needs_a_reason(self):
+		profile = _profile_with_modes(f"OB BankFull {frappe.generate_hash(length=5)}", [CASH])
+		_file_closing(profile, {CASH: 100000}, banked={CASH: 95000})
+		doc = self._opening(profile, [{"mode_of_payment": CASH, "opening_amount": 100000}])
+
+		with self.assertRaises(frappe.ValidationError):
+			enforce(doc)
+
+	def test_a_closing_with_nothing_banked_suggests_the_full_count(self):
+		profile = _profile_with_modes(f"OB NoBank {frappe.generate_hash(length=5)}", [CASH])
+		_file_closing(profile, {CASH: 3000})
+
+		modes = {m["mode_of_payment"]: m for m in opening_suggestion(profile)["modes"]}
+
+		self.assertEqual(flt(modes[CASH]["suggested_amount"]), 3000.0)
+
+	def _closing_doc(self, mode, counted, banked):
+		doc = frappe.new_doc("POS Closing Entry")
+		doc.append(
+			"payment_reconciliation",
+			{
+				"mode_of_payment": mode,
+				"closing_amount": counted,
+				"expected_amount": counted,
+				"custom_banked_amount": banked,
+			},
+		)
+		return doc
+
+	def test_banking_more_than_counted_is_refused(self):
+		with self.assertRaises(frappe.ValidationError) as caught:
+			enforce_banking(self._closing_doc(CASH, 100000, 150000))
+		self.assertIn(CASH, str(caught.exception))
+
+	def test_banking_on_a_mode_without_a_float_is_refused(self):
+		with self.assertRaises(frappe.ValidationError) as caught:
+			enforce_banking(self._closing_doc(PHONE, 40000, 40000))
+		self.assertIn(PHONE, str(caught.exception))
+
+	def test_negative_banking_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			enforce_banking(self._closing_doc(CASH, 1000, -5))
+
+	def test_banking_all_of_it_is_allowed(self):
+		enforce_banking(self._closing_doc(CASH, 100000, 100000))  # no throw
+
+
+class TestClosingRequestCarriesBanking(FrappeTestCase):
+	def test_banked_amounts_are_read_per_mode(self):
+		frappe.local.form_dict = frappe._dict(
+			{
+				"closing_balance": [
+					{"mode_of_payment": CASH, "closing_amount": 100000, "banked_amount": 95000},
+					{"mode_of_payment": PHONE, "closing_amount": 40000},
+				]
+			}
+		)
+		data = _parse_request_data()
+		self.assertEqual(data["closing_balance"], {CASH: 100000, PHONE: 40000})
+		self.assertEqual(data["banked_balance"], {CASH: 95000})
