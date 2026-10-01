@@ -33,14 +33,9 @@ def _series_current(name):
 
 class TestTheTillDecides(FrappeTestCase):
 	def _close(self, shift, clear):
-		real = frappe.db.get_value
-
-		def till_setting(doctype, name=None, fieldname=None, *args, **kwargs):
-			if doctype == "POS Profile" and fieldname == "custom_clear_draft_invoices":
-				return clear
-			return real(doctype, name, fieldname, *args, **kwargs)
-
-		with patch.object(frappe.db, "get_value", side_effect=till_setting), patch.object(
+		# The till's real setting; the test's transaction is rolled back afterwards.
+		frappe.db.set_value("POS Profile", PROFILE, "custom_clear_draft_invoices", clear)
+		with patch.object(
 			pos_entry.frappe.logger(), "warning", side_effect=AssertionError("the close itself failed")
 		):
 			pos_entry._clear_held_orders_on_close(shift)
@@ -86,3 +81,29 @@ class TestNumberingIsNotRewound(FrappeTestCase):
 
 		self.assertFalse(_exists(so))
 		self.assertEqual(_series_current(so.name), before)
+
+	def test_deleting_a_held_order_by_hand_leaves_the_series_too(self):
+		"""With clearing off, the Held tab's delete - newest first - is how orders go."""
+		from klik_pos.tests.test_held_order_access_rule import _as_cashier, _till
+
+		from klik_pos.api.sales_order import delete_held_order
+
+		so = _held_order(opening_entry="", minutes_ago=5)
+		before = _series_current(so.name)
+
+		with _as_cashier(_till(1)):
+			result = delete_held_order(so.name)
+
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(_series_current(so.name), before)
+
+	def test_a_counter_that_moved_on_meanwhile_is_left_alone(self):
+		from klik_pos.api.sales_invoice import _keeping_naming_series
+
+		so = _held_order(opening_entry="", minutes_ago=5)
+		prefix = so.name.rstrip("0123456789")
+		before = _series_current(so.name)
+		with _keeping_naming_series():
+			frappe.db.sql("UPDATE `tabSeries` SET `current` = `current` + 5 WHERE `name` = %s", prefix)
+		self.assertEqual(_series_current(so.name), before + 5)
+

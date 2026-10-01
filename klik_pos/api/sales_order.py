@@ -1,5 +1,4 @@
 import json
-from contextlib import contextmanager
 
 import frappe
 from frappe import _
@@ -10,6 +9,7 @@ from klik_pos.api.sales_invoice import (
     _apply_pos_tax_treatment,
     _apply_walkin_party_fields,
     _get_active_pos_profile,
+    _keeping_naming_series,
     _parse_extra_fields,
     _resolve_item_tax_details_for_line,
     _set_customer,
@@ -109,28 +109,6 @@ def _claim_held_order(order_id):
     if so.docstatus != 0:
         frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
     return None
-
-
-@contextmanager
-def _keeping_naming_series():
-    """Delete without winding naming series back.
-
-    frappe rewinds a series whenever the document holding its newest number is deleted, so
-    clearing held orders newest-first sent the numbering back to SO-00001 and the same names
-    were reused (and deleted again) several times a day - and an invoice's link to the order
-    it came from could point at a later order of the same name. Any counter that went back
-    is put where it was; one that moved on meanwhile is left alone.
-    """
-    before = dict(frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"))
-    try:
-        yield
-    finally:
-        for name, current in frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"):
-            if name in before and cint(current) < cint(before[name]):
-                frappe.db.sql(
-                    "UPDATE `tabSeries` SET `current` = %s WHERE `name` = %s AND `current` < %s",
-                    (before[name], name, before[name]),
-                )
 
 
 def _remove_checked_out_order(order_id):
@@ -629,7 +607,8 @@ def delete_held_order(order_id):
         _assert_held_order_access(so)
         if so.docstatus != 0:
             return {"success": False, "error": f"Cannot delete {order_id}: not a draft."}
-        so.delete(ignore_permissions=True)
+        with _keeping_naming_series():
+            so.delete(ignore_permissions=True)
         return {"success": True, "message": f"Held order {order_id} deleted."}
     except frappe.DoesNotExistError:
         return {"success": False, "error": f"Order {order_id} not found."}
