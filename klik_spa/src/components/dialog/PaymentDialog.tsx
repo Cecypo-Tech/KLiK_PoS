@@ -57,6 +57,7 @@ import ActionButtons from "./ActionButtons";
 import InvoicePreview from "./InvoicePreview";
 import SharingInterface from "./SharingInterface";
 import DeliveryPersonnelCombobox from "./DeliveryPersonnelCombobox";
+import RemarksInput from "./RemarksInput";
 import MpesaOptionsModal from "./MpesaOptionsModal";
 import OtherCharges from "./OtherCharges";
 import StepperInput from "../common/StepperInput";
@@ -218,6 +219,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
   const [selectedDeliveryPersonnel, setSelectedDeliveryPersonnel] = useState<string | null>(null);
+  const [remarks, setRemarks] = useState("");
   const [deliveryCharge, setDeliveryCharge] = useState(0);
   const [orderDiscountAmount, setOrderDiscountAmount] = useState(0);
   const [orderDiscountPercentInput, setOrderDiscountPercentInput] = useState(0);
@@ -501,6 +503,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
     if (checkoutExtras.deliveryPersonnel) setSelectedDeliveryPersonnel(checkoutExtras.deliveryPersonnel);
     if (checkoutExtras.salesTaxCharges) setSelectedSalesTaxCharges(checkoutExtras.salesTaxCharges);
+    setRemarks(checkoutExtras.remarks || "");
     setCheckoutExtrasRestored(true);
     // Once per open, from what the store held at that moment - not on every store write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -514,10 +517,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       deliveryPersonnel: selectedDeliveryPersonnel,
       orderDiscountAmount: Number(orderDiscountAmount) || 0,
       salesTaxCharges: selectedSalesTaxCharges,
+      remarks,
     });
     // setCheckoutExtras is a stable store action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, checkoutExtrasRestored, deliveryCharge, selectedDeliveryPersonnel, orderDiscountAmount, selectedSalesTaxCharges]);
+  }, [isOpen, checkoutExtrasRestored, deliveryCharge, selectedDeliveryPersonnel, orderDiscountAmount, selectedSalesTaxCharges, remarks]);
 
   // Inclusive grand total: sum of discountedPriceIncl (already computed correctly in OrderSummary mapping)
   // This is reliable regardless of whether items have ERPNext Item Tax Templates
@@ -871,6 +875,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       orderDiscountAmount: Number(orderDiscountAmount || 0),
       deliveryCharge: Number(deliveryCharge || 0),
       delivery_charge: Number(deliveryCharge || 0),
+      remarks: remarks.trim(),
       shipping_rule: activeShippingRule || null,
       grandTotal: checkoutGrandTotal,
       amountPaid: totalPaidAmount,
@@ -1553,6 +1558,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           mpesaDraftInvoiceName,
           receiptData && { ...receiptData, enable_background_invoice_submission: enableBackgroundSubmission },
           originalHeldOrderId,
+          remarks.trim(),
         );
       } else if (originalHeldOrderId) {
         // Checkout from a held Sales Order — convert it to a submitted Sales Invoice
@@ -1792,6 +1798,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             deliveryPersonnel: selectedDeliveryPersonnel,
             orderDiscountAmount: Number(orderDiscountAmount || 0),
             salesTaxCharges: selectedSalesTaxCharges,
+            remarks,
           },
           flags: tillFlags(posDetails as Record<string, unknown>),
         }),
@@ -2591,8 +2598,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   }
                 />
                 {renderMpesaStatusNotice()}
-                {(showLoyaltyRedemption || isDeliveryChargeEnabled || allowDiscountChange || isShippingRuleEnabled) && (
-                  <div className="flex flex-wrap items-end gap-3">
+                {/* Remarks is on every till, so this row always shows. */}
+                <div className="flex flex-wrap items-end gap-3">
                     {renderLoyaltyRedemption()}
                     {isDeliveryChargeEnabled && renderDeliveryChargeInput()}
                     {isShippingRuleEnabled && (
@@ -2610,8 +2617,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       onOrderDiscountAmountChange={handleOrderDiscountAmountChange}
                       onOrderDiscountPercentChange={handleOrderDiscountPercentChange}
                     />
-                  </div>
-                )}
+                    <RemarksInput value={remarks} onChange={setRemarks} disabled={invoiceSubmitted || isProcessingPayment} />
+                </div>
 
                 <TotalsSection
                   calculations={calculations}
@@ -2881,6 +2888,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                         inline
                       />
                     )}
+                    <RemarksInput value={remarks} onChange={setRemarks} disabled={invoiceSubmitted || isProcessingPayment} inline />
                   </OtherCharges>
 
                   <div className="lg:col-start-2">

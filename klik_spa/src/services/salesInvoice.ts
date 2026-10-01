@@ -347,7 +347,13 @@ export class DraftNoLongerDraftError extends Error {
  * money moves). The server then finishes that order as checkout does - or answers
  * held_order_gone, raised here as HeldOrderGoneError.
  */
-export async function submitDraftInvoice(invoiceId: string, data?: unknown, heldOrderId?: string | null) {
+export async function submitDraftInvoice(
+  invoiceId: string,
+  data?: unknown,
+  heldOrderId?: string | null,
+  /** The checkout's note, sent on its own: a receipt-paid M-Pesa submit sends no data. */
+  remarks?: string,
+) {
   const csrfToken = window.csrf_token;
 
   const response = await fetch('/api/method/klik_pos.api.sales_invoice.submit_draft_invoice', {
@@ -356,7 +362,12 @@ export async function submitDraftInvoice(invoiceId: string, data?: unknown, held
       'Content-Type': 'application/json',
       'X-Frappe-CSRF-Token': csrfToken
     },
-    body: JSON.stringify({ invoice_id: invoiceId, data, ...(heldOrderId ? { held_order_id: heldOrderId } : {}) }),
+    body: JSON.stringify({
+      invoice_id: invoiceId,
+      data,
+      ...(heldOrderId ? { held_order_id: heldOrderId } : {}),
+      ...(remarks !== undefined ? { remarks } : {}),
+    }),
     credentials: 'include'
   });
 

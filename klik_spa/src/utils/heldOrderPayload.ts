@@ -18,6 +18,8 @@ export interface CheckoutExtras {
   orderDiscountAmount: number;
   /** Sales Taxes and Charges Template chosen at checkout; "" means the till's default. */
   salesTaxCharges: string;
+  /** The cashier's note, kept on the held order and written to the invoice's Remarks. */
+  remarks: string;
 }
 
 export const EMPTY_CHECKOUT_EXTRAS: CheckoutExtras = {
@@ -25,6 +27,7 @@ export const EMPTY_CHECKOUT_EXTRAS: CheckoutExtras = {
   deliveryPersonnel: null,
   orderDiscountAmount: 0,
   salesTaxCharges: "",
+  remarks: "",
 };
 
 export interface TillFlags {
@@ -72,11 +75,13 @@ export function heldOrderPayloadExtras({
     deliveryPersonnel: clean(extras.deliveryPersonnel),
     orderDiscountAmount: money(extras.orderDiscountAmount),
     SalesTaxCharges: extras.salesTaxCharges || "",
+    // Always sent: holding again with the box emptied clears the order's remarks.
+    remarks: (extras.remarks || "").trim(),
   };
 }
 
 export function checkoutExtrasFromHeldOrder(
-  details: { discount_amount?: number; cart_meta?: Record<string, unknown> | null },
+  details: { discount_amount?: number; remarks?: string | null; cart_meta?: Record<string, unknown> | null },
   flags: TillFlags,
 ): CheckoutExtras {
   const meta = details.cart_meta ?? {};
@@ -85,5 +90,7 @@ export function checkoutExtrasFromHeldOrder(
     deliveryPersonnel: clean(meta.deliveryPersonnel as string | null | undefined),
     orderDiscountAmount: flags.discountChange ? money(details.discount_amount) : 0,
     salesTaxCharges: typeof meta.SalesTaxCharges === "string" ? meta.SalesTaxCharges : "",
+    // The order's own field wins - even emptied in desk; the cart copy only for an older server.
+    remarks: typeof details.remarks === "string" ? details.remarks : typeof meta.remarks === "string" ? meta.remarks : "",
   };
 }

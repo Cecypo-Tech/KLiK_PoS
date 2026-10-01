@@ -7,10 +7,12 @@ from frappe.utils import cint, flt, nowdate
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
     _apply_pos_tax_treatment,
+    _apply_remarks,
     _apply_walkin_party_fields,
     _get_active_pos_profile,
     _keeping_naming_series,
     _parse_extra_fields,
+    _parse_remarks,
     _resolve_item_tax_details_for_line,
     _set_customer,
     get_current_pos_opening_entry,
@@ -272,6 +274,8 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
         "walkin_phone": data.get("walkin_phone") if isinstance(data, dict) else None,
         "extra_fields": _parse_extra_fields(data),
         "shipping_rule": (data.get("shipping_rule") or None) if isinstance(data, dict) else None,
+        # None when the cart sent no remarks at all - an older POS - so a re-hold keeps them.
+        "remarks": (_parse_remarks(data) or "") if isinstance(data, dict) and "remarks" in data else None,
     }
 
 
@@ -358,6 +362,8 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
         walkin_phone=cart_meta.get("walkin_phone"),
     )
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
+    if cart_meta.get("remarks") is not None:
+        _apply_remarks(so, {"remarks": cart_meta.get("remarks")})
 
     for item in items:
         so.append("items", _so_item_row(so, pos_profile, item, warehouse))
@@ -403,6 +409,8 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
         walkin_phone=cart_meta.get("walkin_phone"),
     )
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
+    if cart_meta.get("remarks") is not None:
+        _apply_remarks(so, {"remarks": cart_meta.get("remarks")})
 
     for item in items:
         so.append("items", _so_item_row(so, pos_profile, item, warehouse))
@@ -559,6 +567,7 @@ def get_held_order_details(order_id):
             "shipping_rule": cart_meta.get("shipping_rule"),
             "items": items,
             "cart_meta": cart_meta,
+            "remarks": so.get("remarks") or "",
             "grand_total": flt(so.grand_total),
             "currency": so.currency,
             "discount_amount": flt(so.discount_amount or 0),
@@ -808,6 +817,13 @@ def checkout_held_order(order_id, data=None):
         gone = _claim_held_order(order_id)
         if gone:
             return gone
+
+        # A POS that sends no remarks still gets the held order's onto the invoice.
+        held_remarks = frappe.db.get_value("Sales Order", order_id, "remarks") if frappe.get_meta(
+            "Sales Order"
+        ).has_field("remarks") else None
+        if held_remarks and isinstance(data, dict) and "remarks" not in data:
+            data = {**data, "remarks": held_remarks}
 
         # Reuse the full invoice submission pipeline
         from klik_pos.api.sales_invoice import _queue_sales_invoice
