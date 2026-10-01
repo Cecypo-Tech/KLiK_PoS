@@ -278,15 +278,22 @@ export function exceptionsCoverMoreThanScope(summary: DashboardSummary): boolean
   return selected > 0 && selected < scope.available_profiles.length;
 }
 
-/** The earliest start among the open shifts, as HH:MM. */
-export function shiftStartTime(shifts: OpenShift[]): string | null {
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** The earliest start among the open shifts, as HH:MM - with the day in front when it is not
+ * today, since a till without a daily close can keep a shift open for days. */
+export function shiftStartTime(shifts: OpenShift[], today: string = todayIso()): string | null {
   const starts = shifts
     .map((shift) => shift.period_start_date)
     .filter((value): value is string => Boolean(value))
     .sort();
   if (starts.length === 0) return null;
-  const match = starts[0]?.match(/(\d{2}):(\d{2})/);
-  return match ? `${match[1]}:${match[2]}` : null;
+  const match = starts[0]?.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  const time = `${hour}:${minute}`;
+  if (`${year}-${month}-${day}` === today) return time;
+  return `${MONTHS[Number(month) - 1]} ${Number(day)} ${time}`;
 }
 
 /** The reader's last scope, or null. Storage can throw outright in a locked-down browser. */

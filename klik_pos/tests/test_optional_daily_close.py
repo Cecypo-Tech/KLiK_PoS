@@ -11,7 +11,12 @@ from unittest.mock import patch
 import frappe
 
 from klik_pos.api import shift
-from klik_pos.api.pos_entry import _ensure_may_close, current_shift_state, opening_conflict
+from klik_pos.api.pos_entry import (
+	_ensure_may_close,
+	current_shift_state,
+	opening_conflict,
+	validate_closing_entry,
+)
 from klik_pos.tests.test_opening_conflict import COMPANY, _profile, _shift
 from klik_pos.tests.test_shared_shift import JOINER, OPENER, SharedShiftCase
 
@@ -62,12 +67,26 @@ class TestAShiftFromAnEarlierDay(DailyCloseCase):
 		self.assertEqual(shift.join_shift(self.till)["entry"], entry)
 		self.assertEqual(shift.joined_shift(JOINER), entry)
 
-	def test_whoever_is_in_it_may_close_it(self):
+	def test_a_cashier_who_joined_it_may_close_it(self):
 		entry = _shift(self.till, OPENER, days_ago=2)
+		frappe.set_user(JOINER)
+		shift.join_shift(self.till)
 		row = frappe.db.get_value(
 			"POS Opening Entry", entry, ["name", "user", "pos_profile", "period_start_date"], as_dict=True
 		)
-		_ensure_may_close(row, JOINER)
+		with patch("frappe.get_roles", return_value=["Sales User"]):
+			_ensure_may_close(row, JOINER)
+			# The desk's POS Closing Entry is held to the same rule.
+			closing = frappe.new_doc("POS Closing Entry")
+			closing.pos_opening_entry = entry
+			validate_closing_entry(closing, "validate")
+
+	def test_turning_the_setting_back_on_makes_it_stale_at_once(self):
+		entry = _shift(self.till, OPENER, days_ago=1)
+		frappe.set_user(OPENER)
+		self.assertFalse(current_shift_state()["stale"])
+		frappe.db.set_value("POS Profile", self.till, FIELD, 1)
+		self.assertEqual(current_shift_state(), {**current_shift_state(), "entry": entry, "stale": True})
 
 	def test_two_open_shifts_on_the_till_still_need_a_manager(self):
 		_shift(self.till, OPENER, days_ago=1)

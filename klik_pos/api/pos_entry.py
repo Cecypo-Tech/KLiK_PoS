@@ -156,8 +156,6 @@ def opening_conflict(pos_profile):
 			"manager": manager,
 		}
 
-	_stale = _is_stale
-
 	def _shifts_payload(shifts):
 		return [
 			{
@@ -165,7 +163,7 @@ def opening_conflict(pos_profile):
 				"user": s.user,
 				"user_name": frappe.db.get_value("User", s.user, "full_name") or s.user,
 				"period_start_date": s.period_start_date,
-				"stale": _stale(s),
+				"stale": _is_stale(s),
 			}
 			for s in shifts
 		]
@@ -180,7 +178,7 @@ def opening_conflict(pos_profile):
 		row = next((s for s in own if s.pos_profile == pos_profile), own[0])
 		if row.pos_profile != pos_profile:
 			return _describe("own_other_profile", row, row.pos_profile)
-		return _describe("own_stale" if _stale(row) else "own_open", row, pos_profile)
+		return _describe("own_stale" if _is_stale(row) else "own_open", row, pos_profile)
 
 	shifts = open_shifts_on_till(pos_profile)
 	if not shifts:
@@ -190,7 +188,7 @@ def opening_conflict(pos_profile):
 	if joined:
 		joined_row = next((s for s in shifts if s.name == joined), None)
 		if joined_row:
-			return _describe("own_stale" if _stale(joined_row) else "own_open", joined_row, pos_profile)
+			return _describe("own_stale" if _is_stale(joined_row) else "own_open", joined_row, pos_profile)
 
 	if len(shifts) > 1:
 		oldest = shifts[0]
@@ -200,7 +198,7 @@ def opening_conflict(pos_profile):
 		return conflict
 
 	shift_row = shifts[0]
-	if _stale(shift_row):
+	if _is_stale(shift_row):
 		kind = "till_stale" if manager else "till_needs_manager"
 		conflict = _describe(kind, shift_row, pos_profile)
 		if kind == "till_needs_manager":

@@ -32,7 +32,9 @@ def requires_daily_close(pos_profile):
 	and the default). Off, an open shift is good until someone closes it."""
 	if not pos_profile or not frappe.db.has_column("POS Profile", DAILY_CLOSE_FIELD):
 		return True
-	value = frappe.db.get_value("POS Profile", pos_profile, DAILY_CLOSE_FIELD)
+	# Read on every sale and every shift lookup; the profile's document cache is cleared
+	# whenever it is saved.
+	value = frappe.get_cached_value("POS Profile", pos_profile, DAILY_CLOSE_FIELD)
 	return value is None or bool(value)
 
 
@@ -50,7 +52,7 @@ def open_shifts_on_till(pos_profile):
 	return frappe.get_all(
 		"POS Opening Entry",
 		filters={"pos_profile": pos_profile, "docstatus": 1, "status": "Open"},
-		fields=["name", "user", "period_start_date"],
+		fields=["name", "user", "pos_profile", "period_start_date"],
 		order_by="period_start_date asc, name asc",
 	)
 
@@ -63,7 +65,7 @@ def joined_shift(user=None):
 	row = frappe.db.get_value(
 		"POS Opening Entry",
 		{"name": entry, "docstatus": 1, "status": "Open"},
-		["name", "period_start_date"],
+		["name", "pos_profile", "period_start_date"],
 		as_dict=True,
 	)
 	if not row:

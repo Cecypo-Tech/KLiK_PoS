@@ -15,7 +15,8 @@ CREDIT_SALES_DESCRIPTION = (
 DAILY_CLOSE_DESCRIPTION = (
     "On (default): a shift is good for the day it was opened. The next day the till cannot "
     "sell until that shift is closed. Off: a shift stays good until someone closes it, so "
-    "closing is when the money is counted, not a daily chore."
+    "closing is when the money is counted, not a daily chore. Turning it back on while a "
+    "shift from an earlier day is open stops sales on the till until that shift is closed."
 )
 
 POS_PROFILE_FEATURE_FIELDS = [
