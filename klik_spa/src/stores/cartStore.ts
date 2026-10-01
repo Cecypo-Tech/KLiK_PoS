@@ -9,6 +9,7 @@ import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
+import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -146,6 +147,10 @@ interface CartState {
   /** Shipping Rule chosen at checkout; its charge is added by the server. */
   shippingRule: string | null
   setShippingRule: (rule: string | null) => void
+  /** Checkout state that must survive closing the dialog and a hold/recall: delivery
+   * charge and person, order discount, tax template. Emptied with the cart. */
+  checkoutExtras: CheckoutExtras
+  setCheckoutExtras: (patch: Partial<CheckoutExtras>) => void
   updateItemDescription: (id: string, description: string) => void
   /** Which cart line's details panel is open. At most one at a time (opening a
    * second line closes the first). Deliberately not persisted: it's transient UI
@@ -194,6 +199,7 @@ export const useCartStore = create<CartState>()(
       selectedCustomer: null,
       walkinDetails: { name: '', taxId: '', phone: '' },
       extraFields: {},
+      checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS },
       highlightItemId: null,
       highlightNonce: 0,
       selectedPriceList: null,
@@ -551,6 +557,7 @@ export const useCartStore = create<CartState>()(
           extraFields: {},
           selectedPriceList: null,
           shippingRule: null,
+          checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS },
           expandedCartItemId: null,
         }));
       },
@@ -585,6 +592,7 @@ export const useCartStore = create<CartState>()(
       setExtraFields: (v) => set({ extraFields: v }),
       clearExtraFields: () => set({ extraFields: {} }),
       setShippingRule: (rule) => set({ shippingRule: rule || null }),
+      setCheckoutExtras: (patch) => set((s) => ({ checkoutExtras: { ...s.checkoutExtras, ...patch } })),
       updateItemDescription: (id, description) =>
         set((state) => ({
           cartItems: state.cartItems.map((item) =>

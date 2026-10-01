@@ -21,7 +21,8 @@ import {
   getCheckoutCartFingerprint,
 } from "../../utils/checkoutAttempt";
 import { createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
-import { forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
+import { forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId } from "../../utils/draftInvoiceCache";
 import { heldOrderGoneMessage } from "../../utils/staleDraft";
 import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
@@ -60,6 +61,10 @@ export default function OrderSummary({
     expandedCartItemId,
     toggleItemExpansion,
     pendingRateOverride,
+    walkinDetails,
+    extraFields,
+    shippingRule,
+    checkoutExtras,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -497,10 +502,15 @@ export default function OrderSummary({
         status: "held",
         salesperson: activeSalesperson?.name || null,
         held_order_id: originalHeldOrderId,
-        // Preserve an order-level discount carried over from a resumed held
-        // order — this page has no discount UI of its own, so there's never
-        // a new value to apply here, only a prior one to avoid wiping.
-        orderDiscountAmount: originalHeldOrderId ? getOriginalOrderDiscountAmount() : 0,
+        // The buyer, the till's extra fields and what checkout last held (delivery, discount,
+        // tax template) live in the cart store; without them a cart hold lost all of it.
+        ...heldOrderPayloadExtras({
+          walkin: walkinDetails,
+          extraFields,
+          shippingRule,
+          extras: checkoutExtras,
+          flags: tillFlags(posDetails as Record<string, unknown>),
+        }),
       });
       if (result?.success) {
         handleClearCart();

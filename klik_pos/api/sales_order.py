@@ -439,6 +439,11 @@ def create_held_order(data):
             so = _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
             so.insert(ignore_permissions=True)
 
+        # Sales Order.tax_id is fetched from Customer.tax_id on every save, which wipes the
+        # walk-in buyer's PIN the cashier typed. Put it back, as the invoice path does.
+        if tax_id and so.meta.has_field("tax_id") and so.tax_id != tax_id:
+            so.db_set("tax_id", tax_id)
+
         approval_requested = _request_approval_if_needed(so)
         return {
             "success": True,
