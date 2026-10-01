@@ -7,7 +7,8 @@ import { useTheme } from "../hooks/useTheme";
 import { useProduct } from "../providers/ProductProvider";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useCartStore } from "../stores/cartStore";
-import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard } from "lucide-react";
+import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap } from "lucide-react";
+import { toast } from "react-toastify";
 import { clearCacheAndReload } from "../utils/clearCache";
 import { isItemOutOfStock } from "../utils/stock";
 import CategoryTabs from "./CategoryTabs";
@@ -16,6 +17,7 @@ import SearchBar from "./SearchBar";
 import SalespersonAuthModal from "./dialog/SalespersonAuthModal";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import KeyboardShortcutsPanel from "./KeyboardShortcutsPanel";
+import QuickEntryDialog from "./QuickEntryDialog";
 
 interface MenuGridProps {
   onRefreshStock?: () => void;
@@ -50,6 +52,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showQuickEntry, setShowQuickEntry] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(defaultView);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -184,6 +187,14 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
             >
               <Keyboard className="w-4 h-4" />
             </button>
+            {!useScannerOnly && <button
+              onClick={() => setShowQuickEntry(true)}
+              className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="Quick entry: item, qty, rate per line"
+              aria-label="Quick entry"
+            >
+              <Zap className="w-4 h-4" />
+            </button>}
             <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
@@ -349,6 +360,16 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
       </div>
 
       <KeyboardShortcutsPanel isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <QuickEntryDialog
+        isOpen={showQuickEntry}
+        onClose={() => setShowQuickEntry(false)}
+        onNeedSalesperson={() => {
+          // The sign-in sits under the box otherwise. The typed lines are kept.
+          setShowQuickEntry(false);
+          setShowSalespersonModal(true);
+          toast.info("Sign in the salesperson, then open quick entry again");
+        }}
+      />
 
       <SalespersonAuthModal
         isOpen={showSalespersonModal}

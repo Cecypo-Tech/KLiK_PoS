@@ -238,6 +238,6 @@ export function deferredClipboardText(clipboard: Clipboard = navigator.clipboard
 export function formatSystemDate(date: string, format: string | null | undefined): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(date || "");
   if (!match) return date || "";
-  const [, yyyy, mm, dd] = match;
+  const [, yyyy = "", mm = "", dd = ""] = match;
   return (format || "dd-mm-yyyy").replace(/yyyy/i, yyyy).replace(/mm/i, mm).replace(/dd/i, dd);
 }

@@ -9,6 +9,7 @@ import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
+import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 
 interface SerialBatchEntry {
@@ -128,7 +129,13 @@ interface CartState {
 
   addToCart: (item: Omit<CartItem, 'quantity'>) => Promise<void>
   addToCartQueued: (item: Omit<CartItem, 'quantity'>) => Promise<void>
-  addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number) => Promise<void>
+  /** The cart line the quantity went to, or null when the cart refused it (stock). With
+   * refresh false the caller refreshes pricing once after several adds. */
+  addToCartWithQuantity: (
+    item: Omit<CartItem, 'quantity'>,
+    quantity: number,
+    options?: { refresh?: boolean },
+  ) => Promise<string | null>
   updateQuantity: (id: string, quantity: number) => Promise<void>
   adjustQuantity: (id: string, delta: number) => Promise<void>
   updateUOM: (id: string, uom: string, price: number, conversionFactor?: number) => Promise<void>
@@ -162,12 +169,15 @@ interface CartState {
    * (itemDiscounts, checkout totals, persistence) and applies this via its
    * own existing handleCustomRateChange - this is a request to do that, not
    * a second place that sets a line's rate. Deliberately not persisted: a
-   * leftover request must never replay after a reload. nonce lets the same
-   * {itemId, rate} be requested twice in a row without being ignored as a
-   * no-op change.
+   * leftover request must never replay after a reload. A queue, not one slot:
+   * quick entry asks for several lines' rates at once, and a slot kept only the
+   * last. nonce orders them and lets the same {itemId, rate} be asked twice.
    */
-  pendingRateOverride: { itemId: string; rate: number; includesTax: boolean; nonce: number } | null
+  pendingRateOverrides: RateOverride[]
+  rateOverrideNonce: number
   requestCustomRate: (itemId: string, rate: number, includesTax?: boolean) => void
+  /** Drop the requests up to and including `nonce`, once applied. */
+  consumeRateOverrides: (nonce: number) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -210,14 +220,14 @@ export const useCartStore = create<CartState>()(
       toggleItemExpansion: (id) => set((s) => ({
         expandedCartItemId: nextExpandedCartItemId(s.expandedCartItemId, id),
       })),
-      pendingRateOverride: null,
-      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => ({
-        pendingRateOverride: {
-          itemId,
-          rate,
-          includesTax,
-          nonce: (s.pendingRateOverride?.nonce ?? 0) + 1,
-        },
+      pendingRateOverrides: [],
+      rateOverrideNonce: 0,
+      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => {
+        const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax });
+        return { pendingRateOverrides: next.queue, rateOverrideNonce: next.nonce };
+      }),
+      consumeRateOverrides: (nonce) => set((s) => ({
+        pendingRateOverrides: consumeRateOverrides(s.pendingRateOverrides, nonce),
       })),
 
       refreshCartPricing: async () => {
@@ -382,7 +392,7 @@ export const useCartStore = create<CartState>()(
         return run;
       },
 
-      addToCartWithQuantity: async (item, quantity) => {
+      addToCartWithQuantity: async (item, quantity, options) => {
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
@@ -395,16 +405,18 @@ export const useCartStore = create<CartState>()(
 
         if (hasFiniteAvailableStock(item) && item.available < quantity) {
           toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
-          return;
+          return null;
         }
 
+        let lineId: string;
         if (existingItem) {
           if (hasFiniteAvailableStock(item) && (totalMatchingQty + quantity) > item.available) {
             toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
-            return;
+            return null;
           }
 
           const targetId = existingItem.id;
+          lineId = targetId;
           const updatedQty = existingItem.quantity + quantity;
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
@@ -452,6 +464,7 @@ export const useCartStore = create<CartState>()(
           const newCartItems = shouldInsertNewItemsAtTop()
             ? [newItem, ...state.cartItems]
             : [...state.cartItems, newItem];
+          lineId = newItem.id;
           set((s) => ({
             cartItems: newCartItems,
             highlightItemId: newItem.id,
@@ -459,7 +472,8 @@ export const useCartStore = create<CartState>()(
           }));
         }
 
-        await get().refreshCartPricing();
+        if (options?.refresh !== false) await get().refreshCartPricing();
+        return lineId;
       },
 
       updateQuantity: async (id, quantity) => {
@@ -624,7 +638,7 @@ export const useCartStore = create<CartState>()(
       // expanded row reappearing after a reload would be surprising.
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { expandedCartItemId, pendingRateOverride, ...rest } = state;
+        const { expandedCartItemId, pendingRateOverrides, rateOverrideNonce, ...rest } = state;
         return rest;
       },
     }

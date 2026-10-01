@@ -72,7 +72,7 @@ describe("copyPrintImage", () => {
 
   it("says it is still working on a repeat click, and takes clicks again once done", async () => {
     let finish!: (r: Response) => void;
-    vi.stubGlobal("navigator", { clipboard: { write: vi.fn(async (items: Array<{ items: Record<string, Promise<Blob>> }>) => { await items[0].items["image/png"]; }) } });
+    vi.stubGlobal("navigator", { clipboard: { write: vi.fn(async (items: Array<{ items: Record<string, Promise<Blob>> }>) => { await items[0]?.items["image/png"]; }) } });
     vi.stubGlobal("ClipboardItem", class { constructor(public items: unknown) {} });
     const notify = vi.fn();
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => (finish = resolve)));
@@ -92,6 +92,8 @@ describe("copyPrintImage", () => {
     const fetchImpl = vi.fn((_url: string, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))))
     );
-    await expect(fetchPrintImage("Sales Order", "SAL-ORD-1", { fetchImpl }, 10)).rejects.toThrow(/took too long/);
+    await expect(
+      fetchPrintImage("Sales Order", "SAL-ORD-1", { fetchImpl: fetchImpl as unknown as typeof fetch }, 10)
+    ).rejects.toThrow(/took too long/);
   });
 });
