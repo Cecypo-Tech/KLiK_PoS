@@ -67,6 +67,7 @@ def get_current_user_info():
 		user_doc = frappe.get_doc("User", user)
 
 		# Get current POS profile
+		from klik_pos.api.shift import may_close_on_till
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
 		pos_profile = get_current_pos_profile()
@@ -82,6 +83,9 @@ def get_current_user_info():
 				"roles": user_roles,
 				"is_admin_user": is_admin_user,
 				"can_view_sales_dashboard": can_view_sales_dashboard,
+				# Whether to offer Closing Shift on this till (POS Profile 'Allow Closing
+				# Shift', or a manager); the closing endpoints check the same.
+				"can_close_shift": may_close_on_till(pos_profile.name if pos_profile else None, user),
 				"admin_roles": admin_roles,
 				"pos_profile": pos_profile.name if pos_profile else None,
 				"pos_profile_name": pos_profile.name if pos_profile else None,

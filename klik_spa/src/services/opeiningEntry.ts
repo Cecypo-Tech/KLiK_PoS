@@ -47,6 +47,8 @@ export interface CurrentShiftState {
   entry: string | null;
   stale: boolean;
   pos_profile: string | null;
+  /** false: closing is turned off on this till for the caller - a manager closes it. */
+  can_close?: boolean;
 }
 
 /**

@@ -1506,6 +1506,19 @@ def get_sales_invoices(
 		if surface == "dashboard" and not _can_view_sales_dashboard(user_roles):
 			return {"success": False, "error": _("Not permitted to view the Sales Dashboard")}
 
+		# Every surface but the three named screens gets Closing Shift's scope (the whole
+		# shift, every cashier), so every one of them is held to the closing rule.
+		if surface not in ("history", "customer", "dashboard") and current_pos_profile:
+			from klik_pos.api.shift import may_close_on_till
+
+			if not may_close_on_till(current_pos_profile):
+				return {
+					"success": False,
+					"error": _("Closing is turned off on {0}. A manager closes this till's shift.").format(
+						current_pos_profile
+					),
+				}
+
 		sales_invoice_meta = frappe.get_meta("Sales Invoice")
 		has_zatca_status = any(df.fieldname == "custom_zatca_submit_status" for df in sales_invoice_meta.fields)
 		has_custom_is_held = any(df.fieldname == "custom_is_held" for df in sales_invoice_meta.fields)

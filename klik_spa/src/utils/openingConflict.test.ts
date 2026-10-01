@@ -23,6 +23,18 @@ describe("conflictNotice", () => {
     expect(notice.message).toContain("earlier day");
   });
 
+  it("leaves a stale shift to a manager on a till that does not allow closing", () => {
+    const notice = conflictNotice({ ...conflict("own_stale"), can_close: false });
+    expect(notice.action).toBe("none");
+    expect(notice.message).toContain("A manager must close it");
+  });
+
+  it("leaves a shift on another till to a manager when that till does not allow closing", () => {
+    const notice = conflictNotice({ ...conflict("own_other_profile"), can_close: false });
+    expect(notice.action).toBe("none");
+    expect(notice.message).toContain("A manager must close it");
+  });
+
   it("sends a shift open on another till to closing, naming that till", () => {
     const notice = conflictNotice(conflict("own_other_profile"));
     expect(notice.action).toBe("close");

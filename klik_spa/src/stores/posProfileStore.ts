@@ -75,6 +75,9 @@ export interface UserInfo {
   is_admin_user: boolean;
   /** Opens the Sales Dashboard. Separate from is_admin_user, which widens data scope. */
   can_view_sales_dashboard: boolean;
+  /** Offer Closing Shift on this till (POS Profile 'Allow Closing Shift', or a manager).
+   * Missing on an older backend: offered. */
+  can_close_shift?: boolean;
   admin_roles: string[];
   pos_profile: string | null;
   pos_profile_name: string | null;

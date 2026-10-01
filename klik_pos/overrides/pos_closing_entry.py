@@ -25,6 +25,10 @@ def get_invoices(start, end, pos_profile, user):
 		get_invoices as erpnext_get_invoices,
 	)
 
+	from klik_pos.api.shift import ensure_may_close_on_till
+
+	# "Get Entries" on the desk form shows the expected amounts: the closing figures.
+	ensure_may_close_on_till(pos_profile)
 	data = erpnext_get_invoices(start, end, pos_profile, user)
 	data["payments"] = _add_shift_payment_entries(data.get("payments") or [], start, end, pos_profile, user)
 	return data

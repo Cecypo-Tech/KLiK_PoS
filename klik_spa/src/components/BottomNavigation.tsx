@@ -12,6 +12,8 @@ export default function BottomNavigation() {
   // Hidden, not disabled: a greyed-out icon with "you don't have access" is a promise the
   // till cannot keep, and every cashier who taps it learns nothing except that it is there.
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
+  // Closing is turned off on some tills (POS Profile 'Allow Closing Shift'): a manager closes them.
+  const canCloseShift = userInfo?.can_close_shift !== false
 
    const menuItems = [
     { icon: Grid3X3, path: "/pos", label: "POS" },
@@ -19,7 +21,7 @@ export default function BottomNavigation() {
      { icon: Banknote, path: "/payments", label: "Payments" },
      { icon: Users, path: "/customers", label: "Customers", requiresEditCreatePermission: true },
     { icon: BarChart3, path: "/dashboard", label: "Dashboard", requiresSalesDashboard: true },
-    { icon: FileText, path: "/closing_shift", label: "Closing" },
+    { icon: FileText, path: "/closing_shift", label: "Closing", requiresClosing: true },
 
   ]
 
@@ -40,6 +42,9 @@ export default function BottomNavigation() {
       <div className="flex items-center justify-around py-2 px-4">
         {menuItems.map((item, index) => {
           if (item.requiresEditCreatePermission && posDetails?.custom_allow_to_create_and_edit_customers !== 1) {
+            return null
+          }
+          if (item.requiresClosing && !canCloseShift) {
             return null
           }
           if (item.requiresSalesDashboard && !canAccessSalesDashboard) {

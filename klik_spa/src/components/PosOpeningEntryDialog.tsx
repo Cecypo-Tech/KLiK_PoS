@@ -235,6 +235,8 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
         setError(joined.error);
         return;
       }
+      // Now on that till: whether it offers Closing Shift is that till's setting.
+      void usePOSProfileStore.getState().fetchUserInfo(true);
     }
     onSuccess();
     if (notice.action === 'close' || notice.action === 'join_close') {
@@ -254,6 +256,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
       fetchOpeningConflict(profileForPaymentModes).then(setConflict);
       return;
     }
+    void usePOSProfileStore.getState().fetchUserInfo(true);
     onSuccess();
     navigate('/closing_shift');
   };

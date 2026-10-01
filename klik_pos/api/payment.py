@@ -654,6 +654,17 @@ def get_opening_entry_payment_summary():
 
 		payment_summary = _build_payment_summary(opening_info["modes"], sales_data)
 
+		from klik_pos.api.shift import may_close_on_till
+
+		if not may_close_on_till(opening_doc.pos_profile):
+			# The till's users do not close it, so they get the modes (Invoice History
+			# filters by them) without the closing figures.
+			for row in payment_summary:
+				row.update(openingAmount=0.0, amount=0.0, transactions=0)
+			response = _success_response(opening_info, payment_summary)
+			response["figures_hidden"] = True
+			return response
+
 		return _success_response(opening_info, payment_summary)
 
 	except Exception as e:

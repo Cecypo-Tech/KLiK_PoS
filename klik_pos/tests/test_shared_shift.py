@@ -309,7 +309,7 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": False, "pos_profile": self.till, "manager": False},
+				{"entry": entry, "stale": False, "pos_profile": self.till, "manager": False, "can_close": True},
 			)
 
 	def test_own_shift_opened_yesterday_is_stale(self):
@@ -319,7 +319,7 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": False},
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": False, "can_close": True},
 			)
 
 	def test_a_joined_shift_opened_yesterday_is_stale(self):
@@ -332,7 +332,7 @@ class TestCurrentShiftState(SharedShiftCase):
 
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": True},
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": True, "can_close": True},
 			)
 
 	def test_no_shift_at_all(self):
@@ -341,7 +341,7 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": None, "stale": False, "pos_profile": None, "manager": False},
+				{"entry": None, "stale": False, "pos_profile": None, "manager": False, "can_close": True},
 			)
 
 

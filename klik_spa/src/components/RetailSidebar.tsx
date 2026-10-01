@@ -13,6 +13,8 @@ export default function RetailSidebar() {
   // Hidden, not disabled: a greyed-out icon with "you don't have access" is a promise the
   // till cannot keep, and every cashier who taps it learns nothing except that it is there.
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
+  // Closing is turned off on some tills (POS Profile 'Allow Closing Shift'): a manager closes them.
+  const canCloseShift = userInfo?.can_close_shift !== false
 
   const menuItems = [
     { icon: Grid3X3, path: "/pos", label: "POS" },
@@ -20,7 +22,7 @@ export default function RetailSidebar() {
      { icon: Banknote, path: "/payments", label: "Payments" },
      { icon: Users, path: "/customers", label: "Customers", requiresEditCreatePermission: true },
     { icon: BarChart3, path: "/dashboard", label: "Dashboard", requiresSalesDashboard: true },
-    { icon: MonitorX, path: "/closing_shift", label: "Closing Shift" },
+    { icon: MonitorX, path: "/closing_shift", label: "Closing Shift", requiresClosing: true },
 
   ]
 
@@ -68,6 +70,9 @@ export default function RetailSidebar() {
       {/* Menu Items - Flexible space */}
       <div className="flex-1 flex flex-col items-center py-6 space-y-4">
         {menuItems.map((item, index) => {
+          if (item.requiresClosing && !canCloseShift) {
+            return null
+          }
           if (item.requiresSalesDashboard && !canAccessSalesDashboard) {
             return null; // Not for this user — see canAccessSalesDashboard above
           }
