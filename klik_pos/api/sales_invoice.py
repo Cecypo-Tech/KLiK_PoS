@@ -4420,11 +4420,11 @@ class CustomSalesInvoice(SalesInvoice):
 			# sale still needs exactly one Open shift on its till, opened today.
 			self.validate_pos_opening_entry()
 
+		# Only a sale that went through the queue has a queue status to finish - Queued or
+		# Failed and now submitted, whichever way; one submitted directly has none.
+		if self.get("queue_status"):
+			_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
 		if _should_reserve_stock(self):
-			# Only a sale that went through the queue has a queue status to finish; one
-			# submitted directly has none.
-			if self.get("queue_status"):
-				_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
 			_cancel_sales_invoice_reservations(self.name)
 		self.validate_reserved_stock_availability()
 		self.validate_full_payment()

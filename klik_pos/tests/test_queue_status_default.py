@@ -72,6 +72,26 @@ class TestQueueStatusStartsBlank(FrappeTestCase):
 			self.assertTrue(submit_draft_invoice(draft.name)["success"])
 		self.assertEqual(_queue_status(draft), "Submitted")
 
+	def test_a_queued_or_failed_sale_submitted_without_stock_reservation_reads_submitted(self):
+		# The Queued and Failed tabs filter on queue_status alone.
+		from unittest.mock import patch
+
+		from klik_pos.api import sales_invoice
+
+		frappe.set_user("Administrator")
+		for status in ("Queued", "Failed"):
+			draft = _draft(queue_status=status, enable_background_invoice_submission=0)
+			with patch.object(sales_invoice, "_should_reserve_stock", return_value=False):
+				self.assertTrue(submit_draft_invoice(draft.name)["success"])
+			self.assertEqual(_queue_status(draft), "Submitted", status)
+
+	def test_the_other_queue_fields_are_not_copied_either(self):
+		path = frappe.get_app_path("klik_pos", "klik_pos", "custom", "sales_invoice.json")
+		with open(path) as f:
+			fields = {d["fieldname"]: d for d in json.load(f)["custom_fields"]}
+		for fieldname in ("queue_error", "queue_attempts", "queue_last_attempt_at"):
+			self.assertEqual(fields[fieldname]["no_copy"], 1, fieldname)
+
 	def test_a_draft_never_sent_to_the_queue_cannot_be_retried_into_it(self):
 		result = retry_failed_sales_invoice(_draft().name)
 		self.assertFalse(result.get("success"))
@@ -91,6 +111,12 @@ class TestPatchClearsTheDefault(FrappeTestCase):
 
 		self.assertEqual(_queue_status(draft), "")
 		self.assertEqual(_queue_status(submitted), "")
+
+	def test_a_draft_from_before_the_background_flag_stays_queued(self):
+		# Until 2026-04-20 every POS sale was queued and the flag did not exist yet.
+		old = _draft(queue_status="Queued", enable_background_invoice_submission=0, creation="2026-04-15 10:00:00")
+		self._run_patch()
+		self.assertEqual(_queue_status(old), "Queued")
 
 	def test_a_sale_waiting_for_the_worker_stays_queued(self):
 		waiting = _draft(queue_status="Queued", enable_background_invoice_submission=1)

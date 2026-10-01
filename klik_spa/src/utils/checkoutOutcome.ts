@@ -2,8 +2,8 @@
  * Whether the server left the sale for the background worker, from its own answer.
  *
  * The till's "Submit Invoice in Background" checkbox is only a request: a receipt-paid
- * M-Pesa sale, for one, is submitted at once. queue_status cannot tell either - it reads
- * "Queued" (its default) even on an invoice submitted directly.
+ * M-Pesa sale, for one, is submitted at once. The invoice's own queue_status is no guide
+ * either: it read "Queued" on every invoice until that default was removed.
  */
 export function checkoutWasQueued(
   response: {
