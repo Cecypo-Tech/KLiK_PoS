@@ -2559,7 +2559,9 @@ def create_draft_invoice(data):
 			)
 
 			validate_required_salesperson(doc)
-			_apply_klik_invoice_flags(doc, is_held=True, is_submitted=False)
+			# M-Pesa's draft, made before the money moves: a payment in progress, not a hold.
+			# Held orders are Sales Orders.
+			_apply_klik_invoice_flags(doc, is_held=False, is_submitted=False)
 			doc.insert(ignore_permissions=True)
 
 		if tax_id:
@@ -5162,6 +5164,101 @@ def delete_draft_invoices_for_opening_entry(opening_entry_name):
 		return 0
 
 
+def _live_stk_request(invoice_name):
+	"""An M-Pesa STK push sent from this invoice that may still pay, or already paid, it.
+
+	The request names the invoice, so a payment arriving after the invoice is deleted has
+	nowhere to land. Only a Failed push is safe to forget.
+	"""
+	if not frappe.db.exists("DocType", "Mpesa Express Request"):
+		return None
+	return frappe.db.get_value(
+		"Mpesa Express Request",
+		{
+			"reference_doctype": "Sales Invoice",
+			"reference_name": invoice_name,
+			"status": ["in", ["In Progress", "Completed"]],
+		},
+		"name",
+	)
+
+
+def _stk_request_sent_response(invoice_name, request_name):
+	return {
+		"success": False,
+		"code": "mpesa_request_sent",
+		"invoice_id": invoice_name,
+		"error": _(
+			"Draft {0} was kept: M-Pesa request {1} was sent from it, and its payment needs this invoice. Finish or cancel it from Invoice History."
+		).format(invoice_name, request_name),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def discard_mpesa_draft(invoice_id):
+	"""Delete the draft M-Pesa checkout made, when the cashier leaves without finishing it.
+
+	M-Pesa needs an invoice before the money moves, so the payment dialog makes this draft
+	up front; closing the dialog, or holding the order instead, used to leave it behind.
+	Cashiers cannot delete Sales Invoices, so this deletes with permissions ignored and is
+	narrow on purpose: only the caller's own POS draft, not a sale queued for the background
+	worker, and not one an STK push was sent from.
+	"""
+	# Decide on a locked read: a submit committing meanwhile must be seen, not a snapshot.
+	state = frappe.db.get_value(
+		"Sales Invoice",
+		invoice_id,
+		["docstatus", "owner", "custom_is_created_from_klik", "custom_is_held", "enable_background_invoice_submission"],
+		as_dict=True,
+		for_update=True,
+	)
+	if not state:
+		return {"success": True, "message": f"Draft invoice {invoice_id} is already gone"}
+
+	if (
+		state.docstatus != 0
+		or state.owner != frappe.session.user
+		or not cint(state.custom_is_created_from_klik)
+		# A draft held the old way is a hold, not an M-Pesa checkout's draft.
+		or cint(state.custom_is_held)
+		or cint(state.enable_background_invoice_submission)
+	):
+		return {"success": False, "error": _("Draft {0} was kept: it is not this checkout's to discard.").format(invoice_id)}
+
+	live_request = _live_stk_request(invoice_id)
+	if live_request:
+		return _stk_request_sent_response(invoice_id, live_request)
+
+	invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
+	_check_discardable_links(invoice_doc)
+	_cancel_sales_invoice_reservations(invoice_doc.name)
+	frappe.delete_doc("Sales Invoice", invoice_doc.name, ignore_permissions=True, force=True)
+	return {"success": True, "message": f"Draft invoice {invoice_id} discarded"}
+
+
+def _check_discardable_links(invoice_doc):
+	"""Frappe's delete-time link checks, except a Failed STK request's link to the draft.
+
+	Only Failed requests can still name the draft here, and they paid nothing; frappe would
+	otherwise refuse the delete on their account alone. Any other link still refuses it.
+	"""
+	from frappe.model.delete_doc import (
+		check_if_doc_is_linked,
+		get_dynamic_linked_docs,
+		raise_link_exists_exception,
+	)
+
+	check_if_doc_is_linked(invoice_doc)
+	for link in get_dynamic_linked_docs(invoice_doc, "Delete"):
+		failed_stk = link["reference_doctype"] == "Mpesa Express Request" and (
+			frappe.db.get_value("Mpesa Express Request", link["reference_docname"], "status") == "Failed"
+		)
+		if not failed_stk:
+			raise_link_exists_exception(
+				invoice_doc, link["reference_doctype"], link["reference_docname"], link["at_position"]
+			)
+
+
 @frappe.whitelist()
 def delete_draft_invoice(invoice_id):
 	"""
@@ -5177,6 +5274,10 @@ def delete_draft_invoice(invoice_id):
 				"success": False,
 				"error": f"Cannot delete invoice {invoice_id}. Only Draft invoices can be deleted. Current status: {invoice_doc.status}",
 			}
+
+		live_request = _live_stk_request(invoice_doc.name)
+		if live_request:
+			return _stk_request_sent_response(invoice_doc.name, live_request)
 
 		_cancel_sales_invoice_reservations(invoice_doc.name)
 		invoice_doc.delete()
@@ -5194,11 +5295,16 @@ def delete_draft_invoice(invoice_id):
 
 
 @frappe.whitelist()
-def submit_draft_invoice(invoice_id, data=None):
+def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 	"""
 	Submit a draft sales invoice directly without payment dialog.
 	This converts a draft invoice to submitted status.
+
+	held_order_id: the held Sales Order this draft was paid for (M-Pesa makes its draft before
+	the money moves). It is finished as checkout_held_order would: locked, access-checked,
+	linked, price-approval checked, and taken off the Held tab once the invoice goes through.
 	"""
+	draft_touched = False
 	try:
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
 
@@ -5212,6 +5318,21 @@ def submit_draft_invoice(invoice_id, data=None):
 				"docstatus": invoice_doc.docstatus,
 				"error": f"Cannot submit invoice {invoice_id}. Only Draft invoices can be submitted. Current status: {invoice_doc.status}",
 			}
+
+		# This endpoint reports failure without raising, so the request would commit whatever
+		# was saved before it: the rebuilt cart, the background flag, the held order's link.
+		# A refused submit leaves the draft as it was.
+		frappe.db.savepoint("klik_submit_draft_invoice")
+		draft_touched = True
+
+		if held_order_id:
+			from klik_pos.api.sales_order import _claim_held_order
+
+			gone = _claim_held_order(held_order_id)
+			if gone:
+				return gone
+			if invoice_doc.meta.has_field("powerpack_source_order"):
+				invoice_doc.powerpack_source_order = held_order_id
 
 		enable_background_submission = bool(invoice_doc.enable_background_invoice_submission)
 
@@ -5321,6 +5442,11 @@ def submit_draft_invoice(invoice_id, data=None):
 
 			invoice_doc.save(ignore_permissions=True)
 
+		if held_order_id:
+			if not data:
+				invoice_doc.save(ignore_permissions=True)
+			_refuse_unapproved_price_breach(invoice_doc)
+
 		validate_required_salesperson(invoice_doc)
 
 		if enable_background_submission:
@@ -5350,6 +5476,11 @@ def submit_draft_invoice(invoice_id, data=None):
 				invoice_name=invoice_doc.name,
 				requested_by=frappe.session.user,
 			)
+
+			if held_order_id:
+				from klik_pos.api.sales_order import _remove_checked_out_order
+
+				_remove_checked_out_order(held_order_id)
 
 			return {
 				"success": True,
@@ -5394,6 +5525,11 @@ def submit_draft_invoice(invoice_id, data=None):
 				frappe.db.rollback(save_point="klik_submit_draft")
 				raise
 
+			if held_order_id:
+				from klik_pos.api.sales_order import _remove_checked_out_order
+
+				_remove_checked_out_order(held_order_id)
+
 			response = {
 				"success": True,
 				"message": f"Draft invoice {invoice_id} submitted successfully",
@@ -5405,7 +5541,11 @@ def submit_draft_invoice(invoice_id, data=None):
 			return response
 
 	except frappe.DoesNotExistError:
+		if draft_touched:
+			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		return {"success": False, "error": f"Invoice {invoice_id} not found"}
 	except Exception as e:
+		if draft_touched:
+			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		frappe.log_error(frappe.get_traceback(), f"Error submitting draft invoice {invoice_id}")
 		return {"success": False, "error": str(e)}

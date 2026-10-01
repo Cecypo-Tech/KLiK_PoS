@@ -86,6 +86,39 @@ def _gone_response(order_id, message):
     return {"success": False, "code": "held_order_gone", "order_id": order_id, "message": message}
 
 
+def _claim_held_order(order_id):
+    """Lock the held order a checkout is about to invoice and check the caller may.
+
+    Returns a held_order_gone response when it is gone, else None; raises when the caller
+    may not act on it. Shared by checkout_held_order and the M-Pesa draft's submit, so a
+    held order is finished the same way whichever route the payment took.
+    """
+    gone = _held_order_gone(order_id)
+    if gone:
+        return _gone_response(order_id, gone)
+
+    try:
+        _lock_held_order(order_id)
+    except frappe.DoesNotExistError as e:
+        # Another cashier's checkout deleted it while this one waited for the lock.
+        return _gone_response(order_id, str(e))
+    so = frappe.get_doc("Sales Order", order_id)
+    _assert_held_order_access(so)
+    if so.docstatus != 0:
+        frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
+    return None
+
+
+def _remove_checked_out_order(order_id):
+    """The order is now an invoice: take it off the Held tab."""
+    try:
+        frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
+    except Exception as del_err:
+        frappe.logger().warning(
+            "Could not delete held SO %s after checkout: %s", order_id, del_err
+        )
+
+
 # ---------------------------------------------------------------------------
 # Price approval (optional: cecypo_powerpack). Everything here is a no-op when the
 # fields or the Sales Order workflow are absent.
@@ -768,32 +801,16 @@ def checkout_held_order(order_id, data=None):
             return _checkout_request_response(existing_checkout)
 
         # Only now, with a replay of this checkout ruled out, is a missing order news.
-        gone = _held_order_gone(order_id)
+        gone = _claim_held_order(order_id)
         if gone:
-            return _gone_response(order_id, gone)
-
-        try:
-            _lock_held_order(order_id)
-        except frappe.DoesNotExistError as e:
-            # Another cashier's checkout deleted it while this one waited for the lock.
-            return _gone_response(order_id, str(e))
-        so = frappe.get_doc("Sales Order", order_id)
-        _assert_held_order_access(so)
-        if so.docstatus != 0:
-            frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
+            return gone
 
         # Reuse the full invoice submission pipeline
         from klik_pos.api.sales_invoice import _queue_sales_invoice
         result = _queue_sales_invoice(data, source_order=order_id)
 
         if result.get("success"):
-            # SO fulfilled — remove it so it doesn't clutter held orders list
-            try:
-                frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
-            except Exception as del_err:
-                frappe.logger().warning(
-                    "Could not delete held SO %s after checkout: %s", order_id, del_err
-                )
+            _remove_checked_out_order(order_id)
 
         return result
 
