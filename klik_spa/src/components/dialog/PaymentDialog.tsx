@@ -2195,17 +2195,20 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           Loyalty ({availablePoints.toLocaleString()} pts · {formatCurrencyWithSymbol(redeemableValue, displayCurrencySymbol)})
         </label>
         <div className="flex items-center gap-1.5">
-          <input
-            type="number"
+          <StepperInput
+            aria-label="Loyalty points"
             min="0"
             step="1"
             max={availablePoints}
+            maxValue={availablePoints}
+            wrapperClassName="min-w-0 flex-1"
             value={loyaltyPointsInput}
             {...selectAllOnFocus}
             onChange={(event) => handleLoyaltyPointsInputChange(event.target.value)}
+            onStep={(next) => handleLoyaltyPointsInputChange(String(next))}
             disabled={locked || isApplyingLoyalty || availablePoints <= 0}
             placeholder="Points"
-            className="min-w-0 flex-1 px-2 py-1.5 text-sm border border-amber-200 dark:border-amber-800 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full px-2 py-1.5 text-sm border border-amber-200 dark:border-amber-800 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-50"
           />
           <button
             type="button"

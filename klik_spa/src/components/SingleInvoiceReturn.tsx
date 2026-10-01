@@ -18,6 +18,7 @@ import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem 
 import { fixedChargeReturned, returnedValue, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
 import { returnNotice } from "../utils/returnNotice";
+import StepperInput, { NO_NATIVE_SPINNER } from "./common/StepperInput";
 
 interface SingleInvoiceReturnProps {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -456,7 +457,7 @@ export default function SingleInvoiceReturn({
                                   item.item_code,
                                   Math.round((parseFloat(e.target.value) || 0) * 100) / 100  // Round to 2 decimal places
                                 )}
-                                className="w-16 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                                className={`w-16 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm ${NO_NATIVE_SPINNER}`}
                                 disabled={item.available_qty === 0}
                               />
                               <button
@@ -630,20 +631,21 @@ export default function SingleInvoiceReturn({
                 {/* Return Amount Input with currency symbol */}
                 <div>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
+                    <span className="pointer-events-none absolute inset-y-0 left-0 z-10 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
                       {currencySymbol}
                     </span>
-                    <input
-                      type="number"
+                    <StepperInput
+                      aria-label="Refund amount"
                       value={returnAmount}
                       onChange={(e) => {
                         const value = parseFloat(e.target.value) || 0;
                         // Round to 2 decimal places to avoid floating point precision issues
                         setReturnAmount(Math.round(value * 100) / 100);
                       }}
+                      onStep={(next) => setReturnAmount(Math.round(next * 100) / 100)}
                       step="0.01"
                       min="0"
-                      className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-beveren-500 transition-colors text-right text-lg font-semibold"
+                      className="w-full pl-8 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-beveren-500 transition-colors text-right text-lg font-semibold"
                       placeholder="0.00"
                     />
                   </div>
