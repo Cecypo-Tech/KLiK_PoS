@@ -606,8 +606,12 @@ def _apply_extra_fields(doc, extra_fields, allowed=None):
 
 
 def validate_required_salesperson(doc):
-	"""Enforce salesperson presence for POS flows when the POS profile requires it."""
-	if not doc or not getattr(doc, "is_pos", 0):
+	"""Enforce salesperson presence for POS flows when the POS profile requires it.
+
+	Not on a return: the credit note carries the sale's salesperson, and the return
+	endpoints take none - a till requiring a PIN would otherwise refuse to refund a sale
+	rung where none was needed."""
+	if not doc or not getattr(doc, "is_pos", 0) or cint(getattr(doc, "is_return", 0)):
 		return
 
 	pos_profile_name = getattr(doc, "pos_profile", None)
@@ -4395,6 +4399,25 @@ def get_expense_accounts(item_code):
 from frappe.model.mapper import get_mapped_doc
 
 
+def _stamp_return_with_refunding_shift(return_doc):
+	"""The return counts in the shift it happens in - the cash leaves that drawer, and a
+	closed shift is never changed after the fact - and belongs to that shift's till.
+
+	Built from the original, the note kept the sale's till: refunded at "Allparts Cashier"
+	for a sale rung on "Allparts Sales", it was counted in the Cashier shift yet labelled
+	"Allparts Sales", so per-till figures put the refund on a drawer that never paid it and
+	the Cashier's own lists left out a note their totals included.
+	"""
+	current_opening_entry = get_current_pos_opening_entry()
+	if not current_opening_entry:
+		return
+	return_doc.custom_pos_opening_entry = current_opening_entry
+	till = frappe.db.get_value("POS Opening Entry", current_opening_entry, "pos_profile")
+	# Another company's till never lends the note its name.
+	if till and frappe.db.get_value("POS Profile", till, "company") == return_doc.company:
+		return_doc.pos_profile = till
+
+
 @frappe.whitelist()
 def return_sales_invoice(invoice_name):
 	try:
@@ -4440,11 +4463,7 @@ def return_sales_invoice(invoice_name):
 		for item in return_doc.items:
 			item.qty = -abs(item.qty)
 
-		# The return counts in the shift it happens in: the cash leaves today's drawer, and a
-		# closed shift is never changed after the fact.
-		current_opening_entry = get_current_pos_opening_entry()
-		if current_opening_entry:
-			return_doc.custom_pos_opening_entry = current_opening_entry
+		_stamp_return_with_refunding_shift(return_doc)
 
 		# Only cash the drawer kept goes back, in one Cash row. A credit sale refunds nothing,
 		# and card or M-Pesa money stays on the note as credit for accounts to refund.
@@ -5038,10 +5057,7 @@ def create_partial_return(
 		return_doc.set("advances", [])
 		return_doc.total_advance = 0
 
-		# Set the current POS opening entry
-		current_opening_entry = get_current_pos_opening_entry()
-		if current_opening_entry:
-			return_doc.custom_pos_opening_entry = current_opening_entry
+		_stamp_return_with_refunding_shift(return_doc)
 
 		# Filter items to only include selected ones with return quantities
 		filtered_items = []
