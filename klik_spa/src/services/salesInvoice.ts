@@ -1,5 +1,6 @@
 
 import { extractErrorMessage } from "../utils/errorExtraction";
+import { HeldOrderGoneError } from "./salesOrder";
 
 export interface LoyaltyRedemptionPreview {
   loyalty_program: string
@@ -341,7 +342,12 @@ export class DraftNoLongerDraftError extends Error {
   }
 }
 
-export async function submitDraftInvoice(invoiceId: string, data?: unknown) {
+/**
+ * heldOrderId: the held order this draft was paid for (M-Pesa makes its draft before the
+ * money moves). The server then finishes that order as checkout does - or answers
+ * held_order_gone, raised here as HeldOrderGoneError.
+ */
+export async function submitDraftInvoice(invoiceId: string, data?: unknown, heldOrderId?: string | null) {
   const csrfToken = window.csrf_token;
 
   const response = await fetch('/api/method/klik_pos.api.sales_invoice.submit_draft_invoice', {
@@ -350,11 +356,15 @@ export async function submitDraftInvoice(invoiceId: string, data?: unknown) {
       'Content-Type': 'application/json',
       'X-Frappe-CSRF-Token': csrfToken
     },
-    body: JSON.stringify({ invoice_id: invoiceId, data }),
+    body: JSON.stringify({ invoice_id: invoiceId, data, ...(heldOrderId ? { held_order_id: heldOrderId } : {}) }),
     credentials: 'include'
   });
 
   const result = await response.json();
+
+  if (result.message?.code === 'held_order_gone') {
+    throw new HeldOrderGoneError(result.message.message, result.message.order_id);
+  }
 
   if (result.message?.code === 'not_draft') {
     throw new DraftNoLongerDraftError(
@@ -370,4 +380,31 @@ export async function submitDraftInvoice(invoiceId: string, data?: unknown) {
   }
 
   return result.message;
+}
+
+/**
+ * Remove the draft M-Pesa checkout made, when the cashier leaves without finishing the sale.
+ * kept: the server refused because an STK push was sent from it - a payment still on its way
+ * (or already made) needs that invoice.
+ */
+export async function discardMpesaDraft(invoiceId: string): Promise<{ kept: false } | { kept: true; message: string }> {
+  const response = await fetch('/api/method/klik_pos.api.sales_invoice.discard_mpesa_draft', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Frappe-CSRF-Token': window.csrf_token
+    },
+    body: JSON.stringify({ invoice_id: invoiceId }),
+    credentials: 'include'
+  });
+
+  const result = await response.json();
+
+  if (result.message?.code === 'mpesa_request_sent') {
+    return { kept: true, message: result.message.error };
+  }
+  if (!response.ok || !result.message || result.message.success === false) {
+    throw new Error(extractErrorMessage(result, result.message?.error || 'Failed to discard draft invoice'));
+  }
+  return { kept: false };
 }

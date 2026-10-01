@@ -16,6 +16,7 @@ import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import {
   createDraftSalesInvoice,
   createSalesInvoice,
+  discardMpesaDraft,
   DraftNoLongerDraftError,
   previewLoyaltyRedemption,
   submitDraftInvoice,
@@ -136,6 +137,22 @@ const TAX_PREVIEW_DEBOUNCE_MS = 350;
 const TAX_PREVIEW_CACHE_TTL_MS = 15000;
 const TAX_PREVIEW_CACHE_MAX_ENTRIES = 100;
 
+/**
+ * The cashier left checkout without finishing the M-Pesa sale: remove the draft M-Pesa made,
+ * so it does not sit beside the held order as a second copy of the sale. The server keeps it
+ * when an STK push was sent from it - a payment on its way (or made) needs its invoice.
+ */
+async function discardAbandonedMpesaDraft(invoiceName: string) {
+  try {
+    const result = await discardMpesaDraft(invoiceName);
+    if (result.kept) {
+      toast.warning(result.message, { autoClose: 10000, toastId: `mpesa-draft-kept-${invoiceName}` });
+    }
+  } catch (err) {
+    console.warn(`Could not discard M-Pesa draft ${invoiceName}`, err);
+  }
+}
+
 function normalizeMpesaStatus(status?: string) {
   const normalized = (status || "").toLowerCase();
   if (["completed", "success", "successful"].includes(normalized)) return "completed" as const;
@@ -202,6 +219,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
+  // The M-Pesa draft not yet submitted, read when the dialog closes or unmounts.
+  const unfinishedMpesaDraftRef = useRef<string | null>(null);
+  useEffect(() => {
+    unfinishedMpesaDraftRef.current = mpesaDraftInvoiceName;
+  }, [mpesaDraftInvoiceName]);
+  useEffect(
+    () => () => {
+      if (unfinishedMpesaDraftRef.current) void discardAbandonedMpesaDraft(unfinishedMpesaDraftRef.current);
+    },
+    [],
+  );
   // This sale turned out to be recorded already, as this invoice; Submit stays blocked.
   const [alreadySubmittedAs, setAlreadySubmittedAs] = useState<string | null>(null);
   // Only the mobile overlay can be dismissed; unticking M-Pesa resets it.
@@ -1426,6 +1454,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   useEffect(() => {
     if (!isOpen) {
+      // Closed (Hold included) with the M-Pesa sale unfinished.
+      const abandoned = unfinishedMpesaDraftRef.current;
+      unfinishedMpesaDraftRef.current = null;
+      if (abandoned) void discardAbandonedMpesaDraft(abandoned);
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
       setAlreadySubmittedAs(null);
@@ -1490,9 +1522,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           mpesaFlow?.source === "c2b"
             ? receiptDraftSubmitData(buildPaymentData(deliveryPersonnel, { excludeActiveMpesa: true }))
             : paymentData;
+        // A held order paid by M-Pesa: the server finishes the order with the draft.
         response = await submitDraftInvoice(
           mpesaDraftInvoiceName,
           receiptData && { ...receiptData, enable_background_invoice_submission: enableBackgroundSubmission },
+          originalHeldOrderId,
         );
       } else if (originalHeldOrderId) {
         // Checkout from a held Sales Order — convert it to a submitted Sales Invoice
