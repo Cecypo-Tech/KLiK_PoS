@@ -6,6 +6,9 @@ from klik_pos.klik_pos.utils import get_current_pos_profile
 
 from ..sql_builder import apply_sql_permissions
 
+# A disabled Price List is off the POS: its prices are neither offered nor used as a fallback.
+ENABLED_PRICE_LIST = "price_list IN (SELECT name FROM `tabPrice List` WHERE enabled = 1)"
+
 
 @frappe.whitelist(allow_guest=True)
 def get_item_price_for_customer(item_code, customer=None, uom=None):
@@ -56,10 +59,10 @@ def fetch_item_price(
             price_list = get_price_list_with_customer_priority(customer)
 
         if not price_list or not str(price_list).strip():
-            base_sql = """
+            base_sql = f"""
                 SELECT price_list_rate, currency
                 FROM `tabItem Price`
-                WHERE item_code = %s AND selling = 1
+                WHERE item_code = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
             """
             params = [item_code]
 
@@ -380,10 +383,10 @@ def _calculate_price_from_default_uom(
         if not price_list:
             price_list = get_price_list_with_customer_priority(customer)
 
-        price_sql = """
+        price_sql = f"""
             SELECT price_list_rate, currency
             FROM `tabItem Price`
-            WHERE item_code = %s AND uom = %s AND selling = 1
+            WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
         """
 
         params = [item_code, default_uom]
@@ -402,10 +405,10 @@ def _calculate_price_from_default_uom(
         )
 
         if not price_doc and price_list:
-            fallback_sql = """
+            fallback_sql = f"""
                 SELECT price_list_rate, currency
                 FROM `tabItem Price`
-                WHERE item_code = %s AND uom = %s AND selling = 1
+                WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
                 ORDER BY modified DESC
                 LIMIT 1
             """
@@ -454,6 +457,10 @@ def _calculate_price_from_default_uom(
         return None
 
 
+def is_enabled_price_list(price_list):
+    return bool(price_list) and bool(frappe.db.get_value("Price List", price_list, "enabled"))
+
+
 def get_price_list_with_customer_priority(customer=None):
     try:
         if customer:
@@ -469,7 +476,7 @@ def get_price_list_with_customer_priority(customer=None):
                 (customer,),
             )
 
-            if res and res[0][0]:
+            if res and res[0][0] and is_enabled_price_list(res[0][0]):
                 return res[0][0]
 
             # Customer group fallback
@@ -484,7 +491,11 @@ def get_price_list_with_customer_priority(customer=None):
                     customer_group_sql,
                     (res[0][1],),
                 )
-                if customer_group_res and customer_group_res[0][0]:
+                if (
+                    customer_group_res
+                    and customer_group_res[0][0]
+                    and is_enabled_price_list(customer_group_res[0][0])
+                ):
                     return customer_group_res[0][0]
 
         pos_doc = get_current_pos_profile()

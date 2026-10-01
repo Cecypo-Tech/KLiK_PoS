@@ -6,6 +6,7 @@ from frappe.utils import flt
 from erpnext.accounts.doctype.pricing_rule.pricing_rule import apply_pricing_rule
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from ..sql_builder import apply_sql_permissions
+from .item_price import ENABLED_PRICE_LIST, is_enabled_price_list
 
 
 @frappe.whitelist(allow_guest=True)
@@ -112,7 +113,7 @@ def _get_price_list(customer=None):
             fields=["default_price_list", "customer_group"],
             limit=1,
         )
-        if customer_doc and customer_doc[0].get("default_price_list"):
+        if customer_doc and is_enabled_price_list(customer_doc[0].get("default_price_list")):
             return customer_doc[0]["default_price_list"]
         
         if customer_doc and customer_doc[0].get("customer_group"):
@@ -122,7 +123,7 @@ def _get_price_list(customer=None):
                 fields=["default_price_list"],
                 limit=1,
             )
-            if group_doc and group_doc[0].get("default_price_list"):
+            if group_doc and is_enabled_price_list(group_doc[0].get("default_price_list")):
                 return group_doc[0]["default_price_list"]
 
     pos_profile = get_current_pos_profile()
@@ -188,10 +189,10 @@ def _prepare_erpnext_items(cart_items, context):
 
 def _get_item_price(item_code, uom, price_list, customer=None):
     try:
-        sql = """
+        sql = f"""
             SELECT price_list_rate, currency
             FROM `tabItem Price`
-            WHERE item_code = %s AND selling = 1
+            WHERE item_code = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
         """
         params = [item_code]
         

@@ -6,7 +6,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 from ..sql_builder import apply_sql_permissions
-from .item_price import fetch_item_price, get_price_list_with_customer_priority
+from .item_price import ENABLED_PRICE_LIST, fetch_item_price, get_price_list_with_customer_priority
 
 
 @frappe.whitelist()
@@ -85,10 +85,10 @@ def get_item_uoms_and_prices(item_code, customer=None):
             )
 
         for uom_info in uom_data:
-            price_sql = """
+            price_sql = f"""
                 SELECT price_list_rate
                 FROM `tabItem Price`
-                WHERE item_code = %s AND uom = %s AND selling = 1
+                WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
                 AND (price_list = %s OR %s IS NULL OR %s = '')
                 ORDER BY CASE WHEN price_list = %s THEN 0 ELSE 1 END, modified DESC
                 LIMIT 1
@@ -245,10 +245,11 @@ def get_full_pricing_and_batch_details(
         "avg_valuation_rate": flt(global_stock[0].avg_valuation_rate) if global_stock else 0,
     }
 
-    price_query = """
+    price_query = f"""
         SELECT price_list, price_list_rate AS rate, currency, uom, customer, valid_from, valid_upto, name
         FROM `tabItem Price`
-        WHERE item_code = %s AND selling = 1 AND (customer = %s OR customer IS NULL OR customer = '')
+        WHERE item_code = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+        AND (customer = %s OR customer IS NULL OR customer = '')
     """
     price_query = apply_sql_permissions(price_query)
 
