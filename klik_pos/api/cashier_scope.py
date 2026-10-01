@@ -4,6 +4,10 @@ One rule, read from the till the caller is working at: with its
 custom_allow_viewing_other_cashiers flag off (or no till at all) a cashier sees and
 collects only on their own invoices. Money owed on anyone else's is for a manager, another
 till, or the desk.
+
+With the flag on, money owed is the customer's, so receivables, the customer summary and
+collecting payments stay customer-wide. Opening and returning invoices does not: that
+follows the warehouse (sales_invoice._may_read_row, _returnable_scope).
 """
 
 import frappe

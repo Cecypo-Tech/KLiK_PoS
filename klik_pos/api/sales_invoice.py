@@ -12,7 +12,6 @@ from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
-from .cashier_scope import own_invoice_filter
 from .item.item_price import get_price_list_with_customer_priority
 from .loyalty import (
 	apply_loyalty_redemption,
@@ -1385,29 +1384,46 @@ def _profile_allows_other_cashiers(pos_doc):
 	return bool(getattr(pos_doc, "custom_allow_viewing_other_cashiers", 0))
 
 
-def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None):
-	"""Whether `user` may open a row owned by `owner` in `company`: their own, or another
-	cashier's in the company of `pos_doc` when that till lets its users read each other's.
+def _tills_sharing_warehouse(pos_doc):
+	"""The tills (POS Profiles) of pos_doc's company selling from its warehouse, itself included.
 
-	A submitted invoice from any till of the company, not only `pos_doc`: a sale rung at one
-	till is often handled at another (at Allparts, rung on "Allparts Sales", returned at
-	"Allparts Cashier"), and a manager's Invoice History lists every till's - it was listed
-	there with no View or Return. A draft stays with its own till: opening one loads it to be
-	edited and sold here, which is acting on it, as for held orders."""
+	The warehouse is the shop. Allparts runs a sales till, a floor managers' till and an
+	admin till on one warehouse: tills sharing it see each other's work when they allow it;
+	a till on another warehouse - another branch of the same company - does not.
+	"""
+	name = getattr(pos_doc, "name", None)
+	warehouse = getattr(pos_doc, "warehouse", None)
+	company = getattr(pos_doc, "company", None)
+	if not warehouse or not company:
+		return [name] if name else []
+	tills = frappe.get_all("POS Profile", filters={"company": company, "warehouse": warehouse}, pluck="name")
+	if name and name not in tills:
+		tills.append(name)
+	return tills
+
+
+def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None, shared_tills=None):
+	"""Whether `user` may open a row owned by `owner`: their own, or - where `pos_doc` lets its
+	users read each other's - another cashier's rung on a till selling from the same warehouse.
+
+	Drafts too: a till sharing the warehouse finishing another's draft sells from the same
+	stock. An invoice rung on no till is nobody else's to open here. `shared_tills` saves the
+	lookup when a whole list is checked."""
 	if owner == user:
 		return True
 	if not pos_doc or not company or company != getattr(pos_doc, "company", None):
 		return False
-	if cint(docstatus) == 0 and pos_profile != getattr(pos_doc, "name", None):
+	if not _profile_allows_other_cashiers(pos_doc):
 		return False
-	return _profile_allows_other_cashiers(pos_doc)
+	tills = shared_tills if shared_tills is not None else _tills_sharing_warehouse(pos_doc)
+	return bool(pos_profile) and pos_profile in tills
 
 
 def _may_read_invoice(invoice):
 	"""Whether the caller may open this invoice in the POS: their own, or another cashier's
-	in their till's company when that till lets its users read each other's - what the
-	Invoice History list shows. (Held orders stay with their own till: acting on one sells
-	it there.) The till decides for managers
+	rung on a till sharing their till's warehouse when that till lets its users read each
+	other's - what the Invoice History list shows, and what held orders follow. The till
+	decides for managers
 	too; with no till resolvable, only their own."""
 	try:
 		pos_doc = get_current_pos_profile()
@@ -1452,9 +1468,10 @@ def get_sales_invoices(
 				POS Profile (custom_allow_viewing_other_cashiers), not by role. With it
 				off the owner filter is applied in SQL; previously the restriction existed
 				only because the page sent its own name as cashier_name, which anyone
-				could omit. With it on: one's own invoices anywhere, and other cashiers' in
-				the till's company - what _may_read_row opens. (Non-managers are further
-				held to the current till by the pos_profile condition below.)
+				could omit. With it on: one's own invoices, and other cashiers' rung on a
+				till selling from this till's warehouse - what _may_read_row opens.
+				(Non-managers are further held to those tills by the pos_profile
+				condition below.)
 				The customer list follows the same rule because an invoice the caller may
 				not open (get_invoice_details) must not be listed either.
 			""          - Closing Shift. Untouched: a shift legitimately spans cashiers on a
@@ -1516,19 +1533,19 @@ def get_sales_invoices(
 		conditions = []
 		params = []
 
+		shared_tills = (
+			_tills_sharing_warehouse(pos_doc) if pos_doc and _profile_allows_other_cashiers(pos_doc) else None
+		)
 		if surface in ("history", "customer"):
-			if not _profile_allows_other_cashiers(pos_doc):
+			if not shared_tills:
 				conditions.append("si.owner = %s")
 				params.append(frappe.session.user)
 			else:
-				# Exactly what _may_read_row opens: one's own anywhere, others' in the till's
-				# company. Other companies' invoices were listed with no View or Return.
-				conditions.append(
-					"(si.owner = %s OR (si.company = %s AND (si.docstatus != 0 OR si.pos_profile = %s)))"
-				)
-				params.extend(
-					[frappe.session.user, getattr(pos_doc, "company", None), getattr(pos_doc, "name", None)]
-				)
+				# Exactly what _may_read_row opens: one's own, and others' rung on a till
+				# selling from this till's warehouse.
+				placeholders = ", ".join(["%s"] * len(shared_tills))
+				conditions.append(f"(si.owner = %s OR (si.company = %s AND si.pos_profile IN ({placeholders})))")
+				params.extend([frappe.session.user, getattr(pos_doc, "company", None), *shared_tills])
 
 		if surface != "dashboard" and not skip_opening_entry_filter:
 			if is_admin_user:
@@ -1552,8 +1569,14 @@ def get_sales_invoices(
 				params.extend(cashier_user_ids)
 
 		if surface != "dashboard" and current_pos_profile and not is_admin_user:
-			conditions.append("si.pos_profile = %s")
-			params.append(current_pos_profile)
+			if surface in ("history", "customer") and shared_tills:
+				# Not only this till: every till selling from its warehouse.
+				placeholders = ", ".join(["%s"] * len(shared_tills))
+				conditions.append(f"si.pos_profile IN ({placeholders})")
+				params.extend(shared_tills)
+			else:
+				conditions.append("si.pos_profile = %s")
+				params.append(current_pos_profile)
 
 		if search and search.strip():
 			search_term = f"%{search.strip()}%"
@@ -1593,7 +1616,13 @@ def get_sales_invoices(
 
 		for inv in invoices:
 			inv["can_open"] = _may_read_row(
-				inv.owner, inv.company, frappe.session.user, pos_doc, docstatus=inv.docstatus, pos_profile=inv.pos_profile
+				inv.owner,
+				inv.company,
+				frappe.session.user,
+				pos_doc,
+				docstatus=inv.docstatus,
+				pos_profile=inv.pos_profile,
+				shared_tills=shared_tills or [],
 			)
 
 		_process_invoices(invoices, cashier_names_map, payment_methods_map, items_map)
@@ -3133,6 +3162,9 @@ def _update_existing_draft_invoice(
 		if invoice_doc.meta.has_field(_fn) and rebuilt_doc.meta.has_field(_fn):
 			invoice_doc.set(_fn, rebuilt_doc.get(_fn))
 	invoice_doc.pos_profile = rebuilt_doc.pos_profile
+	# Finished here, it counts in this till's shift - not in the one that started it.
+	if rebuilt_doc.get("custom_pos_opening_entry"):
+		invoice_doc.custom_pos_opening_entry = rebuilt_doc.custom_pos_opening_entry
 	invoice_doc.company = rebuilt_doc.company
 	invoice_doc.currency = rebuilt_doc.currency
 	invoice_doc.selling_price_list = rebuilt_doc.selling_price_list
@@ -4466,6 +4498,7 @@ def return_sales_invoice(invoice_name):
 		_ensure_return_allowed()
 
 		original_invoice = frappe.get_doc("Sales Invoice", invoice_name)
+		_ensure_may_return(original_invoice)
 
 		if original_invoice.docstatus != 1:
 			frappe.throw("Only submitted invoices can be returned.")
@@ -4888,6 +4921,30 @@ def get_valid_sales_invoices(doctype, txt, searchfield, start, page_len, filters
 	return frappe.db.sql(query, query_params)
 
 
+def _returnable_scope(filters):
+	"""What a till may refund: the same invoices it may open (_may_read_row) - one's own, and
+	with the till's flag on, others' rung on a till selling from its warehouse. A sale from
+	another branch would put its stock back in that branch's warehouse while the cash left
+	this drawer. Narrows `filters` in place; returns or_filters for frappe.get_all."""
+	try:
+		pos_doc = get_current_pos_profile()
+	except Exception:
+		pos_doc = None
+	if not pos_doc or not _profile_allows_other_cashiers(pos_doc):
+		filters["owner"] = frappe.session.user
+		return None
+	# One's own anywhere; the shared tills are all of this till's company already.
+	return [["owner", "=", frappe.session.user], ["pos_profile", "in", _tills_sharing_warehouse(pos_doc)]]
+
+
+def _ensure_may_return(original_invoice):
+	if not _may_read_invoice(original_invoice):
+		frappe.throw(
+			_("Invoice {0} was rung on another branch's till; return it there.").format(original_invoice.name),
+			frappe.PermissionError,
+		)
+
+
 @frappe.whitelist()
 def get_customer_invoices_for_return(customer, start_date=None, end_date=None, shipping_address=None):
 	"""Get all invoices for a customer within date range that can be returned"""
@@ -4901,7 +4958,7 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 			"status": ["!=", "Cancelled"],
 			"custom_pos_opening_entry": ["!=", ""],
 		}
-		filters.update(own_invoice_filter())
+		or_filters = _returnable_scope(filters)
 
 		if start_date:
 			filters["posting_date"] = [">=", start_date]
@@ -4918,6 +4975,7 @@ def get_customer_invoices_for_return(customer, start_date=None, end_date=None, s
 		invoices = frappe.get_all(
 			"Sales Invoice",
 			filters=filters,
+			or_filters=or_filters,
 			fields=[
 				"name",
 				"posting_date",
@@ -5062,6 +5120,7 @@ def create_partial_return(
 			return_items = json.loads(return_items)
 
 		original_invoice = frappe.get_doc("Sales Invoice", invoice_name)
+		_ensure_may_return(original_invoice)
 
 		if original_invoice.docstatus != 1:
 			frappe.throw("Only submitted invoices can be returned.")
@@ -5475,6 +5534,20 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 		frappe.db.savepoint("klik_submit_draft_invoice")
 		draft_touched = True
 
+		waiting = frappe.db.exists("DocType", "Mpesa Express Request") and frappe.db.get_value(
+			"Mpesa Express Request",
+			{"reference_doctype": "Sales Invoice", "reference_name": invoice_id, "status": "In Progress"},
+			"name",
+		)
+		if waiting:
+			# Its payment would land on an invoice already finished with other money.
+			return {
+				"success": False,
+				"code": "mpesa_request_waiting",
+				"invoice_id": invoice_id,
+				"error": _("M-Pesa request {0} for this invoice is still waiting on the customer.").format(waiting),
+			}
+
 		if held_order_id:
 			from klik_pos.api.sales_order import _claim_held_order
 
@@ -5550,6 +5623,9 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 				if invoice_doc.meta.has_field(_fn) and rebuilt_doc.meta.has_field(_fn):
 					invoice_doc.set(_fn, rebuilt_doc.get(_fn))
 			invoice_doc.pos_profile = rebuilt_doc.pos_profile
+			# Finished here, it counts in this till's shift - not in the one that started it.
+			if rebuilt_doc.get("custom_pos_opening_entry"):
+				invoice_doc.custom_pos_opening_entry = rebuilt_doc.custom_pos_opening_entry
 			invoice_doc.company = rebuilt_doc.company
 			invoice_doc.currency = rebuilt_doc.currency
 			invoice_doc.selling_price_list = rebuilt_doc.selling_price_list
