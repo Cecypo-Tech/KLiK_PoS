@@ -131,7 +131,9 @@ class TestSurfaceShapesTheQuery(FrappeTestCase):
 	def test_history_drops_the_owner_filter_when_the_till_allows(self):
 		with _with_roles("All", "Sales User"), _profile(1):
 			sql = self._sql_for(surface="history", skip_opening_entry_filter=True)
-		self.assertNotIn("si.owner = ", sql)
+		# Not one's own only: others' too, on the tills sharing the warehouse.
+		self.assertIn("(si.owner = %s OR (si.company = %s AND si.pos_profile IN (", sql)
+		self.assertNotIn("si.owner = %s", sql.replace("(si.owner = %s OR", ""))
 
 	def test_unspecified_surface_is_untouched(self):
 		"""Closing Shift must not gain an owner filter: a shift spans cashiers on a

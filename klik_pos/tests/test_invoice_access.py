@@ -34,6 +34,11 @@ def _till(allow, name="Test Till", company="Test Co"):
 	)
 
 
+def _sharing(*tills):
+	"""Tills selling from the current till's warehouse (the current one included)."""
+	return patch.object(sales_invoice, "_tills_sharing_warehouse", return_value=["Test Till", *tills])
+
+
 def _inv(owner, till="Test Till", company="Test Co", docstatus=1):
 	return frappe._dict({"owner": owner, "pos_profile": till, "company": company, "docstatus": docstatus})
 
@@ -54,20 +59,23 @@ class TestTheRule(FrappeTestCase):
 		with _till(1):
 			self.assertTrue(_may_read_invoice(_inv("someone@example.com")))
 
-	def test_another_cashier_s_invoice_from_another_till_opens_where_the_till_allows_it(self):
-		"""The regression (Allparts): the list shows every till's invoices, so a sale rung on
-		"Allparts Sales" was listed at "Allparts Cashier" but had no View or Return."""
-		with _till(1):
+	def test_another_cashier_s_invoice_from_a_till_on_my_warehouse_opens_where_the_till_allows_it(self):
+		"""The regression (Allparts): a sale rung on "Allparts Sales" was listed at "Allparts
+		Cashier" - same warehouse - but had no View or Return."""
+		with _till(1), _sharing("Other Till"):
 			self.assertTrue(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
-		with _till(0):
+		with _till(0), _sharing("Other Till"):
 			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
 
-	def test_another_till_s_draft_stays_with_its_till(self):
-		"""Opening a draft loads it to be edited and sold here: that is acting on it, which
-		stays with its own till, as for held orders."""
-		with _till(1):
+	def test_a_till_on_another_warehouse_does_not_open(self):
+		with _till(1), _sharing():
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
+
+	def test_drafts_follow_the_warehouse_too(self):
+		with _till(1), _sharing("Other Till"):
+			self.assertTrue(_may_read_invoice(_inv("someone@example.com", till="Other Till", docstatus=0)))
+		with _till(1), _sharing():
 			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till", docstatus=0)))
-			self.assertTrue(_may_read_invoice(_inv("someone@example.com", docstatus=0)))
 			self.assertTrue(_may_read_invoice(_inv("Administrator", till="Other Till", docstatus=0)))
 
 	def test_another_company_s_invoice_never_opens(self):
@@ -143,9 +151,11 @@ class TestTheTillDecides(FrappeTestCase):
 		self.assertNotIn("data", result)
 
 	def test_another_cashier_s_invoice_opens_where_the_till_allows_it(self):
-		company = frappe.db.get_value("Sales Invoice", self.theirs, "company")
-		# Any till of the invoice's company, not only the one it was rung on.
-		with _till(1, name="Some Other Till", company=company):
+		company, till = frappe.db.get_value("Sales Invoice", self.theirs, ["company", "pos_profile"])
+		if not till:
+			self.skipTest("their invoice was rung on no till")
+		# Any till selling from the same warehouse, not only the one it was rung on.
+		with _till(1, name="Some Other Till", company=company), _sharing(till):
 			self.assertTrue(get_invoice_details(self.theirs)["success"])
 
 	def test_my_own_invoice_always_opens(self):
@@ -177,10 +187,10 @@ class TestCustomerListFollowsTheTill(FrappeTestCase):
 		self.assertIn("si.owner = ", sql)
 
 	def test_customer_list_shows_everyone_s_where_the_till_allows_it(self):
-		with _till(1):
+		with _till(1), _sharing("Other Till"):
 			_, sql = self._sql_for(surface="customer", search="x")
-		# Everyone's in the till's company, plus one's own anywhere - not one's own only.
-		self.assertIn("(si.owner = %s OR (si.company = %s AND", sql)
+		# Everyone's on the tills sharing the warehouse, plus one's own - not one's own only.
+		self.assertIn("(si.owner = %s OR (si.company = %s AND si.pos_profile IN (", sql)
 		self.assertNotIn("si.owner = %s", sql.replace("(si.owner = %s OR", ""))
 
 
@@ -198,8 +208,10 @@ class TestRowsSayWhetherTheyOpen(FrappeTestCase):
 		self.assertTrue(_may_read_row("me@example.com", "Test Co", "me@example.com", till))
 		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", till))
 		till.custom_allow_viewing_other_cashiers = 1
-		self.assertTrue(_may_read_row("you@example.com", "Test Co", "me@example.com", till))
-		self.assertFalse(_may_read_row("you@example.com", "Other Co", "me@example.com", till))
+		shared = ["Test Till", "Other Till"]
+		self.assertTrue(_may_read_row("you@example.com", "Test Co", "me@example.com", till, pos_profile="Other Till", shared_tills=shared))
+		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", till, pos_profile="Far Till", shared_tills=shared))
+		self.assertFalse(_may_read_row("you@example.com", "Other Co", "me@example.com", till, pos_profile="Other Till", shared_tills=shared))
 		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", None))
 
 	def test_history_lists_only_what_opens_where_the_till_allows_others(self):

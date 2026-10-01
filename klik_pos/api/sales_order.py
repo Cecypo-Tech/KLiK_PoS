@@ -48,9 +48,9 @@ def _active_till():
 def _may_act_on_held_order(so):
     """Whether the caller may see, open, check out or delete this held order.
 
-    The order must be on the till the caller is standing at - or carry no till at all, which
-    nothing would otherwise ever reach - and be their own, unless that till lets its users act
-    on each other's work. With no till resolvable, only their own. Managers included: one who
+    The order must be on a till selling from the same warehouse as the caller's - finishing it
+    here sells from the same stock - or carry no till at all, which nothing would otherwise
+    ever reach; and be their own, unless their till lets its users act on each other's work. With no till resolvable, only their own. Managers included: one who
     needs everyone's orders is given a till that allows it, as for invoices.
 
     Which shift held the order is deliberately not part of it. Access used to demand the
@@ -59,13 +59,13 @@ def _may_act_on_held_order(so):
     and so was the caller's own order from another till. Handing an order from one cashier to
     another is what custom_allow_viewing_other_cashiers is for.
     """
-    from klik_pos.api.sales_invoice import _profile_allows_other_cashiers
+    from klik_pos.api.sales_invoice import _profile_allows_other_cashiers, _tills_sharing_warehouse
 
     mine = so.owner == frappe.session.user
     till = _active_till()
     if not till:
         return mine
-    if so.custom_pos_profile and so.custom_pos_profile != till.name:
+    if so.custom_pos_profile and so.custom_pos_profile not in _tills_sharing_warehouse(till):
         return False
     return mine or _profile_allows_other_cashiers(till)
 
@@ -667,8 +667,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
     Closing Shift page). When ``skip_opening_entry_filter`` is true (used by the
     Invoice History page), the opening-entry restriction is dropped and results follow
     _may_act_on_held_order, the rule opening one is checked against: everyone, managers
-    included, sees orders on their till (or carrying no till), their own only unless the
-    till's POS Profile sets ``custom_allow_viewing_other_cashiers``.
+    included, sees orders on the tills selling from their till's warehouse (or carrying no
+    till), their own only unless the till's POS Profile sets
+    ``custom_allow_viewing_other_cashiers``.
 
     That flag used to be read for invoices and ignored here, so a shop that had
     deliberately opened its till up still found the Held tab showing one cashier's
@@ -691,14 +692,14 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
         or_filters = None
         if skip_opening_entry_filter:
             # _may_act_on_held_order, expressed as filters. Keep the two in step.
-            from klik_pos.api.sales_invoice import _profile_allows_other_cashiers
+            from klik_pos.api.sales_invoice import _profile_allows_other_cashiers, _tills_sharing_warehouse
 
             till = _active_till()
             if not till:
                 filters["owner"] = frappe.session.user
             else:
                 or_filters = [
-                    ["custom_pos_profile", "=", till.name],
+                    ["custom_pos_profile", "in", _tills_sharing_warehouse(till)],
                     ["custom_pos_profile", "is", "not set"],
                 ]
                 if not _profile_allows_other_cashiers(till):

@@ -112,7 +112,10 @@ class TestReadSideFollowsTheRule(FrappeTestCase):
 				captured.update(kw.get("filters") or {})
 			return real(doctype, *a, **kw)
 
-		with _till(0), patch.object(si_api, "_ensure_return_allowed"), \
+		# The return picker reads the till as the rest of the warehouse rule does.
+		till = frappe._dict({"name": "T", "company": "Dev Co", "custom_allow_viewing_other_cashiers": 0})
+		with _till(0), patch.object(si_api, "get_current_pos_profile", return_value=till), \
+			patch.object(si_api, "_ensure_return_allowed"), \
 			patch.object(si_api.frappe, "get_all", side_effect=spy):
 			si_api.get_customer_invoices_for_return("Walk In")
 		self.assertEqual(captured.get("owner"), frappe.session.user)
