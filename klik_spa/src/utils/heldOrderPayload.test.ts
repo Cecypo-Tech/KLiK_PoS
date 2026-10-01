@@ -4,7 +4,10 @@ import {
 } from "./heldOrderPayload";
 
 const allOn = { deliveryCharge: true, shippingRule: true, discountChange: true };
-const extras = { deliveryCharge: 250, deliveryPersonnel: "DP-0001", orderDiscountAmount: 100, salesTaxCharges: "VAT 16% - AP" };
+const extras = {
+  deliveryCharge: 250, deliveryPersonnel: "DP-0001", orderDiscountAmount: 100, salesTaxCharges: "VAT 16% - AP",
+  remarks: "Deliver after 4pm",
+};
 
 describe("tillFlags", () => {
   it("reads the POS Profile's switches however they arrive", () => {
@@ -35,6 +38,7 @@ describe("heldOrderPayloadExtras", () => {
       deliveryPersonnel: "DP-0001",
       orderDiscountAmount: 100,
       SalesTaxCharges: "VAT 16% - AP",
+      remarks: "Deliver after 4pm",
     });
   });
 
@@ -47,6 +51,15 @@ describe("heldOrderPayloadExtras", () => {
     expect(out.extra_fields).toEqual({});
     expect(out.deliveryCharge).toBe(0);
     expect(out.deliveryPersonnel).toBeNull();
+    // Always sent, so holding again with the box emptied clears the order's remarks.
+    expect(out.remarks).toBe("");
+  });
+
+  it("sends remarks trimmed", () => {
+    const out = heldOrderPayloadExtras({
+      walkin: {}, extraFields: {}, shippingRule: null, extras: { ...extras, remarks: "  Fragile \n" }, flags: allOn,
+    });
+    expect(out.remarks).toBe("Fragile");
   });
 
   it("drops a delivery charge the till does not allow - the server would refuse the hold", () => {
@@ -74,6 +87,7 @@ describe("heldOrderPayloadExtras", () => {
 describe("checkoutExtrasFromHeldOrder", () => {
   const details = {
     discount_amount: 100,
+    remarks: "Deliver after 4pm",
     cart_meta: { deliveryCharge: 250, deliveryPersonnel: "DP-0001", SalesTaxCharges: "VAT 16% - AP" },
   };
 
@@ -86,6 +100,11 @@ describe("checkoutExtrasFromHeldOrder", () => {
     expect(out.deliveryCharge).toBe(0);
     expect(out.orderDiscountAmount).toBe(0);
     expect(out.deliveryPersonnel).toBe("DP-0001");
+  });
+
+  it("takes the remarks from the cart meta when the order carries none of its own", () => {
+    const out = checkoutExtrasFromHeldOrder({ cart_meta: { remarks: "From meta" } }, allOn);
+    expect(out.remarks).toBe("From meta");
   });
 
   it("copes with an order held before any of this existed", () => {

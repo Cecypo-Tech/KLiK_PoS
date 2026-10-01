@@ -2228,6 +2228,7 @@ def _queue_sales_invoice(data, source_order=None):
 
 		if source_order and doc.meta.has_field("powerpack_source_order"):
 			doc.powerpack_source_order = source_order
+		_apply_remarks(doc, data)
 
 		validate_required_salesperson(doc)
 
@@ -2652,10 +2653,14 @@ def create_draft_invoice(data):
 			# M-Pesa's draft, made before the money moves: a payment in progress, not a hold.
 			# Held orders are Sales Orders.
 			_apply_klik_invoice_flags(doc, is_held=False, is_submitted=False)
+			_apply_remarks(doc, data)
 			doc.insert(ignore_permissions=True)
 
 		if tax_id:
 			doc.db_set("tax_id", tax_id)
+		if target_draft_invoice_id and _parse_remarks(data):
+			# The existing draft was saved above; its note goes on as it is.
+			doc.db_set("remarks", _parse_remarks(data))
 
 		return {"success": True, "invoice_name": doc.name, "invoice": doc}
 
@@ -4399,6 +4404,35 @@ def get_expense_accounts(item_code):
 from frappe.model.mapper import get_mapped_doc
 
 
+# Long enough for any note a cashier types; short enough that a pasted page does not land on
+# every printed invoice.
+REMARKS_MAX_LENGTH = 2000
+
+
+def _parse_remarks(data):
+	"""The checkout's remarks as plain text, or None when there are none."""
+	raw = data.get("remarks") if isinstance(data, dict) else None
+	if not isinstance(raw, str):
+		return None
+	text = strip_html_tags(raw).strip()
+	return text[:REMARKS_MAX_LENGTH] or None
+
+
+def _apply_remarks(doc, data):
+	"""Write the checkout's remarks onto an invoice or held order.
+
+	A held order takes the cart's remarks whenever the cart sends the key - an empty one
+	clears it. An invoice only ever takes a non-empty note, leaving ERPNext's default.
+	"""
+	if not doc.meta.has_field("remarks") or not isinstance(data, dict):
+		return
+	remarks = _parse_remarks(data)
+	if remarks:
+		doc.remarks = remarks
+	elif doc.doctype == "Sales Order" and "remarks" in data:
+		doc.remarks = None
+
+
 def _stamp_return_with_refunding_shift(return_doc):
 	"""The return counts in the shift it happens in - the cash leaves that drawer, and a
 	closed shift is never changed after the fact - and belongs to that shift's till.
@@ -5489,6 +5523,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 			)
 
 			_set_customer(invoice_doc, rebuilt_doc.customer)
+			_apply_remarks(invoice_doc, data)
 			invoice_doc.due_date = rebuilt_doc.due_date
 			invoice_doc.custom_delivery_date = rebuilt_doc.custom_delivery_date
 			invoice_doc.enable_background_invoice_submission = rebuilt_doc.enable_background_invoice_submission

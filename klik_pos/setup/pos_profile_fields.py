@@ -487,6 +487,38 @@ def ensure_opening_entry_variance_fields():
         frappe.log_error(frappe.get_traceback(), "klik_pos: opening variance field install failed")
 
 
+def install_sales_order_remarks():
+    """Give Sales Order a Remarks field, as Sales Invoice has, so a held order's note survives
+    to the invoice. Only where the site has none - a standard or custom `remarks` is kept.
+    Placed in More Info, by the status, as on Sales Invoice. Returns True when created."""
+    if frappe.db.exists("DocField", {"parent": "Sales Order", "fieldname": "remarks"}) or frappe.db.exists(
+        "Custom Field", {"dt": "Sales Order", "fieldname": "remarks"}
+    ):
+        return False
+    create_custom_fields(
+        {
+            "Sales Order": [
+                {
+                    "fieldname": "remarks",
+                    "label": "Remarks",
+                    "fieldtype": "Small Text",
+                    "insert_after": "advance_payment_status",
+                    "module": "KLiK PoS",
+                }
+            ]
+        },
+        update=True,
+    )
+    return True
+
+
+def ensure_sales_order_remarks():
+    try:
+        install_sales_order_remarks()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "klik_pos: Sales Order remarks field install failed")
+
+
 def ensure_pos_profile_feature_fields():
     """Hook entrypoint for after_migrate / after_install. Never abort on failure."""
     try:
@@ -497,3 +529,4 @@ def ensure_pos_profile_feature_fields():
     ensure_mpesa_reconciled_payment_child()
     ensure_pos_closing_entry_invoice_table()
     ensure_opening_entry_variance_fields()
+    ensure_sales_order_remarks()
