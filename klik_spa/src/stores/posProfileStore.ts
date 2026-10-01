@@ -59,7 +59,7 @@ export interface POSProfile {
   /** "Set Grand Total to Default Payment Method": whether the checkout opens with the total on the default mode. */
   set_grand_total_to_default_mop?: boolean | number;
   /** "Allow Credit Sales": whether the checkout offers "Is Credit Sale". */
-  custom_allow_credit_sales?: boolean | number;
+  custom_allow_credit_sales_as_pos?: boolean | number;
   [key: string]: unknown;
 }
 

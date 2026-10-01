@@ -3056,9 +3056,8 @@ def build_sales_invoice_doc(
 		doc.calculate_taxes_and_totals()
 
 	if is_credit_sale:
-		# Credit sales are unpaid-at-creation invoices; is_pos stays 0 so the
-		# outstanding balance isn't misclassified as a paid POS sale, unless
-		# the POS Profile opts in to treating credit sales as POS sales.
+		# A till may sell on credit only through its one "Allow Credit Sales" checkbox, and an
+		# allowed credit sale is booked as a POS sale (parse_invoice_data has refused the rest).
 		doc.is_pos = _is_pos_for_credit_sale(pos_profile)
 		if due_date:
 			doc.due_date = due_date
@@ -3599,17 +3598,21 @@ def _determine_is_pos(customer, business_type):
 
 
 def _credit_sales_allowed(pos_profile):
-	"""Whether this till may sell on credit at all - its "Allow Credit Sales" checkbox.
+	"""Whether this till may sell on credit - its one "Allow Credit Sales" checkbox
+	(custom_allow_credit_sales_as_pos). An allowed credit sale is booked as a POS sale.
 
-	"Allow Credit Sales as POS Sales" is a different question: whether a credit sale that is
-	allowed gets is_pos=1.
+	There used to be two near-identical boxes: this one (2026-07), which only decided how an
+	allowed credit sale was booked, and the older custom_allow_credit_sales (2025-08), which
+	since f5a31b4 decided whether it was allowed. That one is gone; patch one_credit_checkbox
+	carried each till's permission over to this one.
 	"""
-	return 1 if cint(getattr(pos_profile, "custom_allow_credit_sales", 0) or 0) else 0
+	return 1 if cint(getattr(pos_profile, "custom_allow_credit_sales_as_pos", 0) or 0) else 0
 
 
 def _is_pos_for_credit_sale(pos_profile):
-	"""Whether a Credit Sale invoice should still be marked is_pos=1, per POS Profile opt-in."""
-	return 1 if cint(getattr(pos_profile, "custom_allow_credit_sales_as_pos", 0)) else 0
+	"""Whether a credit sale is booked as a POS sale: always, where the till allows credit at
+	all - the one checkbox both permits it and books it so."""
+	return _credit_sales_allowed(pos_profile)
 
 
 def _check_customer_type_for_pos(customer):
