@@ -1325,17 +1325,20 @@ def _profile_allows_other_cashiers(pos_doc):
 	return bool(getattr(pos_doc, "custom_allow_viewing_other_cashiers", 0))
 
 
-def _may_read_row(owner, company, user, pos_doc):
+def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None):
 	"""Whether `user` may open a row owned by `owner` in `company`: their own, or another
 	cashier's in the company of `pos_doc` when that till lets its users read each other's.
 
-	Any till of the company, not only `pos_doc`: Invoice History lists every till's invoices
-	once the till allows it, and a sale rung at one till is often handled at another (at
-	Allparts, rung on "Allparts Sales", returned at "Allparts Cashier") - it was listed there
-	with no View or Return."""
+	A submitted invoice from any till of the company, not only `pos_doc`: a sale rung at one
+	till is often handled at another (at Allparts, rung on "Allparts Sales", returned at
+	"Allparts Cashier"), and a manager's Invoice History lists every till's - it was listed
+	there with no View or Return. A draft stays with its own till: opening one loads it to be
+	edited and sold here, which is acting on it, as for held orders."""
 	if owner == user:
 		return True
 	if not pos_doc or not company or company != getattr(pos_doc, "company", None):
+		return False
+	if cint(docstatus) == 0 and pos_profile != getattr(pos_doc, "name", None):
 		return False
 	return _profile_allows_other_cashiers(pos_doc)
 
@@ -1350,7 +1353,14 @@ def _may_read_invoice(invoice):
 		pos_doc = get_current_pos_profile()
 	except Exception:
 		pos_doc = None
-	return _may_read_row(invoice.owner, invoice.company, frappe.session.user, pos_doc)
+	return _may_read_row(
+		invoice.owner,
+		invoice.company,
+		frappe.session.user,
+		pos_doc,
+		docstatus=invoice.docstatus,
+		pos_profile=invoice.pos_profile,
+	)
 
 
 @frappe.whitelist()
@@ -1382,7 +1392,9 @@ def get_sales_invoices(
 				POS Profile (custom_allow_viewing_other_cashiers), not by role. With it
 				off the owner filter is applied in SQL; previously the restriction existed
 				only because the page sent its own name as cashier_name, which anyone
-				could omit.
+				could omit. With it on: one's own invoices anywhere, and other cashiers' in
+				the till's company - what _may_read_row opens. (Non-managers are further
+				held to the current till by the pos_profile condition below.)
 				The customer list follows the same rule because an invoice the caller may
 				not open (get_invoice_details) must not be listed either.
 			""          - Closing Shift. Untouched: a shift legitimately spans cashiers on a
@@ -1426,7 +1438,7 @@ def get_sales_invoices(
 		)
 		has_walkin_name = any(df.fieldname == "custom_walkin_customer_name" for df in sales_invoice_meta.fields)
 
-		select_fields = """name, posting_date, posting_time, owner, customer, customer_name,
+		select_fields = """name, docstatus, posting_date, posting_time, owner, customer, customer_name,
 			base_grand_total, base_rounded_total, status, discount_amount,
 			total_taxes_and_charges, custom_pos_opening_entry, queue_status,
 			queue_error, queue_attempts, queue_last_attempt_at, pos_profile, company, currency, custom_is_printed"""
@@ -1451,8 +1463,12 @@ def get_sales_invoices(
 			else:
 				# Exactly what _may_read_row opens: one's own anywhere, others' in the till's
 				# company. Other companies' invoices were listed with no View or Return.
-				conditions.append("(si.owner = %s OR si.company = %s)")
-				params.extend([frappe.session.user, getattr(pos_doc, "company", None)])
+				conditions.append(
+					"(si.owner = %s OR (si.company = %s AND (si.docstatus != 0 OR si.pos_profile = %s)))"
+				)
+				params.extend(
+					[frappe.session.user, getattr(pos_doc, "company", None), getattr(pos_doc, "name", None)]
+				)
 
 		if surface != "dashboard" and not skip_opening_entry_filter:
 			if is_admin_user:
@@ -1516,7 +1532,9 @@ def get_sales_invoices(
 		items_map = _batch_fetch_items(invoice_names)
 
 		for inv in invoices:
-			inv["can_open"] = _may_read_row(inv.owner, inv.company, frappe.session.user, pos_doc)
+			inv["can_open"] = _may_read_row(
+				inv.owner, inv.company, frappe.session.user, pos_doc, docstatus=inv.docstatus, pos_profile=inv.pos_profile
+			)
 
 		_process_invoices(invoices, cashier_names_map, payment_methods_map, items_map)
 

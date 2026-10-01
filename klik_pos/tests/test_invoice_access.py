@@ -34,8 +34,8 @@ def _till(allow, name="Test Till", company="Test Co"):
 	)
 
 
-def _inv(owner, till="Test Till", company="Test Co"):
-	return frappe._dict({"owner": owner, "pos_profile": till, "company": company})
+def _inv(owner, till="Test Till", company="Test Co", docstatus=1):
+	return frappe._dict({"owner": owner, "pos_profile": till, "company": company, "docstatus": docstatus})
 
 
 class TestTheRule(FrappeTestCase):
@@ -61,6 +61,14 @@ class TestTheRule(FrappeTestCase):
 			self.assertTrue(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
 		with _till(0):
 			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
+
+	def test_another_till_s_draft_stays_with_its_till(self):
+		"""Opening a draft loads it to be edited and sold here: that is acting on it, which
+		stays with its own till, as for held orders."""
+		with _till(1):
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till", docstatus=0)))
+			self.assertTrue(_may_read_invoice(_inv("someone@example.com", docstatus=0)))
+			self.assertTrue(_may_read_invoice(_inv("Administrator", till="Other Till", docstatus=0)))
 
 	def test_another_company_s_invoice_never_opens(self):
 		with _till(1):
@@ -172,8 +180,8 @@ class TestCustomerListFollowsTheTill(FrappeTestCase):
 		with _till(1):
 			_, sql = self._sql_for(surface="customer", search="x")
 		# Everyone's in the till's company, plus one's own anywhere - not one's own only.
-		self.assertIn("(si.owner = %s OR si.company = %s)", sql)
-		self.assertNotIn("AND si.owner = %s AND", sql.replace("(si.owner = %s OR", ""))
+		self.assertIn("(si.owner = %s OR (si.company = %s AND", sql)
+		self.assertNotIn("si.owner = %s", sql.replace("(si.owner = %s OR", ""))
 
 
 class TestNoTillResolvable(FrappeTestCase):
