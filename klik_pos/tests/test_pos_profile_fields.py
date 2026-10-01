@@ -177,3 +177,28 @@ class TestPosProfileFormLayout(FrappeTestCase):
         # Eight checkboxes, 5 | 3, with the Extra Fields table closing the second column.
         self.assertEqual(len(order[start + 1:column]), 5)
         self.assertEqual(len(order[column + 1:table]), 3)
+
+    def test_allow_credit_sales_shows_under_sales_and_checkout_permissions(self):
+        # It shipped hidden while nothing read it; once it became the only switch for credit
+        # sales, no till could turn them on. migrate copies the custom JSON over every site's
+        # Custom Field, so the shipped files are what must be right.
+        import json
+
+        custom = json.load(open(frappe.get_app_path("klik_pos", "klik_pos", "custom", "pos_profile.json")))
+        field = next(d for d in custom["custom_fields"] if d["fieldname"] == "custom_allow_credit_sales")
+        self.assertEqual(field["hidden"], 0)
+
+        setters = json.load(open(frappe.get_app_path("klik_pos", "fixtures", "property_setter.json")))
+        self.assertFalse(
+            [r for r in setters if r.get("field_name") == "custom_allow_credit_sales" and r.get("property") == "hidden"]
+        )
+
+        order = self._order()
+        start = order.index("custom_sales__checkout_permissions")
+        meta = frappe.get_meta("POS Profile")
+        breaks = ("Section Break", "Tab Break")
+        end = next(
+            i for i in range(start + 1, len(order))
+            if (meta.get_field(order[i]) and meta.get_field(order[i]).fieldtype in breaks)
+        )
+        self.assertIn("custom_allow_credit_sales", order[start + 1:end])
