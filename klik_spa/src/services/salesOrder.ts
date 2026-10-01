@@ -93,28 +93,35 @@ export interface HeldOrderShareTools {
   copy_message_script: string | null;
   /** Whether PowerPack's Copy as Image is installed and on. */
   copy_image: boolean;
+  /** The site's date format, for the script's dates. */
+  date_format: string | null;
 }
 
 export async function getHeldOrderShareTools(): Promise<HeldOrderShareTools> {
   const response = await fetch('/api/method/klik_pos.api.sales_order.get_held_order_share_tools', {
     credentials: 'include',
   });
-  if (!response.ok) return { copy_message_script: null, copy_image: false };
+  const none = { copy_message_script: null, copy_image: false, date_format: null };
+  if (!response.ok) return none;
   const result = await response.json();
   return {
     copy_message_script: result.message?.copy_message_script ?? null,
     copy_image: !!result.message?.copy_image,
+    date_format: result.message?.date_format ?? null,
   };
 }
 
-/** The held order's Sales Order document, as the desk form has it. */
-export async function getSalesOrderDoc(orderId: string): Promise<Record<string, unknown> & { doctype: string }> {
+/** The held order's Sales Order document, as the desk form has it, and its currency symbol. */
+export async function getHeldOrderShareDoc(orderId: string): Promise<{
+  doc: Record<string, unknown> & { doctype: string };
+  currency_symbol: string;
+}> {
   const response = await fetch(
-    `/api/method/frappe.client.get?doctype=Sales%20Order&name=${encodeURIComponent(orderId)}`,
+    `/api/method/klik_pos.api.sales_order.get_held_order_share_doc?order_id=${encodeURIComponent(orderId)}`,
     { credentials: 'include' },
   );
   const result = await response.json();
-  if (!response.ok || !result.message) throw new Error(`Could not load ${orderId}`);
+  if (!response.ok || !result.message?.doc) throw new Error(`Could not load ${orderId}`);
   return result.message;
 }
 

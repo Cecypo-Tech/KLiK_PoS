@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from frappe import _
@@ -926,6 +927,10 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
 
 
 COPY_MESSAGE_LABEL = "Copy as Message"
+# PowerPack seeds its script under this name; a site's own copy under another name also works.
+POWERPACK_COPY_MESSAGE_SCRIPT = "PowerPack - Copy as Message (Sales Order)"
+# The button the script adds, as written in its source: __('Copy as Message') or "...".
+_COPY_MESSAGE_BUTTON = re.compile(r"add_custom_button\(\s*(?:__\(\s*)?['\"]Copy as Message['\"]")
 
 
 def _copy_as_image_enabled():
@@ -940,23 +945,39 @@ def _copy_as_image_enabled():
     return "Sales Order" in DOCTYPES and is_feature_enabled("enable_copy_as_image")
 
 
+def _copy_message_script():
+    rows = frappe.get_all(
+        "Client Script",
+        filters={"dt": "Sales Order", "enabled": 1, "view": "Form"},
+        fields=["name", "script"],
+        order_by="name asc",
+    )
+    rows.sort(key=lambda row: row.name != POWERPACK_COPY_MESSAGE_SCRIPT)
+    return next((row.script for row in rows if _COPY_MESSAGE_BUTTON.search(row.script or "")), None)
+
+
 @frappe.whitelist()
 def get_held_order_share_tools():
     """What a held order's row offers besides Print: the site's enabled "Copy as Message"
     Client Script for Sales Order (its source, which the SPA runs as the desk form would,
-    payment details and all), and whether PowerPack's Copy as Image is on."""
+    payment details and all - desk hands the same source to anyone who opens the form), and
+    whether PowerPack's Copy as Image is on. `date_format` is what the script's dates use."""
     if not frappe.has_permission("Sales Order", "read"):
-        return {"copy_message_script": None, "copy_image": False}
+        return {"copy_message_script": None, "copy_image": False, "date_format": None}
+    return {
+        "copy_message_script": _copy_message_script(),
+        "copy_image": bool(_copy_as_image_enabled()),
+        "date_format": frappe.db.get_default("date_format") or "dd-mm-yyyy",
+    }
 
-    script = None
-    for row in frappe.get_all(
-        "Client Script",
-        filters={"dt": "Sales Order", "enabled": 1},
-        fields=["name", "script"],
-        order_by="name asc",
-    ):
-        if COPY_MESSAGE_LABEL in (row.script or ""):
-            script = row.script
-            break
 
-    return {"copy_message_script": script, "copy_image": bool(_copy_as_image_enabled())}
+@frappe.whitelist()
+def get_held_order_share_doc(order_id):
+    """The held order as the desk form has it, for the Copy as Message script, with its
+    currency's symbol for format_currency."""
+    doc = frappe.get_doc("Sales Order", order_id)
+    doc.check_permission("read")
+    return {
+        "doc": doc.as_dict(convert_dates_to_str=True),
+        "currency_symbol": frappe.db.get_value("Currency", doc.currency, "symbol") or doc.currency,
+    }

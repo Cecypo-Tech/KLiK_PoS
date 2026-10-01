@@ -14,18 +14,32 @@ export interface CopyImageDeps {
 
 let busy = false;
 
+/** A render that takes longer than this is given up (Cloudflare would cut it at 100s). */
+export const RENDER_TIMEOUT_MS = 60_000;
+
 export async function fetchPrintImage(
   doctype: string,
   name: string,
-  { fetchImpl = fetch, csrfToken }: Pick<CopyImageDeps, "fetchImpl" | "csrfToken"> = {}
+  { fetchImpl = fetch, csrfToken }: Pick<CopyImageDeps, "fetchImpl" | "csrfToken"> = {},
+  timeoutMs = RENDER_TIMEOUT_MS
 ): Promise<Blob> {
   const params = new URLSearchParams({ doctype, name });
-  const response = await fetchImpl(`${PRINT_IMAGE_METHOD}?${params}`, {
-    credentials: "same-origin",
-    headers: csrfToken ? { "X-Frappe-CSRF-Token": csrfToken } : {},
-  });
-  if (!response.ok) throw new Error(await errorMessage(response));
-  return new Blob([await response.arrayBuffer()], { type: "image/png" });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${PRINT_IMAGE_METHOD}?${params}`, {
+      credentials: "same-origin",
+      headers: csrfToken ? { "X-Frappe-CSRF-Token": csrfToken } : {},
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    return new Blob([await response.arrayBuffer()], { type: "image/png" });
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error("The image took too long to prepare. Try again.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function errorMessage(response: Response): Promise<string> {
@@ -58,7 +72,10 @@ function download(blob: Blob, name: string) {
  */
 export function copyPrintImage(doctype: string, name: string, deps: CopyImageDeps): Promise<void> {
   // A render takes a few seconds and holds a server worker; ignore repeat clicks.
-  if (busy) return Promise.resolve();
+  if (busy) {
+    deps.notify("Still preparing the image…", "info");
+    return Promise.resolve();
+  }
   busy = true;
   deps.notify("Preparing image…", "info");
 

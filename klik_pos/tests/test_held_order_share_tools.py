@@ -11,7 +11,12 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.api.sales_order import get_held_order_share_tools
+from klik_pos.api.sales_order import (
+	POWERPACK_COPY_MESSAGE_SCRIPT,
+	_copy_as_image_enabled,
+	get_held_order_share_doc,
+	get_held_order_share_tools,
+)
 
 SCRIPT = "_Test KLiK Copy as Message (Sales Order)"
 SOURCE = "frappe.ui.form.on('Sales Order', {refresh(frm) { frm.add_custom_button(__('Copy as Message'), () => 1); }});"
@@ -31,11 +36,11 @@ class TestHeldOrderShareTools(FrappeTestCase):
 		frappe.set_user("Administrator")
 		frappe.db.rollback()
 
-	def _script(self, **overrides):
+	def _script(self, name=SCRIPT, **overrides):
 		doc = frappe.get_doc(
 			{
 				"doctype": "Client Script",
-				"name": SCRIPT,
+				"name": name,
 				"dt": "Sales Order",
 				"view": "Form",
 				"enabled": 1,
@@ -43,7 +48,7 @@ class TestHeldOrderShareTools(FrappeTestCase):
 				**overrides,
 			}
 		)
-		doc.insert(ignore_permissions=True, set_name=SCRIPT)
+		doc.insert(ignore_permissions=True, set_name=name)
 		return doc
 
 	def test_hands_over_the_site_s_copy_as_message_script(self):
@@ -62,15 +67,63 @@ class TestHeldOrderShareTools(FrappeTestCase):
 		self._script(dt="Sales Invoice")
 		self.assertIsNone(get_held_order_share_tools()["copy_message_script"])
 
+	def test_a_script_that_only_mentions_it_is_not_it(self):
+		self._script(script="// TODO: Copy as Message\nfrappe.ui.form.on('Sales Order', {refresh() {}});")
+		self.assertIsNone(get_held_order_share_tools()["copy_message_script"])
+
+	def test_a_list_view_script_is_not_used(self):
+		self._script(view="List")
+		self.assertIsNone(get_held_order_share_tools()["copy_message_script"])
+
+	def test_powerpack_s_own_script_wins_over_another_copy(self):
+		self._script(name="_Test AAA earlier name", script=SOURCE.replace("() => 1", "() => 2"))
+		if frappe.db.exists("Client Script", POWERPACK_COPY_MESSAGE_SCRIPT):
+			frappe.db.set_value(
+				"Client Script", POWERPACK_COPY_MESSAGE_SCRIPT, {"enabled": 1, "view": "Form", "script": SOURCE}
+			)
+		else:
+			self._script(name=POWERPACK_COPY_MESSAGE_SCRIPT)
+		self.assertEqual(get_held_order_share_tools()["copy_message_script"], SOURCE)
+
+	def test_dates_follow_the_site_s_format(self):
+		self.assertEqual(get_held_order_share_tools()["date_format"], frappe.db.get_default("date_format"))
+
 	def test_image_follows_powerpack_s_setting(self):
-		with patch("klik_pos.api.sales_order._copy_as_image_enabled", return_value=True):
+		if "cecypo_powerpack" not in frappe.get_installed_apps():
+			self.assertFalse(_copy_as_image_enabled())
+			return
+		with patch("cecypo_powerpack.utils.is_feature_enabled", return_value=True):
 			self.assertTrue(get_held_order_share_tools()["copy_image"])
-		with patch("klik_pos.api.sales_order._copy_as_image_enabled", return_value=False):
+		with patch("cecypo_powerpack.utils.is_feature_enabled", return_value=False):
 			self.assertFalse(get_held_order_share_tools()["copy_image"])
+
+	def test_no_image_without_powerpack(self):
+		with patch("frappe.get_installed_apps", return_value=["frappe", "erpnext", "klik_pos"]):
+			self.assertFalse(_copy_as_image_enabled())
 
 	def test_someone_who_cannot_read_sales_orders_gets_nothing(self):
 		self._script()
-		with patch("frappe.has_permission", return_value=False):
-			self.assertEqual(
-				get_held_order_share_tools(), {"copy_message_script": None, "copy_image": False}
-			)
+		user = "share-tools-no-read@example.com"
+		if not frappe.db.exists("User", user):
+			frappe.get_doc(
+				{"doctype": "User", "email": user, "first_name": "NoRead", "send_welcome_email": 0}
+			).insert(ignore_permissions=True)
+		frappe.set_user(user)
+		self.assertEqual(
+			get_held_order_share_tools(), {"copy_message_script": None, "copy_image": False, "date_format": None}
+		)
+		order = frappe.get_all("Sales Order", limit=1, pluck="name", ignore_permissions=True)
+		if order:
+			with self.assertRaises(frappe.PermissionError):
+				get_held_order_share_doc(order[0])
+
+	def test_the_order_comes_with_its_currency_symbol(self):
+		order = frappe.get_all("Sales Order", fields=["name", "currency"], limit=1)
+		if not order:
+			self.skipTest("no Sales Order on this site")
+		result = get_held_order_share_doc(order[0].name)
+		self.assertEqual(result["doc"]["name"], order[0].name)
+		self.assertEqual(
+			result["currency_symbol"],
+			frappe.db.get_value("Currency", order[0].currency, "symbol") or order[0].currency,
+		)

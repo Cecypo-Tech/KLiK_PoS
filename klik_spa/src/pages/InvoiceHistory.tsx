@@ -48,11 +48,11 @@ import {
   applyHeldOrderAction,
   callMethod,
   getHeldOrders,
+  getHeldOrderShareDoc,
   getHeldOrderShareTools,
-  getSalesOrderDoc,
   type HeldOrderShareTools,
 } from "../services/salesOrder";
-import { runCopyAsMessage } from "../utils/copyAsMessage";
+import { deferredClipboardText, formatSystemDate, runCopyAsMessage } from "../utils/copyAsMessage";
 import { copyPrintImage } from "../utils/copyAsImage";
 import { getCSRFToken } from "../utils/csrf";
 import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
@@ -60,7 +60,7 @@ import { approvalBadge, PRICE_APPROVED, WITHDRAW_APPROVAL } from "../utils/price
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { handlePrintInvoice } from "../utils/printHandler";
 import { useCartStore } from "../stores/cartStore";
-import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, formatDateOnly, toSortableTimestamp } from "../utils/time";
+import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
 import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "../utils/exportUtils";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -247,7 +247,12 @@ export default function InvoiceHistoryPage() {
 
   // Copy and Image on a held order's row: each only when the site has it (see
   // get_held_order_share_tools).
-  const [shareTools, setShareTools] = useState<HeldOrderShareTools>({ copy_message_script: null, copy_image: false });
+  const [shareTools, setShareTools] = useState<HeldOrderShareTools>({
+    copy_message_script: null,
+    copy_image: false,
+    date_format: null,
+  });
+  const copyingMessage = useRef(false);
   useEffect(() => {
     let cancelled = false;
     getHeldOrderShareTools()
@@ -259,17 +264,25 @@ export default function InvoiceHistoryPage() {
   }, []);
 
   const handleCopyHeldOrderMessage = async (orderId: string) => {
-    if (!shareTools.copy_message_script) return;
+    if (!shareTools.copy_message_script || copyingMessage.current) return;
+    copyingMessage.current = true;
+    // Taken during the click: Safari refuses a clipboard write that comes after the fetches.
+    const clipboard = deferredClipboardText();
     try {
-      const doc = await getSalesOrderDoc(orderId);
+      const { doc, currency_symbol } = await getHeldOrderShareDoc(orderId);
       await runCopyAsMessage(shareTools.copy_message_script, doc, {
         call: callMethod,
         alert: (message, ok) => (ok ? toast.success(message) : toast.error(message)),
-        formatCurrency: (value, currency) => formatCurrencyWithSymbol(value, currency),
-        formatDate: formatDateOnly,
+        formatCurrency: (value) => formatCurrencyWithSymbol(value, currency_symbol),
+        formatDate: (date) => formatSystemDate(date, shareTools.date_format),
+        writeText: clipboard.writeText,
+        user: userInfo?.user,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not copy the message");
+    } finally {
+      clipboard.done();
+      copyingMessage.current = false;
     }
   };
 
@@ -282,8 +295,8 @@ export default function InvoiceHistoryPage() {
 
   const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
     const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
-    const button =
-      "p-1 rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
+    // Icons only, so on a touch screen each needs a finger-sized target.
+    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
     return (
       <>
         <button type="button" title="Print" aria-label="Print" className={button}
