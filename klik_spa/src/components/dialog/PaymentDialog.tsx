@@ -5,11 +5,10 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { paymentBlockReason } from "../../utils/paymentBlockReason";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
-import { Award, ChevronDown, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, X } from "lucide-react";
+import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
 import { useSalesTaxCharges } from "../../hooks/useSalesTaxCharges";
-import { useDeliveryPersonnel } from "../../hooks/useDeliveryPersonnel";
 import { useShippingRules } from "../../hooks/useShippingRules";
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
 import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
@@ -57,7 +56,7 @@ import TotalsSection from "./TotalsSection";
 import ActionButtons from "./ActionButtons";
 import InvoicePreview from "./InvoicePreview";
 import SharingInterface from "./SharingInterface";
-import DeliveryPersonnelModal from "./DeliveryPersonnelModal";
+import DeliveryPersonnelCombobox from "./DeliveryPersonnelCombobox";
 import MpesaOptionsModal from "./MpesaOptionsModal";
 import OtherCharges from "./OtherCharges";
 import StepperInput from "../common/StepperInput";
@@ -217,7 +216,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [emailMessage, setEmailMessage] = useState("");
   const [isLoadingEmailTemplates, setIsLoadingEmailTemplates] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
-  const [showDeliveryPersonnelModal, setShowDeliveryPersonnelModal] = useState(false);
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
   const [selectedDeliveryPersonnel, setSelectedDeliveryPersonnel] = useState<string | null>(null);
   const [deliveryCharge, setDeliveryCharge] = useState(0);
@@ -296,7 +294,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   } = useSalespersonStore();
   const { modes, isLoading, error } = usePaymentModes(typeof posDetails?.name === "string" ? posDetails.name : "");
   const { salesTaxCharges, defaultTax, isLoading: salesTaxLoading } = useSalesTaxCharges();
-  const { personnel: deliveryPersonnelList } = useDeliveryPersonnel();
   const navigate = useNavigate();
   const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule, checkoutExtras, setCheckoutExtras } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
@@ -2230,12 +2227,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   };
 
-  const getSelectedDeliveryPersonnelName = () => {
-    if (!selectedDeliveryPersonnel) return null;
-    const person = deliveryPersonnelList.find((p) => p.name === selectedDeliveryPersonnel);
-    return person?.delivery_personnel || selectedDeliveryPersonnel;
-  };
-
   const retryMpesaRequest = async () => {
     const activeMpesaPayment = getActiveMpesaPayment();
     if (!activeMpesaPayment) {
@@ -2964,10 +2955,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             {(isDeliveryRequired || isShippingRuleEnabled) && (
               <div className="flex flex-1 flex-wrap items-center gap-3">
                 {isDeliveryRequired && (
-                  <button type="button" onClick={() => setShowDeliveryPersonnelModal(true)} disabled={invoiceSubmitted || isProcessingPayment} className={`flex-1 min-w-[12rem] max-w-xs px-4 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-between ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
-                    <span>{getSelectedDeliveryPersonnelName() || <span className="text-gray-500 dark:text-gray-400">Select Delivery Personnel</span>}</span>
-                    <ChevronDown size={16} className="text-gray-400 dark:text-gray-500 flex-shrink-0 ml-2" />
-                  </button>
+                  <DeliveryPersonnelCombobox
+                    value={selectedDeliveryPersonnel}
+                    onChange={setSelectedDeliveryPersonnel}
+                    disabled={invoiceSubmitted || isProcessingPayment}
+                    className="flex-1 min-w-[12rem] max-w-xs"
+                  />
                 )}
                 {isShippingRuleEnabled && renderShippingRuleSelect("flex-1 min-w-[12rem] max-w-xs px-4 py-2")}
               </div>
@@ -3011,11 +3004,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           </div>
         </div>
 
-      <DeliveryPersonnelModal
-        isOpen={showDeliveryPersonnelModal}
-        onClose={() => setShowDeliveryPersonnelModal(false)}
-        onSelect={(name) => setSelectedDeliveryPersonnel(name)}
-      />
     </div>
   );
 }
