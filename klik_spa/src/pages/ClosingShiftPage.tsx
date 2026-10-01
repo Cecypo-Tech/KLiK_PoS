@@ -382,6 +382,8 @@ export default function ClosingShiftPage() {
   const handleBankedChange = (modeName: string, value: string) =>
     setBankedAmounts((prev) => ({ ...prev, [modeName]: parseFloat(value) || 0 }));
   const hasBankingError = [...floatModes].some((m) => bankingError(closingAmounts[m] || 0, bankedAmounts[m] || 0));
+  // One condition for the Close button's state and its look, so a blocked close also looks blocked.
+  const closeBlocked = isCreating || !hasPaymentStats || hasBankingError;
 
   const handleClosingAmountChange = (modeName: string, value: string) => {
     setClosingAmounts(prev => ({
@@ -726,9 +728,9 @@ export default function ClosingShiftPage() {
                 </button>
                 <button
                   onClick={handleFinalClose}
-                  disabled={isCreating || !hasPaymentStats || hasBankingError}
+                  disabled={closeBlocked}
                   className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                    isCreating || !hasPaymentStats
+                    closeBlocked
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-beveren-600 text-white hover:bg-beveren-700'
                   }`}
@@ -1118,9 +1120,9 @@ export default function ClosingShiftPage() {
                 </button>
                 <button
                   onClick={handleFinalClose}
-                  disabled={isCreating || !hasPaymentStats || hasBankingError}
+                  disabled={closeBlocked}
                   className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                    isCreating || !hasPaymentStats
+                    closeBlocked
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                       : 'bg-beveren-600 text-white hover:bg-beveren-700'
                   }`}
