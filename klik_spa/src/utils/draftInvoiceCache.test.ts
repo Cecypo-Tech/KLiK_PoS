@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("../stores/cartStore", () => ({ useCartStore: { setState: vi.fn() } }));
 
+import { useCartStore } from "../stores/cartStore";
+import { EMPTY_CHECKOUT_EXTRAS } from "./heldOrderPayload";
+
 import {
   cacheDraftInvoiceItems,
   cacheHeldOrder,
@@ -12,6 +15,7 @@ import {
   getCachedDraftInvoiceItems,
   getOriginalHeldOrderId,
   hasCachedDraftInvoiceItems,
+  loadCachedItemsToCart,
 } from "./draftInvoiceCache";
 
 const store = new Map<string, string>();
@@ -100,5 +104,31 @@ describe("forgetOriginalHeldOrder", () => {
 
     expect(getOriginalHeldOrderId()).toBeNull();
     expect(getCachedDraftInvoiceItems()?.items).toHaveLength(1);
+  });
+});
+
+describe("loadCachedItemsToCart and checkout's own state", () => {
+  const item = { id: "A", item_code: "A", name: "A", quantity: 1, price: 10 } as never;
+  const leftover = { deliveryCharge: 200, deliveryPersonnel: "DP-1", orderDiscountAmount: 50, salesTaxCharges: "VAT" };
+
+  /** The state the loader would leave, starting from a cart that still holds `leftover`. */
+  async function stateAfterLoad() {
+    const setState = useCartStore.setState as unknown as ReturnType<typeof vi.fn>;
+    setState.mockClear();
+    await loadCachedItemsToCart();
+    const updater = setState.mock.calls[0]![0] as (s: Record<string, unknown>) => Record<string, unknown>;
+    return updater({ cartItems: [], checkoutExtras: leftover });
+  }
+
+  it("gives a recalled draft its own discount and none of the last sale's delivery or tax", async () => {
+    cacheDraftInvoiceItems("ACC-SINV-1", [item], null, 10);
+
+    expect((await stateAfterLoad()).checkoutExtras).toEqual({ ...EMPTY_CHECKOUT_EXTRAS, orderDiscountAmount: 10 });
+  });
+
+  it("leaves a resumed held order's restored checkout state alone", async () => {
+    cacheHeldOrder("SAL-ORD-1", [item], null, 10);
+
+    expect((await stateAfterLoad()).checkoutExtras).toEqual(leftover);
   });
 });
