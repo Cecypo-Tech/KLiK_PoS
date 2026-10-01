@@ -430,11 +430,11 @@ def install_opening_entry_variance_fields():
     fields = [
         {
             "fieldname": "custom_previous_closing_amount",
-            "label": "Counted At Last Closing",
+            "label": "Left In Drawer At Last Closing",
             "fieldtype": "Currency",
             "read_only": 1,
             "insert_after": "opening_amount",
-            "description": "What this mode was counted at when this till last closed. Zero for a mode that holds no float.",
+            "description": "What this till's last closing counted, less what was handed over for banking. Zero for a mode that holds no float.",
             "module": "KLiK PoS",
         },
         {
@@ -451,6 +451,31 @@ def install_opening_entry_variance_fields():
     ]
     if missing:
         create_custom_fields({"POS Opening Entry Detail": missing}, update=True)
+
+    # The cash handed over for banking at closing. The next opening is suggested at the
+    # count less this, rather than at the whole count.
+    banked = {
+        "fieldname": "custom_banked_amount",
+        "label": "Handed Over For Banking",
+        "fieldtype": "Currency",
+        "insert_after": "closing_amount",
+        "description": "Cash taken out of the drawer at closing to be banked. The next opening "
+        "on this till is suggested at the count less this. Cash-type modes only.",
+        "module": "KLiK PoS",
+    }
+    if not frappe.db.has_column("POS Closing Entry Detail", banked["fieldname"]):
+        create_custom_fields({"POS Closing Entry Detail": [banked]}, update=True)
+        missing.append(banked)
+    # What the opening row records is now the float left after banking, not the raw count.
+    frappe.db.set_value(
+        "Custom Field",
+        {"dt": "POS Opening Entry Detail", "fieldname": "custom_previous_closing_amount"},
+        {
+            "label": "Left In Drawer At Last Closing",
+            "description": "What this till's last closing counted, less what was handed over "
+            "for banking. Zero for a mode that holds no float.",
+        },
+    )
     return [f["fieldname"] for f in missing]
 
 

@@ -881,6 +881,8 @@ def _build_payment_summary(opening_modes, sales_data):
 		summary.append(
 			{
 				"name": mop,
+				# Close Shift asks how much cash is banked only on Cash-type modes.
+				"type": frappe.db.get_value("Mode of Payment", mop, "type") if mop else None,
 				"openingAmount": float(mode.opening_amount or 0.0),
 				"amount": float(sales_info.get("total_amount", 0.0)),
 				"transactions": int(sales_info.get("transactions", 0)),

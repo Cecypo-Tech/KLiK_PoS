@@ -22,6 +22,7 @@ import {
   validateCheckoutInvoice,
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
+import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
 import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
 import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
@@ -227,6 +228,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const taxPreviewCacheRef = useRef<Map<string, CachedTaxPreviewEntry>>(new Map());
   const initializedCreditDefaultRef = useRef(false);
   const initializedOrderDiscountRef = useRef(false);
+  // State, not a ref: the write-back below must wait for the render that holds the restored
+  // values, or it would store the pre-restore ones first.
+  const [checkoutExtrasRestored, setCheckoutExtrasRestored] = useState(false);
 
   const { posDetails } = usePOSProfileStore();
   const posLoading = false;
@@ -242,7 +246,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const { salesTaxCharges, defaultTax, isLoading: salesTaxLoading } = useSalesTaxCharges();
   const { personnel: deliveryPersonnelList } = useDeliveryPersonnel();
   const navigate = useNavigate();
-  const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule } = useCartStore();
+  const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule, checkoutExtras, setCheckoutExtras } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
   const posCompanyName =
     typeof posDetails?.company === "string"
@@ -422,14 +426,49 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (initializedOrderDiscountRef.current) {
       return;
     }
-    if (allowDiscountChange && (getOriginalHeldOrderId() || getOriginalDraftInvoiceId())) {
-      const restoredDiscount = getOriginalOrderDiscountAmount();
+    if (allowDiscountChange) {
+      // The cart store carries it across closing checkout and a hold/recall; a recalled
+      // draft invoice still brings it in the draft cache.
+      const restoredDiscount =
+        checkoutExtras.orderDiscountAmount
+        || (getOriginalHeldOrderId() || getOriginalDraftInvoiceId() ? getOriginalOrderDiscountAmount() : 0);
       if (restoredDiscount > 0) {
         handleOrderDiscountAmountChange(restoredDiscount);
       }
     }
     initializedOrderDiscountRef.current = true;
   }, [isOpen, allowDiscountChange]);
+
+  // Delivery charge and person and the tax template come back from the cart store each time
+  // checkout opens - after closing it, and after recalling a held order.
+  useEffect(() => {
+    if (!isOpen) {
+      setCheckoutExtrasRestored(false);
+      return;
+    }
+    if (checkoutExtrasRestored) return;
+    if (checkoutExtras.deliveryCharge > 0 && isDeliveryChargeEnabled && !activeShippingRule) {
+      setDeliveryCharge(checkoutExtras.deliveryCharge);
+    }
+    if (checkoutExtras.deliveryPersonnel) setSelectedDeliveryPersonnel(checkoutExtras.deliveryPersonnel);
+    if (checkoutExtras.salesTaxCharges) setSelectedSalesTaxCharges(checkoutExtras.salesTaxCharges);
+    setCheckoutExtrasRestored(true);
+    // Once per open, from what the store held at that moment - not on every store write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // ...and go back to it as they change, so a hold from the cart sends what checkout showed.
+  useEffect(() => {
+    if (!isOpen || !checkoutExtrasRestored) return;
+    setCheckoutExtras({
+      deliveryCharge: Number(deliveryCharge) || 0,
+      deliveryPersonnel: selectedDeliveryPersonnel,
+      orderDiscountAmount: Number(orderDiscountAmount) || 0,
+      salesTaxCharges: selectedSalesTaxCharges,
+    });
+    // setCheckoutExtras is a stable store action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, checkoutExtrasRestored, deliveryCharge, selectedDeliveryPersonnel, orderDiscountAmount, selectedSalesTaxCharges]);
 
   // Inclusive grand total: sum of discountedPriceIncl (already computed correctly in OrderSummary mapping)
   // This is reliable regardless of whether items have ERPNext Item Tax Templates
@@ -1663,12 +1702,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         customerData: selectedCustomer,
         subtotal: calculations.subtotal,
         total: checkoutGrandTotal,
-        SalesTaxCharges: selectedSalesTaxCharges,
         taxAmount: calculations.taxAmount,
         taxType: calculations.isInclusive ? "inclusive" : "exclusive",
         couponDiscount: calculations.couponDiscount,
-        orderDiscountAmount: Number(orderDiscountAmount || 0),
-        deliveryCharge,
         grandTotal: checkoutGrandTotal,
         appliedCoupons,
         itemDiscounts,
@@ -1677,10 +1713,20 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         status: "held",
         businessType: posDetails?.business_type,
         salesperson: currentSalesperson?.name || null,
-        tax_id: walkinDetails.taxId || null,
-        walkin_name: walkinDetails.name || null,
-        walkin_phone: walkinDetails.phone || null,
-        extra_fields: extraFields,
+        // Buyer, extra fields, shipping rule, delivery, discount and tax template - built the
+        // same way as the cart's Hold, from what checkout shows now.
+        ...heldOrderPayloadExtras({
+          walkin: walkinDetails,
+          extraFields,
+          shippingRule: activeShippingRule,
+          extras: {
+            deliveryCharge,
+            deliveryPersonnel: selectedDeliveryPersonnel,
+            orderDiscountAmount: Number(orderDiscountAmount || 0),
+            salesTaxCharges: selectedSalesTaxCharges,
+          },
+          flags: tillFlags(posDetails as Record<string, unknown>),
+        }),
         loyalty: appliedLoyalty
           ? {
               loyalty_program: appliedLoyalty.loyalty_program,
@@ -1688,7 +1734,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             }
           : null,
         held_order_id: getOriginalHeldOrderId(),
-        shipping_rule: activeShippingRule || null,
       };
 
       const result = await createHeldOrder(orderData);
@@ -1963,10 +2008,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [isOpen, allowCreditSales, defaultSalesType]);
 
   useEffect(() => {
-    if (isOpen && defaultTax && !selectedSalesTaxCharges) {
+    // A template restored from a held order wins over the till default.
+    if (isOpen && defaultTax && !selectedSalesTaxCharges && !checkoutExtras.salesTaxCharges) {
       setSelectedSalesTaxCharges(defaultTax);
     }
-  }, [isOpen, defaultTax, selectedSalesTaxCharges]);
+  }, [isOpen, defaultTax, selectedSalesTaxCharges, checkoutExtras.salesTaxCharges]);
 
   const setGrandTotalToDefaultMop = Boolean(Number(posDetails?.set_grand_total_to_default_mop || 0));
 

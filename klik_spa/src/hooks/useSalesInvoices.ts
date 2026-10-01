@@ -113,6 +113,7 @@ export function useSalesInvoices(
           cashierId: invoice.owner || "",
           customer: invoice.customer_name || "",
           customerId: invoice.customer || "",
+          walkinName: invoice.custom_walkin_customer_name || "",
           items: items,
           subtotal:
             (Number(invoice.base_grand_total) || 0) -

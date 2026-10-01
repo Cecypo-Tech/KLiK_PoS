@@ -1418,6 +1418,7 @@ def get_sales_invoices(
 		has_custom_is_created_from_klik = any(
 			df.fieldname == "custom_is_created_from_klik" for df in sales_invoice_meta.fields
 		)
+		has_walkin_name = any(df.fieldname == "custom_walkin_customer_name" for df in sales_invoice_meta.fields)
 
 		select_fields = """name, posting_date, posting_time, owner, customer, customer_name,
 			base_grand_total, base_rounded_total, status, discount_amount,
@@ -1431,6 +1432,8 @@ def get_sales_invoices(
 			select_fields += ", custom_is_submitted"
 		if has_custom_is_created_from_klik:
 			select_fields += ", custom_is_created_from_klik"
+		if has_walkin_name:
+			select_fields += ", custom_walkin_customer_name"
 
 		conditions = []
 		params = []
@@ -1466,8 +1469,12 @@ def get_sales_invoices(
 
 		if search and search.strip():
 			search_term = f"%{search.strip()}%"
-			conditions.append("(si.name LIKE %s OR si.customer_name LIKE %s OR si.customer LIKE %s)")
-			params.extend([search_term, search_term, search_term])
+			searched = ["si.name", "si.customer_name", "si.customer"]
+			# Walk-in sales all sit under one customer; the buyer's own name tells them apart.
+			if has_walkin_name:
+				searched.append("si.custom_walkin_customer_name")
+			conditions.append("(" + " OR ".join(f"{col} LIKE %s" for col in searched) + ")")
+			params.extend([search_term] * len(searched))
 
 		where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

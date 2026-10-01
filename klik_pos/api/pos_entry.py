@@ -275,6 +275,11 @@ def validate_closing_entry(doc, method):
 	if frappe.flags.in_install or frappe.flags.in_patch:
 		return
 
+	from klik_pos.api.opening_balances import enforce_banking
+
+	# Only counted cash can be handed over for banking, from the desk as from the till.
+	enforce_banking(doc)
+
 	row = frappe.db.get_value(
 		"POS Opening Entry",
 		doc.pos_opening_entry,
@@ -299,6 +304,13 @@ def create_closing_entry():
 		opening_entry = _get_open_pos_entry(user)
 		_ensure_may_close(opening_entry, user)
 		payment_data = _calculate_payment_reconciliation(opening_entry, data)
+
+		from klik_pos.api.opening_balances import BANKED_FIELD
+
+		if frappe.db.has_column("POS Closing Entry Detail", BANKED_FIELD):
+			banked = data.get("banked_balance") or {}
+			for row in payment_data:
+				row[BANKED_FIELD] = flt(banked.get(row["mode_of_payment"]))
 
 		doc = _create_and_submit_closing_doc(opening_entry, data, payment_data, user)
 
@@ -325,15 +337,20 @@ def _parse_request_data():
 	# Normalize closing_balance format
 	closing_balance_raw = data.get("closing_balance", {})
 	closing_balance = {}
+	# Cash handed over for banking, per mode; the rest stays as the next shift's float.
+	banked_balance = {}
 
 	if isinstance(closing_balance_raw, list):
 		for item in closing_balance_raw:
 			if isinstance(item, dict) and "mode_of_payment" in item and "closing_amount" in item:
 				closing_balance[item["mode_of_payment"]] = item["closing_amount"]
+				if flt(item.get("banked_amount")):
+					banked_balance[item["mode_of_payment"]] = flt(item["banked_amount"])
 	elif isinstance(closing_balance_raw, dict):
 		closing_balance = closing_balance_raw
 
 	data["closing_balance"] = closing_balance
+	data["banked_balance"] = banked_balance
 	return data
 
 

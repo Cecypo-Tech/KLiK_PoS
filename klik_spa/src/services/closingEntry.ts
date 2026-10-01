@@ -5,6 +5,8 @@ import { extractErrorMessage } from "../utils/errorExtraction";
 interface ClosingBalance {
   mode_of_payment: string;
   closing_amount: number;
+  /** Cash handed over for banking; Cash-type modes only. */
+  banked_amount?: number;
 }
 
 export type ClosingResult = { ok: true } | { ok: false; error: string };

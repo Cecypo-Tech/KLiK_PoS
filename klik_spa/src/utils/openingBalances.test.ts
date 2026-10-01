@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOpeningRows,
+  openingMeta,
   canOpen,
   needsReason,
   setAmount,
@@ -179,5 +180,34 @@ describe("what gets sent", () => {
     const rows = buildOpeningRows(modes, suggestion());
 
     expect(totalFloat(rows)).toBe(3000);
+  });
+});
+
+describe("openingMeta", () => {
+  const money = (n: number) => `KES ${n}`;
+  const suggestion = (counted: number, banked: number) => ({
+    pos_profile: "P",
+    modes: [{
+      mode_of_payment: "Cash", type: "Cash", carries_float: true,
+      suggested_amount: counted - banked, previous_closing_amount: counted - banked,
+      previous_counted_amount: counted, previous_banked_amount: banked,
+      previous_closing_entry: "POS-CLO-1", previous_closed_on: "2026-10-01 18:00:00",
+    }],
+  });
+  const row = (counted: number, banked: number) =>
+    buildOpeningRows([{ mode_of_payment: "Cash", type: "Cash" }], suggestion(counted, banked))[0]!;
+
+  it("says what was banked when something was", () => {
+    expect(openingMeta(row(100000, 95000), money)).toBe("left KES 5000 (counted KES 100000, banked KES 95000)");
+  });
+  it("keeps the plain wording when nothing was banked", () => {
+    expect(openingMeta(row(3000, 0), money)).toBe("last closed KES 3000");
+  });
+  it("starts the row at the float left", () => {
+    expect(row(100000, 95000).amount).toBe(5000);
+  });
+  it("names a mode with no float, and a till never closed", () => {
+    expect(openingMeta(buildOpeningRows([{ mode_of_payment: "Card", type: "Bank" }], null)[0]!, money)).toBe("no float");
+    expect(openingMeta(buildOpeningRows([{ mode_of_payment: "Cash", type: "Cash" }], null)[0]!, money)).toBe("no previous closing");
   });
 });

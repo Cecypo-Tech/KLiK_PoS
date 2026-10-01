@@ -1,3 +1,4 @@
+import { EMPTY_CHECKOUT_EXTRAS } from './heldOrderPayload';
 import { useCartStore } from '../stores/cartStore';
 import type { CartItem, Customer } from '../../types';
 
@@ -156,6 +157,12 @@ export async function loadCachedItemsToCart(): Promise<boolean> {
     cartItems: mappedItems,
     appliedCoupons: [],
     selectedCustomer: cachedData.customer,
+    // A recalled draft invoice brings its own discount and nothing else of checkout's: the
+    // last sale's delivery charge, person and tax template must not ride along onto it. A
+    // held order sets its own checkout state just before this, so it is left alone.
+    ...(cachedData.originalDraftInvoiceId
+      ? { checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS, orderDiscountAmount: Number(cachedData.orderDiscountAmount) || 0 } }
+      : {}),
   }));
 
   return true;

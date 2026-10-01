@@ -82,3 +82,13 @@ class TestMergePaymentEntryRows(FrappeTestCase):
 
 	def test_rows_without_a_mode_are_dropped(self):
 		self.assertEqual(_merge_payment_entry_rows([{"total_amount": 10}], []), [])
+
+	def test_each_mode_says_its_type(self):
+		"""Close Shift asks how much cash goes to the bank only on modes that keep cash in
+		the drawer, which it tells apart by Mode of Payment type."""
+		modes = [frappe._dict(mode_of_payment=m, opening_amount=0) for m in ("Cash", "Cheque")]
+		summary = _build_payment_summary(modes, [])
+
+		by_mode = {row["name"]: row for row in summary}
+		self.assertEqual(by_mode["Cash"]["type"], frappe.db.get_value("Mode of Payment", "Cash", "type"))
+		self.assertEqual(by_mode["Cheque"]["type"], frappe.db.get_value("Mode of Payment", "Cheque", "type"))

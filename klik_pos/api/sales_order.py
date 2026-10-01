@@ -439,6 +439,11 @@ def create_held_order(data):
             so = _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
             so.insert(ignore_permissions=True)
 
+        # Sales Order.tax_id is fetched from Customer.tax_id on every save, which wipes the
+        # walk-in buyer's PIN the cashier typed. Put it back, as the invoice path does.
+        if tax_id and so.meta.has_field("tax_id") and so.tax_id != tax_id:
+            so.db_set("tax_id", tax_id)
+
         approval_requested = _request_approval_if_needed(so)
         return {
             "success": True,
@@ -670,6 +675,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             so_fields.append(APPROVAL_STATE_FIELD)
         if frappe.db.has_column("Sales Order", PRICE_BREACH_FIELD):
             so_fields.append(PRICE_BREACH_FIELD)
+        # Held orders for walk-ins all sit under one customer; the buyer's name tells them apart.
+        if frappe.db.has_column("Sales Order", "custom_walkin_customer_name"):
+            so_fields.append("custom_walkin_customer_name")
 
         orders = frappe.get_all(
             "Sales Order",
@@ -688,6 +696,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 if term in (o.name or "").lower()
                 or term in (o.customer_name or "").lower()
                 or term in (o.customer or "").lower()
+                or term in (o.get("custom_walkin_customer_name") or "").lower()
             ]
 
         _attach_cashier_names(orders)

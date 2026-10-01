@@ -2,6 +2,8 @@ import { getHeldOrderDetails } from '../services/salesOrder';
 import { cacheHeldOrder, loadCachedItemsToCart } from './draftInvoiceCache';
 import { transformCustomerInfo } from './transformCustomerInfo';
 import { useCartStore } from '../stores/cartStore';
+import { usePOSProfileStore } from '../stores/posProfileStore';
+import { checkoutExtrasFromHeldOrder, tillFlags } from './heldOrderPayload';
 import type { CartItem, Customer } from '../../types';
 
 // transformCustomerInfo returns the `types/customer` Customer; the cache stores the
@@ -76,7 +78,13 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
   });
 
   useCartStore.getState().setExtraFields(od.extra_fields || od.cart_meta?.extra_fields || {});
-  useCartStore.getState().setShippingRule(od.shipping_rule || od.cart_meta?.shipping_rule || null);
+  // The till's switches decide what comes back: a rule, charge or discount it no longer
+  // allows would only get the next hold or checkout refused.
+  const flags = tillFlags(usePOSProfileStore.getState().posDetails as Record<string, unknown> | null);
+  useCartStore.getState().setShippingRule(
+    flags.shippingRule ? (od.shipping_rule || od.cart_meta?.shipping_rule || null) : null,
+  );
+  useCartStore.getState().setCheckoutExtras(checkoutExtrasFromHeldOrder(od, flags));
 
   return loadCachedItemsToCart();
 }
