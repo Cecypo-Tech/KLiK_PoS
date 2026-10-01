@@ -13,6 +13,7 @@ ENABLED = "_Test KLiK PL Enabled"
 DISABLED = "_Test KLiK PL Disabled"
 EMPTY = "_Test KLiK PL Empty"
 CUSTOMER = "_Test KLiK PL Customer"
+GROUP = "_Test KLiK PL Group"
 
 
 class TestDisabledPriceLists(FrappeTestCase):
@@ -43,10 +44,12 @@ class TestDisabledPriceLists(FrappeTestCase):
 						"price_list_rate": rate,
 					}
 				).insert()
-		if not frappe.db.exists("Customer", CUSTOMER):
+		if not frappe.db.exists("Customer Group", GROUP):
 			frappe.get_doc(
-				{"doctype": "Customer", "customer_name": CUSTOMER, "customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name")}
+				{"doctype": "Customer Group", "customer_group_name": GROUP, "parent_customer_group": "All Customer Groups"}
 			).insert()
+		if not frappe.db.exists("Customer", CUSTOMER):
+			frappe.get_doc({"doctype": "Customer", "customer_name": CUSTOMER, "customer_group": GROUP}).insert()
 		# ERPNext refuses an Item Price on a disabled list, so the price goes in first.
 		frappe.db.set_value("Price List", DISABLED, "enabled", 0)
 		frappe.db.commit()
@@ -56,6 +59,7 @@ class TestDisabledPriceLists(FrappeTestCase):
 		frappe.set_user("Administrator")
 		frappe.db.delete("Item Price", {"item_code": ITEM})
 		frappe.delete_doc("Customer", CUSTOMER, force=True, ignore_missing=True)
+		frappe.delete_doc("Customer Group", GROUP, force=True, ignore_missing=True)
 		for name in (ENABLED, DISABLED, EMPTY):
 			frappe.delete_doc("Price List", name, force=True, ignore_missing=True)
 		frappe.delete_doc("Item", ITEM, force=True, ignore_missing=True)
@@ -74,13 +78,39 @@ class TestDisabledPriceLists(FrappeTestCase):
 		price = fetch_item_price(ITEM, price_list=EMPTY, uom="Box")
 		self.assertEqual(price.get("price"), 1200)
 
-	def test_a_customer_default_on_a_disabled_list_falls_back_to_the_till(self):
+	def _pickers(self):
+		"""Every place that picks a customer's price list, each with the till patched in."""
 		from unittest.mock import patch
 
-		customer = CUSTOMER
+		from klik_pos.api.item import item_listing, pricing
+
 		till = frappe._dict(selling_price_list=ENABLED)
-		with patch("klik_pos.api.item.item_price.get_current_pos_profile", return_value=till):
-			frappe.db.set_value("Customer", customer, "default_price_list", DISABLED)
-			self.assertEqual(get_price_list_with_customer_priority(customer), ENABLED)
-			frappe.db.set_value("Customer", customer, "default_price_list", EMPTY)
-			self.assertEqual(get_price_list_with_customer_priority(customer), EMPTY)
+		with (
+			patch("klik_pos.api.item.item_price.get_current_pos_profile", return_value=till),
+			patch("klik_pos.api.item.pricing.get_current_pos_profile", return_value=till),
+		):
+			yield "customer priority", get_price_list_with_customer_priority(CUSTOMER)
+			yield "item listing", item_listing._get_priority_price_list(CUSTOMER, pos_profile=till)
+			yield "cart pricing", pricing._get_price_list(CUSTOMER)
+
+	def _set_defaults(self, customer_list, group_list):
+		frappe.db.set_value("Customer", CUSTOMER, "default_price_list", customer_list)
+		frappe.db.set_value("Customer Group", GROUP, "default_price_list", group_list)
+
+	def test_a_customer_default_on_a_disabled_list_falls_back_to_the_till(self):
+		self._set_defaults(DISABLED, None)
+		for picker, price_list in self._pickers():
+			self.assertEqual(price_list, ENABLED, picker)
+
+	def test_a_group_default_on_a_disabled_list_falls_back_to_the_till(self):
+		self._set_defaults(None, DISABLED)
+		for picker, price_list in self._pickers():
+			self.assertEqual(price_list, ENABLED, picker)
+
+	def test_an_enabled_customer_default_still_wins(self):
+		self._set_defaults(EMPTY, None)
+		for picker, price_list in self._pickers():
+			self.assertEqual(price_list, EMPTY, picker)
+		self._set_defaults(DISABLED, EMPTY)
+		for picker, price_list in self._pickers():
+			self.assertEqual(price_list, EMPTY, picker)

@@ -457,8 +457,8 @@ def _calculate_price_from_default_uom(
         return None
 
 
-def _is_enabled_price_list(price_list):
-    return bool(frappe.db.get_value("Price List", price_list, "enabled"))
+def is_enabled_price_list(price_list):
+    return bool(price_list) and bool(frappe.db.get_value("Price List", price_list, "enabled"))
 
 
 def get_price_list_with_customer_priority(customer=None):
@@ -476,7 +476,7 @@ def get_price_list_with_customer_priority(customer=None):
                 (customer,),
             )
 
-            if res and res[0][0] and _is_enabled_price_list(res[0][0]):
+            if res and res[0][0] and is_enabled_price_list(res[0][0]):
                 return res[0][0]
 
             # Customer group fallback
@@ -494,7 +494,7 @@ def get_price_list_with_customer_priority(customer=None):
                 if (
                     customer_group_res
                     and customer_group_res[0][0]
-                    and _is_enabled_price_list(customer_group_res[0][0])
+                    and is_enabled_price_list(customer_group_res[0][0])
                 ):
                     return customer_group_res[0][0]
 

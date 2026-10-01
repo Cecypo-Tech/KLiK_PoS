@@ -11,7 +11,7 @@ from ..sql_builder import (
     record_denied_doctype,
     reset_denied_doctypes,
 )
-from .item_price import fetch_item_price
+from .item_price import fetch_item_price, is_enabled_price_list
 from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balance
 from .search_utils import build_item_search_conditions
 
@@ -1009,7 +1009,7 @@ def _get_priority_price_list(customer=None, pos_profile=None, default_price_list
         if customer:
             try:
                 customer_doc = frappe.get_doc("Customer", customer)
-                if customer_doc.default_price_list:
+                if customer_doc.default_price_list and is_enabled_price_list(customer_doc.default_price_list):
                     return customer_doc.default_price_list
             except Exception:
                 pass
@@ -1018,7 +1018,8 @@ def _get_priority_price_list(customer=None, pos_profile=None, default_price_list
                 customer_doc = frappe.get_doc("Customer", customer)
                 if customer_doc.customer_group:
                     customer_group_doc = frappe.get_doc("Customer Group", customer_doc.customer_group)
-                    if getattr(customer_group_doc, "default_price_list", None):
+                    group_list = getattr(customer_group_doc, "default_price_list", None)
+                    if group_list and is_enabled_price_list(group_list):
                         return customer_group_doc.default_price_list
             except Exception:
                 pass
