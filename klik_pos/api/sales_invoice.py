@@ -4421,7 +4421,10 @@ class CustomSalesInvoice(SalesInvoice):
 			self.validate_pos_opening_entry()
 
 		if _should_reserve_stock(self):
-			_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
+			# Only a sale that went through the queue has a queue status to finish; one
+			# submitted directly has none.
+			if self.get("queue_status"):
+				_update_queue_fields(self, QUEUE_STATUSES["submitted"], error_message=None)
 			_cancel_sales_invoice_reservations(self.name)
 		self.validate_reserved_stock_availability()
 		self.validate_full_payment()
