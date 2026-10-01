@@ -3552,14 +3552,11 @@ def _set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile):
 	tax rows. Left to it, a re-held order (an existing Sales Order) lost its tax altogether,
 	and on a till whose rates include tax the default was added on top of the price.
 	"""
-	template = sales_and_tax_charges or pos_profile.taxes_and_charges
-	if not template:
-		company = doc.get("company") or pos_profile.get("company")
-		if company:
-			template = frappe.db.get_value(
-				"Sales Taxes and Charges Template", {"company": company, "is_default": 1, "disabled": 0}, "name"
-			)
+	from klik_pos.api.tax import resolve_pos_tax_template
+
+	template = sales_and_tax_charges or resolve_pos_tax_template(pos_profile, company=doc.get("company"))
 	doc.taxes_and_charges = template
+	return template
 
 
 def _apply_pos_tax_treatment(
@@ -3583,12 +3580,16 @@ def _apply_pos_tax_treatment(
 	charge service item, named in skip_item_code) before calling this - it builds the tax
 	rows and pos_line_prices from what is already on doc.items.
 	"""
-	_set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile)
+	template = _set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile)
 	force_inclusive_tax = _is_pos_profile_tax_included_in_basic_rate(pos_profile)
 	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
 	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
 	doc.set_taxes()
 	doc.set_missing_values()
+	# On a POS invoice ERPNext's set_pos_fields copies the till's own template over this one -
+	# blank on a till that names none - and leaves the rows built from it behind.
+	if template and doc.get("taxes_and_charges") != template:
+		doc.taxes_and_charges = template
 	_reassert_pos_line_prices(
 		doc, pos_line_prices, skip_item_code=skip_item_code, restore_price_list_rate=restore_price_list_rate
 	)

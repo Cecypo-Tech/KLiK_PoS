@@ -101,3 +101,64 @@ class TestDefaultTaxTemplate(FrappeTestCase):
 		self.assertGreater(flt(so.total_taxes_and_charges), 0)
 		# Keyed at 100 with tax included: the order totals 100, not 100 plus tax.
 		self.assertEqual(flt(so.grand_total), 100.0)
+
+
+TEST_TILL = "_Test POS Profile"  # on this bench: no template, rates include tax
+
+
+class TestEveryReaderSeesTheSameTemplate(FrappeTestCase):
+	"""The checkout's tax picker, the item grid's tax rows and the invoice all resolve the
+	till's template the same way the order builder does."""
+
+	def setUp(self):
+		self.default = _default_template()
+		if not self.default:
+			self.skipTest("no default Sales Taxes and Charges Template for Dev Co")
+		if not frappe.db.exists("POS Profile", TEST_TILL) or frappe.db.get_value(
+			"POS Profile", TEST_TILL, "taxes_and_charges"
+		):
+			self.skipTest(f"{TEST_TILL} is missing or names its own template")
+		self.till = frappe.get_doc("POS Profile", TEST_TILL)
+
+	def test_the_resolver_falls_back_to_the_company_default(self):
+		from klik_pos.api.tax import resolve_pos_tax_template
+
+		self.assertEqual(resolve_pos_tax_template(self.till), self.default)
+		self.assertEqual(resolve_pos_tax_template(frappe._dict(taxes_and_charges="Till's")), "Till's")
+		self.assertIsNone(resolve_pos_tax_template(frappe._dict(taxes_and_charges=None, company=None)))
+
+	def test_checkout_is_offered_the_template_the_server_will_use(self):
+		from klik_pos.api.tax import get_sales_tax_categories
+
+		with patch("klik_pos.api.tax.get_current_pos_profile", return_value=self.till):
+			result = get_sales_tax_categories()
+
+		self.assertEqual(result["default"], self.default)
+
+	def test_the_item_grid_shows_the_template_s_tax_rows(self):
+		from klik_pos.api.item.item_listing import _fetch_pos_sales_tax_rows
+
+		self.assertTrue(_fetch_pos_sales_tax_rows(self.till))
+
+	def test_an_invoice_keeps_the_template_its_rows_came_from(self):
+		"""ERPNext's set_pos_fields copies the till's (empty) template onto a POS invoice,
+		leaving tax rows with no template - which erpnext_express refuses."""
+		from klik_pos.api.sales_invoice import _apply_pos_tax_treatment
+
+		doc = frappe.new_doc("Sales Invoice")
+		doc.update(
+			{
+				"company": self.till.company,
+				"customer": self.till.customer or "Walk In",
+				"is_pos": 1,
+				"pos_profile": TEST_TILL,
+				"posting_date": frappe.utils.nowdate(),
+			}
+		)
+		doc.append("items", {"item_code": "Consulting", "qty": 1, "rate": 100, "price_list_rate": 100})
+
+		_apply_pos_tax_treatment(doc, self.till, None, [("Consulting", 100.0, 100.0)])
+
+		self.assertEqual(doc.taxes_and_charges, self.default)
+		self.assertTrue(doc.taxes)
+		self.assertEqual(flt(doc.grand_total), 100.0)
