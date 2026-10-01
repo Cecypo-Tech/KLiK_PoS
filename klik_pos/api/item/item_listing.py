@@ -555,7 +555,10 @@ def _get_expected_display_price(price, tax_info):
 
 
 def _fetch_pos_sales_tax_rows(pos_doc):
-    taxes_and_charges = getattr(pos_doc, "taxes_and_charges", None)
+    from klik_pos.api.tax import resolve_pos_tax_template
+
+    # The till's template, else its company's default - what its documents are taxed with.
+    taxes_and_charges = resolve_pos_tax_template(pos_doc)
     if not taxes_and_charges:
         return []
 

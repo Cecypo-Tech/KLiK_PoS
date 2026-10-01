@@ -4,6 +4,26 @@ from frappe import _
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 
+def resolve_pos_tax_template(pos_profile, company=None):
+	"""The Sales Taxes and Charges Template a till taxes with: its own, else its company's
+	default - the template ERPNext itself falls back to on a new document.
+
+	Every reader goes through here - the checkout's tax picker, the item grid's tax rows and
+	the documents klik builds - so a till that names no template is not taxed one way on
+	screen and another on the order, and an order taxed on its first hold keeps that tax
+	when it is held again.
+	"""
+	template = pos_profile.get("taxes_and_charges") if pos_profile else None
+	if template:
+		return template
+	company = company or (pos_profile.get("company") if pos_profile else None)
+	if not company:
+		return None
+	return frappe.db.get_value(
+		"Sales Taxes and Charges Template", {"company": company, "is_default": 1, "disabled": 0}, "name"
+	)
+
+
 @frappe.whitelist(allow_guest=True)
 def get_sales_tax_categories():
 	try:
@@ -47,7 +67,7 @@ def get_sales_tax_categories():
 		default_template = None
 		try:
 			pos_doc = get_current_pos_profile()
-			default_template = pos_doc.taxes_and_charges
+			default_template = resolve_pos_tax_template(pos_doc)
 		except Exception:
 			pass
 

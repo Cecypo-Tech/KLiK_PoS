@@ -131,11 +131,15 @@ def get_item_tax_details(item_code, customer=None, qty=1, uom=None):
         if item_tax_rate:
             account_heads = list(item_tax_rate.keys())
             included_map = {}
-            if pos_profile.taxes_and_charges and account_heads:
+            from klik_pos.api.tax import resolve_pos_tax_template
+
+            # The till's template, else its company's default - what its documents use.
+            pos_template = resolve_pos_tax_template(pos_profile)
+            if pos_template and account_heads:
                 for row in frappe.get_all(
                     "Sales Taxes and Charges",
                     filters={
-                        "parent": pos_profile.taxes_and_charges,
+                        "parent": pos_template,
                         "account_head": ["in", account_heads],
                     },
                     fields=["account_head", "included_in_print_rate"],
