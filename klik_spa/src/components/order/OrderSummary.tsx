@@ -60,7 +60,8 @@ export default function OrderSummary({
     updateItemDescription,
     expandedCartItemId,
     toggleItemExpansion,
-    pendingRateOverride,
+    pendingRateOverrides,
+    consumeRateOverrides,
     walkinDetails,
     extraFields,
     shippingRule,
@@ -410,15 +411,18 @@ export default function OrderSummary({
   // to keep in sync with checkout totals, persistence, or the discount reset.
   const lastAppliedRateOverrideNonce = useRef(0);
   useEffect(() => {
-    if (!pendingRateOverride || pendingRateOverride.nonce === lastAppliedRateOverrideNonce.current) {
-      return;
+    const fresh = pendingRateOverrides.filter((o) => o.nonce > lastAppliedRateOverrideNonce.current);
+    if (fresh.length === 0) return;
+    for (const override of fresh) {
+      const target = cartItems.find((ci) => ci.id === override.itemId);
+      if (target) {
+        handleCustomRateChange(target, override.rate, override.includesTax);
+      }
     }
-    lastAppliedRateOverrideNonce.current = pendingRateOverride.nonce;
-    const target = cartItems.find((ci) => ci.id === pendingRateOverride.itemId);
-    if (target) {
-      handleCustomRateChange(target, pendingRateOverride.rate, pendingRateOverride.includesTax);
-    }
-  }, [pendingRateOverride, cartItems]);
+    const last = fresh[fresh.length - 1]?.nonce ?? lastAppliedRateOverrideNonce.current;
+    lastAppliedRateOverrideNonce.current = last;
+    consumeRateOverrides(last);
+  }, [pendingRateOverrides, cartItems, consumeRateOverrides]);
 
   const handleBundleUpdate = (itemId: string, bundleId: string, entries: any[]) => {
     updateItemDiscount(itemId, "serial_batch_bundle", bundleId);

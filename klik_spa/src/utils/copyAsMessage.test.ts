@@ -177,7 +177,7 @@ describe("deferredClipboardText", () => {
       }
     });
     const write = vi.fn(async (list: Array<{ data: Record<string, Promise<Blob>> }>) => {
-      await list[0].data["text/plain"];
+      await list[0]?.data["text/plain"];
     });
     const clipboard = { write, writeText: vi.fn() } as unknown as Clipboard;
 
@@ -185,7 +185,7 @@ describe("deferredClipboardText", () => {
     expect(write).toHaveBeenCalledTimes(1); // during the click, before any text exists
 
     await writer.writeText("hello");
-    expect(await (await items[0]["text/plain"]).text()).toBe("hello");
+    expect(await (await items[0]?.["text/plain"])?.text()).toBe("hello");
   });
 
   it("falls back to writeText where ClipboardItem is missing", async () => {

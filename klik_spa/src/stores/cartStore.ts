@@ -114,6 +114,13 @@ const fetchItemTaxDetails = async (
 export interface WalkinDetails { name: string; taxId: string; phone: string }
 const EMPTY_WALKIN: WalkinDetails = { name: '', taxId: '', phone: '' };
 
+export interface RateOverride {
+  itemId: string
+  rate: number
+  includesTax: boolean
+  nonce: number
+}
+
 interface CartState {
   cartItems: CartItem[]
   appliedCoupons: GiftCoupon[]
@@ -162,12 +169,15 @@ interface CartState {
    * (itemDiscounts, checkout totals, persistence) and applies this via its
    * own existing handleCustomRateChange - this is a request to do that, not
    * a second place that sets a line's rate. Deliberately not persisted: a
-   * leftover request must never replay after a reload. nonce lets the same
-   * {itemId, rate} be requested twice in a row without being ignored as a
-   * no-op change.
+   * leftover request must never replay after a reload. A queue, not one slot:
+   * quick entry asks for several lines' rates at once, and a slot kept only the
+   * last. nonce orders them and lets the same {itemId, rate} be asked twice.
    */
-  pendingRateOverride: { itemId: string; rate: number; includesTax: boolean; nonce: number } | null
+  pendingRateOverrides: RateOverride[]
+  rateOverrideNonce: number
   requestCustomRate: (itemId: string, rate: number, includesTax?: boolean) => void
+  /** Drop the requests up to and including `nonce`, once applied. */
+  consumeRateOverrides: (nonce: number) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -210,14 +220,17 @@ export const useCartStore = create<CartState>()(
       toggleItemExpansion: (id) => set((s) => ({
         expandedCartItemId: nextExpandedCartItemId(s.expandedCartItemId, id),
       })),
-      pendingRateOverride: null,
+      pendingRateOverrides: [],
+      rateOverrideNonce: 0,
       requestCustomRate: (itemId, rate, includesTax = false) => set((s) => ({
-        pendingRateOverride: {
-          itemId,
-          rate,
-          includesTax,
-          nonce: (s.pendingRateOverride?.nonce ?? 0) + 1,
-        },
+        pendingRateOverrides: [
+          ...s.pendingRateOverrides,
+          { itemId, rate, includesTax, nonce: s.rateOverrideNonce + 1 },
+        ],
+        rateOverrideNonce: s.rateOverrideNonce + 1,
+      })),
+      consumeRateOverrides: (nonce) => set((s) => ({
+        pendingRateOverrides: s.pendingRateOverrides.filter((o) => o.nonce > nonce),
       })),
 
       refreshCartPricing: async () => {
@@ -624,7 +637,7 @@ export const useCartStore = create<CartState>()(
       // expanded row reappearing after a reload would be surprising.
       partialize: (state) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { expandedCartItemId, pendingRateOverride, ...rest } = state;
+        const { expandedCartItemId, pendingRateOverrides, rateOverrideNonce, ...rest } = state;
         return rest;
       },
     }
