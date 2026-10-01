@@ -88,6 +88,52 @@ export async function applyHeldOrderAction(orderId: string, action: string) {
   }>;
 }
 
+export interface HeldOrderShareTools {
+  /** The site's "Copy as Message" Client Script for Sales Order, or null. */
+  copy_message_script: string | null;
+  /** Whether PowerPack's Copy as Image is installed and on. */
+  copy_image: boolean;
+}
+
+export async function getHeldOrderShareTools(): Promise<HeldOrderShareTools> {
+  const response = await fetch('/api/method/klik_pos.api.sales_order.get_held_order_share_tools', {
+    credentials: 'include',
+  });
+  if (!response.ok) return { copy_message_script: null, copy_image: false };
+  const result = await response.json();
+  return {
+    copy_message_script: result.message?.copy_message_script ?? null,
+    copy_image: !!result.message?.copy_image,
+  };
+}
+
+/** The held order's Sales Order document, as the desk form has it. */
+export async function getSalesOrderDoc(orderId: string): Promise<Record<string, unknown> & { doctype: string }> {
+  const response = await fetch(
+    `/api/method/frappe.client.get?doctype=Sales%20Order&name=${encodeURIComponent(orderId)}`,
+    { credentials: 'include' },
+  );
+  const result = await response.json();
+  if (!response.ok || !result.message) throw new Error(`Could not load ${orderId}`);
+  return result.message;
+}
+
+/** frappe.call for a desk script: POST, resolving to the response's message. */
+export async function callMethod(method: string, args: Record<string, unknown>) {
+  const response = await fetch(`/api/method/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': csrf() },
+    body: JSON.stringify(args),
+    credentials: 'include',
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    const messages = JSON.parse(result._server_messages || '[]').map((m: string) => JSON.parse(m).message);
+    throw new Error(messages.join(' ') || result.exc_type || 'Request failed');
+  }
+  return result.message;
+}
+
 export async function deleteHeldOrder(orderId: string) {
   return apiPost('klik_pos.api.sales_order.delete_held_order', { order_id: orderId });
 }

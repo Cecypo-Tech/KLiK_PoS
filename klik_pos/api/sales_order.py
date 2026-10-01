@@ -923,3 +923,40 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
     except Exception:
         frappe.log_error(frappe.get_traceback(), "Clear Held Orders on POS Close")
         return 0
+
+
+COPY_MESSAGE_LABEL = "Copy as Message"
+
+
+def _copy_as_image_enabled():
+    """PowerPack's Copy as Image (cecypo_powerpack.copy_as_image), when it is installed and on."""
+    if "cecypo_powerpack" not in frappe.get_installed_apps():
+        return False
+    try:
+        from cecypo_powerpack.copy_as_image import DOCTYPES
+        from cecypo_powerpack.utils import is_feature_enabled
+    except ImportError:
+        return False
+    return "Sales Order" in DOCTYPES and is_feature_enabled("enable_copy_as_image")
+
+
+@frappe.whitelist()
+def get_held_order_share_tools():
+    """What a held order's row offers besides Print: the site's enabled "Copy as Message"
+    Client Script for Sales Order (its source, which the SPA runs as the desk form would,
+    payment details and all), and whether PowerPack's Copy as Image is on."""
+    if not frappe.has_permission("Sales Order", "read"):
+        return {"copy_message_script": None, "copy_image": False}
+
+    script = None
+    for row in frappe.get_all(
+        "Client Script",
+        filters={"dt": "Sales Order", "enabled": 1},
+        fields=["name", "script"],
+        order_by="name asc",
+    ):
+        if COPY_MESSAGE_LABEL in (row.script or ""):
+            script = row.script
+            break
+
+    return {"copy_message_script": script, "copy_image": bool(_copy_as_image_enabled())}
