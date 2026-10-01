@@ -28,6 +28,7 @@ import { addHeldOrderToCart } from "../utils/heldOrderToCart";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatCurrencyWithSymbol } from "../utils/currency";
 import { computePaymentStats } from "../utils/paymentStats";
+import { bankingError, closingBalancePayload, floatModeNames } from "../utils/closingBanking";
 import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
 import { clearAllCache } from "../utils/clearCache";
 import { useTableSort } from "../hooks/useTableSort";
@@ -45,6 +46,8 @@ export default function ClosingShiftPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [closingAmounts, setClosingAmounts] = useState<Record<string, number>>({});
+  // Cash handed over for banking at this close; the rest is the next shift's float.
+  const [bankedAmounts, setBankedAmounts] = useState<Record<string, number>>({});
 
   // Draft Invoice Edit states
   // const [showEditOptions, setShowEditOptions] = useState(false);
@@ -205,6 +208,8 @@ export default function ClosingShiftPage() {
     [modes, filteredInvoices, posDetails?.current_opening_entry]
   );
   const total = Object.values(paymentStats).reduce((sum, stat) => sum + stat.amount, 0);
+  // Modes that keep cash in the drawer: the only ones asked how much is banked at close.
+  const floatModes = useMemo(() => floatModeNames(modes || []), [modes]);
   const hasPaymentStats = Object.keys(paymentStats).length > 0;
 
   // Loading state
@@ -374,6 +379,10 @@ export default function ClosingShiftPage() {
     setShowInvoiceModal(false);
   };
 
+  const handleBankedChange = (modeName: string, value: string) =>
+    setBankedAmounts((prev) => ({ ...prev, [modeName]: parseFloat(value) || 0 }));
+  const hasBankingError = [...floatModes].some((m) => bankingError(closingAmounts[m] || 0, bankedAmounts[m] || 0));
+
   const handleClosingAmountChange = (modeName: string, value: string) => {
     setClosingAmounts(prev => ({
       ...prev,
@@ -394,10 +403,7 @@ export default function ClosingShiftPage() {
 
     try {
       // Convert closingAmounts object to array format expected by the service
-      const closingBalanceArray = Object.entries(closingAmounts).map(([mode_of_payment, closing_amount]) => ({
-        mode_of_payment,
-        closing_amount: closing_amount || 0
-      }));
+      const closingBalanceArray = closingBalancePayload(closingAmounts, bankedAmounts, floatModes);
 
       const result = await createClosingEntry(closingBalanceArray);
       if (!result.ok) {
@@ -704,6 +710,9 @@ export default function ClosingShiftPage() {
                     currency={posDetails?.currency || 'USD'}
                     hideExpected={Boolean(hideExpectedAmount)}
                     varianceClass={getVarianceClass}
+                    banked={bankedAmounts}
+                    onBankedChange={handleBankedChange}
+                    floatModes={floatModes}
                   />
                 )}
               </div>
@@ -717,7 +726,7 @@ export default function ClosingShiftPage() {
                 </button>
                 <button
                   onClick={handleFinalClose}
-                  disabled={isCreating || !hasPaymentStats}
+                  disabled={isCreating || !hasPaymentStats || hasBankingError}
                   className={`px-6 py-2 rounded-lg font-medium transition-colors ${
                     isCreating || !hasPaymentStats
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
@@ -1093,6 +1102,9 @@ export default function ClosingShiftPage() {
                     currency={posDetails?.currency || 'USD'}
                     hideExpected={Boolean(hideExpectedAmount)}
                     varianceClass={getVarianceClass}
+                    banked={bankedAmounts}
+                    onBankedChange={handleBankedChange}
+                    floatModes={floatModes}
                   />
                 )}
               </div>
@@ -1106,7 +1118,7 @@ export default function ClosingShiftPage() {
                 </button>
                 <button
                   onClick={handleFinalClose}
-                  disabled={isCreating || !hasPaymentStats}
+                  disabled={isCreating || !hasPaymentStats || hasBankingError}
                   className={`px-6 py-2 rounded-lg font-medium transition-colors ${
                     isCreating || !hasPaymentStats
                       ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
