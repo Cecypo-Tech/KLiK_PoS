@@ -20,7 +20,12 @@ class TestReturnTakesTheRefundingTill(CashOnlyReturnCase):
 		super().setUp()
 		from klik_pos.tests.test_opening_conflict import _profile, _shift
 
+		from klik_pos.tests.test_mpesa_payment_entry_first import COMPANY
+
 		self.sold_at, self.refunded_at = _profile(), _profile()
+		# Two tills of the sale's company - one shop, two counters.
+		for till in (self.sold_at, self.refunded_at):
+			frappe.db.set_value("POS Profile", till, "company", COMPANY)
 		self.shift = _shift(self.refunded_at, "Administrator")
 
 	def _sale_on_other_till(self):
@@ -47,3 +52,24 @@ class TestReturnTakesTheRefundingTill(CashOnlyReturnCase):
 		with patch("klik_pos.api.sales_invoice.get_current_pos_opening_entry", return_value=None):
 			credit = self._full_return(invoice)
 		self.assertEqual(credit.pos_profile, self.sold_at)
+
+	def test_a_salesperson_pin_on_the_refunding_till_does_not_block_the_return(self):
+		"""A credit note carries the sale's salesperson; the return endpoints take none."""
+		frappe.db.set_value("POS Profile", self.refunded_at, "custom_sales_person_pin_required", 1)
+		invoice = self._sale_on_other_till()
+		with patch("klik_pos.api.sales_invoice.get_current_pos_opening_entry", return_value=self.shift):
+			credit = self._full_return(invoice)
+		self.assertEqual(credit.docstatus, 1)
+
+	def test_a_shift_in_another_company_does_not_lend_the_return_its_till(self):
+		other_company = frappe.db.get_value("Company", {"name": ["!=", self.refunded_company()]}, "name")
+		if not other_company:
+			self.skipTest("needs a second company")
+		frappe.db.set_value("POS Profile", self.refunded_at, "company", other_company)
+		invoice = self._sale_on_other_till()
+		with patch("klik_pos.api.sales_invoice.get_current_pos_opening_entry", return_value=self.shift):
+			credit = self._full_return(invoice)
+		self.assertEqual(credit.pos_profile, self.sold_at)
+
+	def refunded_company(self):
+		return frappe.db.get_value("POS Profile", self.refunded_at, "company")

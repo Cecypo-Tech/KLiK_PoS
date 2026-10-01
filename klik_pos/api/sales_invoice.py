@@ -606,8 +606,12 @@ def _apply_extra_fields(doc, extra_fields, allowed=None):
 
 
 def validate_required_salesperson(doc):
-	"""Enforce salesperson presence for POS flows when the POS profile requires it."""
-	if not doc or not getattr(doc, "is_pos", 0):
+	"""Enforce salesperson presence for POS flows when the POS profile requires it.
+
+	Not on a return: the credit note carries the sale's salesperson, and the return
+	endpoints take none - a till requiring a PIN would otherwise refuse to refund a sale
+	rung where none was needed."""
+	if not doc or not getattr(doc, "is_pos", 0) or cint(getattr(doc, "is_return", 0)):
 		return
 
 	pos_profile_name = getattr(doc, "pos_profile", None)
@@ -4409,7 +4413,8 @@ def _stamp_return_with_refunding_shift(return_doc):
 		return
 	return_doc.custom_pos_opening_entry = current_opening_entry
 	till = frappe.db.get_value("POS Opening Entry", current_opening_entry, "pos_profile")
-	if till:
+	# Another company's till never lends the note its name.
+	if till and frappe.db.get_value("POS Profile", till, "company") == return_doc.company:
 		return_doc.pos_profile = till
 
 
