@@ -5194,7 +5194,7 @@ def _stk_request_sent_response(invoice_name, request_name):
 	}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def discard_mpesa_draft(invoice_id):
 	"""Delete the draft M-Pesa checkout made, when the cashier leaves without finishing it.
 
@@ -5204,23 +5204,32 @@ def discard_mpesa_draft(invoice_id):
 	narrow on purpose: only the caller's own POS draft, not a sale queued for the background
 	worker, and not one an STK push was sent from.
 	"""
-	try:
-		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
-	except frappe.DoesNotExistError:
+	# Decide on a locked read: a submit committing meanwhile must be seen, not a snapshot.
+	state = frappe.db.get_value(
+		"Sales Invoice",
+		invoice_id,
+		["docstatus", "owner", "custom_is_created_from_klik", "custom_is_held", "enable_background_invoice_submission"],
+		as_dict=True,
+		for_update=True,
+	)
+	if not state:
 		return {"success": True, "message": f"Draft invoice {invoice_id} is already gone"}
 
 	if (
-		invoice_doc.docstatus != 0
-		or invoice_doc.owner != frappe.session.user
-		or not cint(invoice_doc.get("custom_is_created_from_klik"))
-		or cint(invoice_doc.get("enable_background_invoice_submission"))
+		state.docstatus != 0
+		or state.owner != frappe.session.user
+		or not cint(state.custom_is_created_from_klik)
+		# A draft held the old way is a hold, not an M-Pesa checkout's draft.
+		or cint(state.custom_is_held)
+		or cint(state.enable_background_invoice_submission)
 	):
-		return {"success": False, "error": _("Draft {0} is not this checkout's to discard.").format(invoice_id)}
+		return {"success": False, "error": _("Draft {0} was kept: it is not this checkout's to discard.").format(invoice_id)}
 
-	live_request = _live_stk_request(invoice_doc.name)
+	live_request = _live_stk_request(invoice_id)
 	if live_request:
-		return _stk_request_sent_response(invoice_doc.name, live_request)
+		return _stk_request_sent_response(invoice_id, live_request)
 
+	invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
 	_check_discardable_links(invoice_doc)
 	_cancel_sales_invoice_reservations(invoice_doc.name)
 	frappe.delete_doc("Sales Invoice", invoice_doc.name, ignore_permissions=True, force=True)
@@ -5241,7 +5250,10 @@ def _check_discardable_links(invoice_doc):
 
 	check_if_doc_is_linked(invoice_doc)
 	for link in get_dynamic_linked_docs(invoice_doc, "Delete"):
-		if link["reference_doctype"] != "Mpesa Express Request":
+		failed_stk = link["reference_doctype"] == "Mpesa Express Request" and (
+			frappe.db.get_value("Mpesa Express Request", link["reference_docname"], "status") == "Failed"
+		)
+		if not failed_stk:
 			raise_link_exists_exception(
 				invoice_doc, link["reference_doctype"], link["reference_docname"], link["at_position"]
 			)
@@ -5292,6 +5304,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 	the money moves). It is finished as checkout_held_order would: locked, access-checked,
 	linked, price-approval checked, and taken off the Held tab once the invoice goes through.
 	"""
+	draft_touched = False
 	try:
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
 
@@ -5305,6 +5318,12 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 				"docstatus": invoice_doc.docstatus,
 				"error": f"Cannot submit invoice {invoice_id}. Only Draft invoices can be submitted. Current status: {invoice_doc.status}",
 			}
+
+		# This endpoint reports failure without raising, so the request would commit whatever
+		# was saved before it: the rebuilt cart, the background flag, the held order's link.
+		# A refused submit leaves the draft as it was.
+		frappe.db.savepoint("klik_submit_draft_invoice")
+		draft_touched = True
 
 		if held_order_id:
 			from klik_pos.api.sales_order import _claim_held_order
@@ -5524,5 +5543,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 	except frappe.DoesNotExistError:
 		return {"success": False, "error": f"Invoice {invoice_id} not found"}
 	except Exception as e:
+		if draft_touched:
+			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		frappe.log_error(frappe.get_traceback(), f"Error submitting draft invoice {invoice_id}")
 		return {"success": False, "error": str(e)}

@@ -97,6 +97,10 @@ class TestMpesaDraftFinishesTheHeldOrder(FrappeTestCase):
 		refuse.assert_called_once()
 		self.assertFalse(result["success"])
 		self.assertTrue(_held(so))
+		self.assertEqual(_docstatus(draft), 0)
+		# Refused: the draft is left exactly as it was, not half-linked to the order.
+		if frappe.get_meta("Sales Invoice").has_field("powerpack_source_order"):
+			self.assertFalse(frappe.db.get_value("Sales Invoice", draft.name, "powerpack_source_order"))
 
 	def test_a_queued_submit_also_finishes_the_held_order(self):
 		so, draft = _order(opening_entry=""), _draft()
@@ -223,4 +227,64 @@ class TestAnAbandonedMpesaDraftIsDiscarded(FrappeTestCase):
 		result = sales_invoice.delete_draft_invoice(draft.name)
 		self.assertFalse(result["success"])
 		self.assertEqual(result["code"], "mpesa_request_sent")
+		self.assertTrue(_exists(draft))
+
+
+CASHIER = "mpesa-discard-cashier@example.com"
+
+
+def _cashier():
+	if not frappe.db.exists("User", CASHIER):
+		user = frappe.get_doc(
+			{"doctype": "User", "email": CASHIER, "first_name": "Discard", "send_welcome_email": 0}
+		)
+		user.insert(ignore_permissions=True)
+		user.add_roles("Sales User")
+	return CASHIER
+
+
+class TestDiscardKeepsWhatItMust(FrappeTestCase):
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def test_a_cashier_who_cannot_delete_invoices_still_discards_their_own_draft(self):
+		draft = _klik_draft(owner=_cashier())
+		frappe.set_user(CASHIER)
+		self.assertFalse(frappe.has_permission("Sales Invoice", "delete"))
+
+		self.assertTrue(sales_invoice.discard_mpesa_draft(draft.name)["success"])
+		frappe.set_user("Administrator")
+		self.assertFalse(_exists(draft))
+
+	def test_a_legacy_held_draft_is_kept(self):
+		draft = _klik_draft(custom_is_held=1)
+		self.assertFalse(sales_invoice.discard_mpesa_draft(draft.name)["success"])
+		self.assertTrue(_exists(draft))
+
+	def test_a_submitted_invoice_is_kept(self):
+		draft = _klik_draft()
+		frappe.db.set_value("Sales Invoice", draft.name, "docstatus", 1, update_modified=False)
+		self.assertFalse(sales_invoice.discard_mpesa_draft(draft.name)["success"])
+		self.assertTrue(_exists(draft))
+
+	def test_any_other_link_still_blocks_the_delete(self):
+		draft = _klik_draft()
+		request = frappe.get_doc(
+			{"doctype": "Payment Request", "reference_doctype": "Sales Invoice", "reference_name": draft.name}
+		)
+		request.db_insert()
+
+		with self.assertRaises(frappe.LinkExistsError):
+			sales_invoice.discard_mpesa_draft(draft.name)
+		self.assertTrue(_exists(draft))
+
+	def test_only_a_failed_stk_request_is_let_past_the_link_check(self):
+		draft = _klik_draft()
+		_stk_request(draft, "In Progress")
+
+		# Even were the status check to miss it, the link check still refuses.
+		with patch.object(sales_invoice, "_live_stk_request", return_value=None), self.assertRaises(
+			frappe.LinkExistsError
+		):
+			sales_invoice.discard_mpesa_draft(draft.name)
 		self.assertTrue(_exists(draft))

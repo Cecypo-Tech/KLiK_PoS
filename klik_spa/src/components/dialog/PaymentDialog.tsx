@@ -39,6 +39,7 @@ import {
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
+import { holdBlockedByMpesa, mpesaDraftToDiscard } from "../../utils/mpesaDraftLifecycle";
 import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { summaryFigures } from "../../utils/summaryFigures";
@@ -149,7 +150,12 @@ async function discardAbandonedMpesaDraft(invoiceName: string) {
       toast.warning(result.message, { autoClose: 10000, toastId: `mpesa-draft-kept-${invoiceName}` });
     }
   } catch (err) {
-    console.warn(`Could not discard M-Pesa draft ${invoiceName}`, err);
+    // Kept for another reason (linked elsewhere, queued, not this cashier's): say so, or it
+    // sits unnoticed beside the held order.
+    toast.warning(err instanceof Error ? err.message : `Draft ${invoiceName} was kept.`, {
+      autoClose: 10000,
+      toastId: `mpesa-draft-kept-${invoiceName}`,
+    });
   }
 }
 
@@ -221,15 +227,24 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
   // The M-Pesa draft not yet submitted, read when the dialog closes or unmounts.
   const unfinishedMpesaDraftRef = useRef<string | null>(null);
+  // Draft creation, STK initiation, receipt reconcile or submit still running.
+  const mpesaWorkInFlightRef = useRef(0);
+  // Drafts an STK push was sent from: the dialog never discards these.
+  const stkSentFromRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     unfinishedMpesaDraftRef.current = mpesaDraftInvoiceName;
   }, [mpesaDraftInvoiceName]);
-  useEffect(
-    () => () => {
-      if (unfinishedMpesaDraftRef.current) void discardAbandonedMpesaDraft(unfinishedMpesaDraftRef.current);
-    },
-    [],
-  );
+  const releaseUnfinishedMpesaDraft = useCallback(() => {
+    const abandoned = mpesaDraftToDiscard({
+      draftName: unfinishedMpesaDraftRef.current,
+      workInFlight: mpesaWorkInFlightRef.current,
+      stkSentFrom: stkSentFromRef.current,
+    });
+    unfinishedMpesaDraftRef.current = null;
+    if (abandoned) void discardAbandonedMpesaDraft(abandoned);
+  }, []);
+  // On the main POS screen the dialog unmounts rather than closing.
+  useEffect(() => () => releaseUnfinishedMpesaDraft(), [releaseUnfinishedMpesaDraft]);
   // This sale turned out to be recorded already, as this invoice; Submit stays blocked.
   const [alreadySubmittedAs, setAlreadySubmittedAs] = useState<string | null>(null);
   // Only the mobile overlay can be dismissed; unticking M-Pesa resets it.
@@ -914,9 +929,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
 
+    mpesaWorkInFlightRef.current += 1;
     try {
       setIsProcessingPayment(true);
       const draftInvoiceName = await ensureMpesaDraftInvoice();
+      // From here the customer's phone may ring: a payment may come for this draft.
+      stkSentFromRef.current.add(draftInvoiceName);
 
       const accountReference = draftInvoiceName;
       const response = await initiateKlikPosStkPush({
@@ -950,6 +968,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     } catch (error) {
       toast.error(extractErrorFromException(error, "Failed to initiate M-Pesa STK push"));
     } finally {
+      mpesaWorkInFlightRef.current -= 1;
       setIsProcessingPayment(false);
     }
   };
@@ -1012,6 +1031,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
 
+    mpesaWorkInFlightRef.current += 1;
     try {
       setIsProcessingPayment(true);
       const draftInvoiceName = await ensureMpesaDraftInvoice();
@@ -1067,6 +1087,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     } catch (error) {
       toast.error(extractErrorFromException(error, "Failed to reconcile M-Pesa payments"));
     } finally {
+      mpesaWorkInFlightRef.current -= 1;
       setIsProcessingPayment(false);
     }
   };
@@ -1455,9 +1476,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   useEffect(() => {
     if (!isOpen) {
       // Closed (Hold included) with the M-Pesa sale unfinished.
-      const abandoned = unfinishedMpesaDraftRef.current;
-      unfinishedMpesaDraftRef.current = null;
-      if (abandoned) void discardAbandonedMpesaDraft(abandoned);
+      releaseUnfinishedMpesaDraft();
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
       setAlreadySubmittedAs(null);
@@ -1466,7 +1485,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setSelectedMpesaPayments([]);
       setDeliveryCharge(0);
     }
-  }, [isOpen]);
+  }, [isOpen, releaseUnfinishedMpesaDraft]);
 
   useEffect(() => {
     clearLoyaltyRedemption();
@@ -1508,6 +1527,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       }
     }
     setIsProcessingPayment(true);
+    mpesaWorkInFlightRef.current += 1;
     const paymentData = buildPaymentData(deliveryPersonnel);
     const originalHeldOrderId = getOriginalHeldOrderId();
     const originalDraftInvoiceId = getOriginalDraftInvoiceId();
@@ -1650,6 +1670,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       const errorMessage = extractErrorFromException(err, defaultMessage);
       toast.error(errorMessage);
     } finally {
+      mpesaWorkInFlightRef.current -= 1;
       setIsProcessingPayment(false);
     }
   };
@@ -1688,6 +1709,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (requiresSalespersonPin && !currentSalesperson) {
       setShowSalespersonModal(true);
       toast.error("Verify the salesperson before holding this order");
+      return;
+    }
+    const mpesaHoldBlock = holdBlockedByMpesa(mpesaFlow);
+    if (mpesaHoldBlock) {
+      toast.error(mpesaHoldBlock);
       return;
     }
 
@@ -1907,6 +1933,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        // Leaving mid-payment would abandon an STK push or a submit still running.
+        if (isProcessingPayment || isHoldingOrder) return;
         // Completed screen: ESC does the default "Start New Order" action.
         // Payment-entry screen: ESC closes the dialog.
         if (invoiceSubmitted) {
@@ -1918,7 +1946,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, invoiceSubmitted, finalizeCompletedOrderState, onClose]);
+  }, [isOpen, invoiceSubmitted, isProcessingPayment, isHoldingOrder, finalizeCompletedOrderState, onClose]);
 
   const buildOrderText = () => {
     const lines: string[] = [];
