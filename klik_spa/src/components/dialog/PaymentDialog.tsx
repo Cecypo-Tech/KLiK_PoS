@@ -40,6 +40,7 @@ import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard } from "../../utils/mpesaDraftLifecycle";
+import { checkoutWasQueued } from "../../utils/checkoutOutcome";
 import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { summaryFigures } from "../../utils/summaryFigures";
@@ -191,6 +192,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isHoldingOrder, setIsHoldingOrder] = useState(false);
   const [invoiceSubmitted, setInvoiceSubmitted] = useState(false);
+  // What the server did with the sale - not what the background checkbox asked for.
+  const [submissionQueued, setSubmissionQueued] = useState(false);
   const [isCreditSale, setIsCreditSale] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [submittedInvoice, setSubmittedInvoice] = useState<any>(null);
@@ -1602,12 +1605,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         markCheckoutAttemptAccepted(attempt.requestId, response.invoice_name || response.invoice_id);
       }
 
+      const queued = checkoutWasQueued(response);
       setInvoiceSubmitted(true);
+      setSubmissionQueued(queued);
       setSubmittedInvoice(response);
       setInvoiceData(response.invoice);
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
-      toast.success(enableBackgroundSubmission ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
+      toast.success(queued ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
 
       // What the receipts held beyond this sale stays on them for the customer's next
       // sale - never handed back as cash change. Surface it explicitly.
@@ -2464,7 +2469,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         {!isFullPage && (
           <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between z-10">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {invoiceSubmitted ? "Invoice Queued" : isB2B ? "Submit Invoice" : "Payment"}
+              {invoiceSubmitted ? (submissionQueued ? "Invoice Queued" : "Invoice Submitted") : isB2B ? "Submit Invoice" : "Payment"}
             </h1>
           </div>
         )}
@@ -2474,7 +2479,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               <div className="space-y-4">
                 <div className="flex items-center justify-center space-x-3 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
                   <div className="text-green-600 dark:text-green-400 text-center">
-                    <p className="font-semibold">Invoice queued for background submission!</p>
+                    <p className="font-semibold">
+                      {submissionQueued ? "Invoice queued for background submission!" : "Invoice submitted successfully!"}
+                    </p>
                     <p className="text-sm opacity-75">Total: {formatCurrencyWithSymbol(checkoutGrandTotal, displayCurrencySymbol)}</p>
                   </div>
                 </div>
