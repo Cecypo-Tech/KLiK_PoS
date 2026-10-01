@@ -242,6 +242,17 @@ class TestBankingAtClosing(OpeningCase):
 		with self.assertRaises(frappe.ValidationError):
 			enforce(doc)
 
+	def test_a_float_with_cents_opens_at_exactly_what_was_left(self):
+		"""1234.56 - 1000 is 234.55999999999995 in float arithmetic. Unrounded, the cashier
+		retyping 234.56 was asked to explain a difference the screen showed as 0.00."""
+		profile = _profile_with_modes(f"OB Cents {frappe.generate_hash(length=5)}", [CASH])
+		_file_closing(profile, {CASH: 1234.56}, banked={CASH: 1000})
+
+		modes = {m["mode_of_payment"]: m for m in opening_suggestion(profile)["modes"]}
+		self.assertEqual(modes[CASH]["suggested_amount"], 234.56)
+
+		enforce(self._opening(profile, [{"mode_of_payment": CASH, "opening_amount": 234.56}]))  # no throw
+
 	def test_a_closing_with_nothing_banked_suggests_the_full_count(self):
 		profile = _profile_with_modes(f"OB NoBank {frappe.generate_hash(length=5)}", [CASH])
 		_file_closing(profile, {CASH: 3000})

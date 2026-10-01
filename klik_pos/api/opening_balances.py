@@ -51,6 +51,9 @@ def last_closing(pos_profile) -> dict:
 	if frappe.db.has_column("POS Closing Entry Detail", BANKED_FIELD):
 		fields.append(BANKED_FIELD)
 	rows = frappe.get_all("POS Closing Entry Detail", filters={"parent": closing.name}, fields=fields)
+	# Rounded to the field's precision: 1234.56 - 1000 is 234.55999999999995 in float, and
+	# the opening's exact comparison would then ask about a difference of 0.00.
+	precision = frappe.get_precision("POS Closing Entry Detail", "closing_amount")
 	result = {}
 	for row in rows:
 		if not row.mode_of_payment:
@@ -58,7 +61,7 @@ def last_closing(pos_profile) -> dict:
 		counted = flt(row.closing_amount)
 		banked = flt(row.get(BANKED_FIELD))
 		result[row.mode_of_payment] = {
-			"amount": counted - banked,
+			"amount": flt(counted - banked, precision),
 			"counted": counted,
 			"banked": banked,
 			"closing_entry": closing.name,
@@ -117,6 +120,7 @@ def enforce(doc):
 	previous = last_closing(doc.pos_profile) if doc.pos_profile else {}
 	has_reason_field = frappe.db.has_column("POS Opening Entry Detail", REASON_FIELD)
 	has_previous_field = frappe.db.has_column("POS Opening Entry Detail", PREVIOUS_FIELD)
+	precision = frappe.get_precision("POS Opening Entry Detail", "opening_amount")
 
 	for row in doc.balance_details:
 		if not row.mode_of_payment:
@@ -147,7 +151,7 @@ def enforce(doc):
 		# not migrated yet must still be able to open its tills.
 		if not has_reason_field:
 			continue
-		if flt(row.opening_amount) == expected:
+		if flt(row.opening_amount, precision) == flt(expected, precision):
 			continue
 		if (row.get(REASON_FIELD) or "").strip():
 			continue
