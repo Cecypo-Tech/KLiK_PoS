@@ -11,6 +11,7 @@ from klik_pos.api.sales_invoice import (
     _get_active_pos_profile,
     _parse_extra_fields,
     _resolve_item_tax_details_for_line,
+    _set_customer,
     get_current_pos_opening_entry,
     parse_invoice_data,
 )
@@ -376,7 +377,7 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     pos_profile = _get_active_pos_profile()
     warehouse = getattr(pos_profile, "warehouse", "") or ""
 
-    so.customer = customer
+    _set_customer(so, customer)
     so.delivery_date = nowdate()
     # Whoever holds it now owns where it lives. A cashier may take over an order held on
     # another shift; left stamped with that shift, its close would delete the order from
