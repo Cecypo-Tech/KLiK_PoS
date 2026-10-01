@@ -18,6 +18,9 @@ import {
   RotateCcw,
   Check,
   FileMinus,
+  Printer,
+  Copy,
+  Image as ImageIcon,
 } from "lucide-react";
 
 import InvoiceViewModal from "../components/InvoiceViewModal";
@@ -41,7 +44,17 @@ import { useAllPaymentModes } from "../hooks/usePaymentModes";
 import PaymentDialog from "../components/dialog/PaymentDialog";
 import { addDraftInvoiceToCart } from "../utils/draftInvoiceToCart";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
-import { applyHeldOrderAction, getHeldOrders } from "../services/salesOrder";
+import {
+  applyHeldOrderAction,
+  callMethod,
+  getHeldOrders,
+  getHeldOrderShareDoc,
+  getHeldOrderShareTools,
+  type HeldOrderShareTools,
+} from "../services/salesOrder";
+import { deferredClipboardText, formatSystemDate, runCopyAsMessage } from "../utils/copyAsMessage";
+import { copyPrintImage } from "../utils/copyAsImage";
+import { getCSRFToken } from "../utils/csrf";
 import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
 import { approvalBadge, PRICE_APPROVED, WITHDRAW_APPROVAL } from "../utils/priceApproval";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
@@ -231,6 +244,80 @@ export default function InvoiceHistoryPage() {
   useEffect(() => {
     void refetchHeldOrders();
   }, [refetchHeldOrders]);
+
+  // Copy and Image on a held order's row: each only when the site has it (see
+  // get_held_order_share_tools).
+  const [shareTools, setShareTools] = useState<HeldOrderShareTools>({
+    copy_message_script: null,
+    copy_image: false,
+    date_format: null,
+  });
+  const copyingMessage = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    getHeldOrderShareTools()
+      .then((tools) => !cancelled && setShareTools(tools))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCopyHeldOrderMessage = async (orderId: string) => {
+    if (!shareTools.copy_message_script || copyingMessage.current) return;
+    copyingMessage.current = true;
+    // Taken during the click: Safari refuses a clipboard write that comes after the fetches.
+    const clipboard = deferredClipboardText();
+    try {
+      const { doc, currency_symbol } = await getHeldOrderShareDoc(orderId);
+      await runCopyAsMessage(shareTools.copy_message_script, doc, {
+        call: callMethod,
+        alert: (message, ok) => (ok ? toast.success(message) : toast.error(message)),
+        formatCurrency: (value) => formatCurrencyWithSymbol(value, currency_symbol),
+        formatDate: (date) => formatSystemDate(date, shareTools.date_format),
+        writeText: clipboard.writeText,
+        user: userInfo?.user,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not copy the message");
+    } finally {
+      clipboard.done();
+      copyingMessage.current = false;
+    }
+  };
+
+  const handleCopyHeldOrderImage = (orderId: string) => {
+    void copyPrintImage("Sales Order", orderId, {
+      csrfToken: getCSRFToken(),
+      notify: (message, level) => toast[level](message, level === "info" ? { autoClose: 3000 } : undefined),
+    });
+  };
+
+  const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
+    const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
+    // Icons only, so on a touch screen each needs a finger-sized target.
+    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
+    return (
+      <>
+        <button type="button" title="Print" aria-label="Print" className={button}
+          onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
+          <Printer className={icon} />
+        </button>
+        {shareTools.copy_message_script && (
+          <button type="button" title="Copy as message" aria-label="Copy as message" className={button}
+            onClick={() => void handleCopyHeldOrderMessage(orderId)}>
+            <Copy className={icon} />
+          </button>
+        )}
+        {shareTools.copy_image && (
+          <button type="button" title="Copy as image" aria-label="Copy as image" className={button}
+            onClick={() => handleCopyHeldOrderImage(orderId)}>
+            <ImageIcon className={icon} />
+          </button>
+        )}
+      </>
+    );
+  };
 
   const { modes } = useAllPaymentModes();
   const { cartItems, selectedCustomer: cartCustomer } = useCartStore();
@@ -764,7 +851,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                     <div className="flex space-x-2">
                       {/* A row the till will not open (rung by another cashier) gets no View or
                           Return, as on the Closing Shift page: the detail read behind both is refused. */}
-                      {invoice.canOpen !== false ? (
+                      {(invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
+                        renderHeldOrderShareButtons(invoice.id || invoice.name, "sm")
+                      ) : invoice.canOpen !== false ? (
                         <button
                           onClick={() => handleViewInvoice(invoice)}
                           className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
@@ -875,7 +964,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {invoice.canOpen !== false ? (
+                {(invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
+                  <div className="flex items-center gap-1">{renderHeldOrderShareButtons(invoice.id || invoice.name, "md")}</div>
+                ) : invoice.canOpen !== false ? (
                   <button
                     onClick={() => handleViewInvoice(invoice)}
                     className="flex-1 text-xs px-3 py-2 bg-beveren-600 text-white rounded hover:bg-beveren-700 transition-colors"
