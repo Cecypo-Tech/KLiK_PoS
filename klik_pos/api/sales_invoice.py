@@ -410,6 +410,34 @@ def _refuse_unapproved_price_breach(doc):
 		frappe.throw(_("Prices below the minimum need approval. Hold the order to request it."))
 
 
+# Filled from the customer by ERPNext's set_missing_values - but only when empty, so a document
+# whose customer changes keeps the old customer's. Its validation then refuses the address:
+# "Billing Address does not belong to the <new customer>".
+_PARTY_DETAIL_FIELDS = (
+	"customer_name",
+	"customer_address",
+	"address_display",
+	"shipping_address_name",
+	"shipping_address",
+	"contact_person",
+	"contact_display",
+	"contact_mobile",
+	"contact_email",
+	"territory",
+	"customer_group",
+)
+
+
+def _set_customer(doc, customer):
+	"""Point an existing held order or draft at `customer`, forgetting what was filled from
+	the previous one so set_missing_values fills it again for the new one."""
+	if doc.get("customer") and doc.customer != customer:
+		for fieldname in _PARTY_DETAIL_FIELDS:
+			if doc.meta.has_field(fieldname):
+				doc.set(fieldname, None)
+	doc.customer = customer
+
+
 def _apply_walkin_party_fields(doc, walkin_name=None, walkin_phone=None):
 	"""Set walk-in buyer name/phone on a selling doc when the optional custom
 	fields exist. tax_id is handled separately by the standard field path."""
@@ -3053,7 +3081,7 @@ def _update_existing_draft_invoice(
 		shipping_rule=shipping_rule,
 	)
 
-	invoice_doc.customer = rebuilt_doc.customer
+	_set_customer(invoice_doc, rebuilt_doc.customer)
 	invoice_doc.due_date = rebuilt_doc.due_date
 	invoice_doc.custom_delivery_date = rebuilt_doc.custom_delivery_date
 	invoice_doc.enable_background_invoice_submission = rebuilt_doc.enable_background_invoice_submission
@@ -5416,7 +5444,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 				shipping_rule=data.get("shipping_rule") or None,
 			)
 
-			invoice_doc.customer = rebuilt_doc.customer
+			_set_customer(invoice_doc, rebuilt_doc.customer)
 			invoice_doc.due_date = rebuilt_doc.due_date
 			invoice_doc.custom_delivery_date = rebuilt_doc.custom_delivery_date
 			invoice_doc.enable_background_invoice_submission = rebuilt_doc.enable_background_invoice_submission
