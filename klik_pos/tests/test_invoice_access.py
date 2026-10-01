@@ -26,16 +26,16 @@ from klik_pos.api.sales_invoice import (
 )
 
 
-def _till(allow, name="Test Till"):
+def _till(allow, name="Test Till", company="Test Co"):
 	return patch.object(
 		sales_invoice,
 		"get_current_pos_profile",
-		return_value=frappe._dict({"name": name, "custom_allow_viewing_other_cashiers": allow}),
+		return_value=frappe._dict({"name": name, "company": company, "custom_allow_viewing_other_cashiers": allow}),
 	)
 
 
-def _inv(owner, till="Test Till"):
-	return frappe._dict({"owner": owner, "pos_profile": till})
+def _inv(owner, till="Test Till", company="Test Co"):
+	return frappe._dict({"owner": owner, "pos_profile": till, "company": company})
 
 
 class TestTheRule(FrappeTestCase):
@@ -54,10 +54,17 @@ class TestTheRule(FrappeTestCase):
 		with _till(1):
 			self.assertTrue(_may_read_invoice(_inv("someone@example.com")))
 
-	def test_another_cashier_s_invoice_from_another_till_never_opens(self):
-		"""The list only ever shows the current till's invoices; opening follows it."""
+	def test_another_cashier_s_invoice_from_another_till_opens_where_the_till_allows_it(self):
+		"""The regression (Allparts): the list shows every till's invoices, so a sale rung on
+		"Allparts Sales" was listed at "Allparts Cashier" but had no View or Return."""
 		with _till(1):
+			self.assertTrue(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
+		with _till(0):
 			self.assertFalse(_may_read_invoice(_inv("someone@example.com", till="Other Till")))
+
+	def test_another_company_s_invoice_never_opens(self):
+		with _till(1):
+			self.assertFalse(_may_read_invoice(_inv("someone@example.com", company="Other Co")))
 
 	def test_with_no_till_only_my_own(self):
 		with patch.object(sales_invoice, "get_current_pos_profile", side_effect=Exception("no till")):
@@ -128,8 +135,9 @@ class TestTheTillDecides(FrappeTestCase):
 		self.assertNotIn("data", result)
 
 	def test_another_cashier_s_invoice_opens_where_the_till_allows_it(self):
-		till = frappe.db.get_value("Sales Invoice", self.theirs, "pos_profile")
-		with _till(1, name=till):
+		company = frappe.db.get_value("Sales Invoice", self.theirs, "company")
+		# Any till of the invoice's company, not only the one it was rung on.
+		with _till(1, name="Some Other Till", company=company):
 			self.assertTrue(get_invoice_details(self.theirs)["success"])
 
 	def test_my_own_invoice_always_opens(self):
@@ -163,7 +171,9 @@ class TestCustomerListFollowsTheTill(FrappeTestCase):
 	def test_customer_list_shows_everyone_s_where_the_till_allows_it(self):
 		with _till(1):
 			_, sql = self._sql_for(surface="customer", search="x")
-		self.assertNotIn("si.owner = ", sql)
+		# Everyone's in the till's company, plus one's own anywhere - not one's own only.
+		self.assertIn("(si.owner = %s OR si.company = %s)", sql)
+		self.assertNotIn("AND si.owner = %s AND", sql.replace("(si.owner = %s OR", ""))
 
 
 class TestNoTillResolvable(FrappeTestCase):
@@ -176,13 +186,30 @@ class TestNoTillResolvable(FrappeTestCase):
 
 class TestRowsSayWhetherTheyOpen(FrappeTestCase):
 	def test_rows_follow_the_same_rule_as_opening(self):
-		till = frappe._dict({"name": "Test Till", "custom_allow_viewing_other_cashiers": 0})
-		self.assertTrue(_may_read_row("me@example.com", "Test Till", "me@example.com", till))
-		self.assertFalse(_may_read_row("you@example.com", "Test Till", "me@example.com", till))
+		till = frappe._dict({"name": "Test Till", "company": "Test Co", "custom_allow_viewing_other_cashiers": 0})
+		self.assertTrue(_may_read_row("me@example.com", "Test Co", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", till))
 		till.custom_allow_viewing_other_cashiers = 1
-		self.assertTrue(_may_read_row("you@example.com", "Test Till", "me@example.com", till))
-		self.assertFalse(_may_read_row("you@example.com", "Other", "me@example.com", till))
-		self.assertFalse(_may_read_row("you@example.com", "Test Till", "me@example.com", None))
+		self.assertTrue(_may_read_row("you@example.com", "Test Co", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Other Co", "me@example.com", till))
+		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", None))
+
+	def test_history_lists_only_what_opens_where_the_till_allows_others(self):
+		"""Another company's invoices were listed - with no View - on a till that allows
+		reading other cashiers': 150 such rows on dev."""
+		frappe.set_user("Administrator")
+		# A till in one company, with another cashier's invoice in a different company.
+		elsewhere = frappe.db.get_value(
+			"Sales Invoice", {"docstatus": 1, "owner": ["!=", "Administrator"]}, ["name", "company"], as_dict=True
+		)
+		company = elsewhere and frappe.db.get_value("Company", {"name": ["!=", elsewhere.company]}, "name")
+		if not company:
+			self.skipTest("needs another cashier's invoice and a second company")
+		with _till(1, company=company):
+			result = get_sales_invoices(limit=500, skip_opening_entry_filter=True, surface="history")
+		self.assertTrue(result["success"], result.get("error"))
+		self.assertTrue(result["data"])
+		self.assertEqual([r["name"] for r in result["data"] if not r["can_open"]], [])
 
 	def test_every_listed_row_carries_can_open(self):
 		frappe.set_user("Administrator")

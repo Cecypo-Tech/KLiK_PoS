@@ -1325,26 +1325,32 @@ def _profile_allows_other_cashiers(pos_doc):
 	return bool(getattr(pos_doc, "custom_allow_viewing_other_cashiers", 0))
 
 
-def _may_read_row(owner, pos_profile, user, pos_doc):
-	"""Whether `user` may open a row owned by `owner` on `pos_profile`: their own, or
-	another cashier's rung on `pos_doc` when that till lets its users read each other's."""
+def _may_read_row(owner, company, user, pos_doc):
+	"""Whether `user` may open a row owned by `owner` in `company`: their own, or another
+	cashier's in the company of `pos_doc` when that till lets its users read each other's.
+
+	Any till of the company, not only `pos_doc`: Invoice History lists every till's invoices
+	once the till allows it, and a sale rung at one till is often handled at another (at
+	Allparts, rung on "Allparts Sales", returned at "Allparts Cashier") - it was listed there
+	with no View or Return."""
 	if owner == user:
 		return True
-	if not pos_doc or pos_profile != getattr(pos_doc, "name", None):
+	if not pos_doc or not company or company != getattr(pos_doc, "company", None):
 		return False
 	return _profile_allows_other_cashiers(pos_doc)
 
 
 def _may_read_invoice(invoice):
 	"""Whether the caller may open this invoice in the POS: their own, or another cashier's
-	rung on the till they are standing at when that till lets its users read each other's -
-	what the Invoice History list and held orders allow. The till decides for managers
+	in their till's company when that till lets its users read each other's - what the
+	Invoice History list shows. (Held orders stay with their own till: acting on one sells
+	it there.) The till decides for managers
 	too; with no till resolvable, only their own."""
 	try:
 		pos_doc = get_current_pos_profile()
 	except Exception:
 		pos_doc = None
-	return _may_read_row(invoice.owner, invoice.pos_profile, frappe.session.user, pos_doc)
+	return _may_read_row(invoice.owner, invoice.company, frappe.session.user, pos_doc)
 
 
 @frappe.whitelist()
@@ -1423,7 +1429,7 @@ def get_sales_invoices(
 		select_fields = """name, posting_date, posting_time, owner, customer, customer_name,
 			base_grand_total, base_rounded_total, status, discount_amount,
 			total_taxes_and_charges, custom_pos_opening_entry, queue_status,
-			queue_error, queue_attempts, queue_last_attempt_at, pos_profile, currency, custom_is_printed"""
+			queue_error, queue_attempts, queue_last_attempt_at, pos_profile, company, currency, custom_is_printed"""
 		if has_zatca_status:
 			select_fields += ", custom_zatca_submit_status"
 		if has_custom_is_held:
@@ -1438,9 +1444,15 @@ def get_sales_invoices(
 		conditions = []
 		params = []
 
-		if surface in ("history", "customer") and not _profile_allows_other_cashiers(pos_doc):
-			conditions.append("si.owner = %s")
-			params.append(frappe.session.user)
+		if surface in ("history", "customer"):
+			if not _profile_allows_other_cashiers(pos_doc):
+				conditions.append("si.owner = %s")
+				params.append(frappe.session.user)
+			else:
+				# Exactly what _may_read_row opens: one's own anywhere, others' in the till's
+				# company. Other companies' invoices were listed with no View or Return.
+				conditions.append("(si.owner = %s OR si.company = %s)")
+				params.extend([frappe.session.user, getattr(pos_doc, "company", None)])
 
 		if surface != "dashboard" and not skip_opening_entry_filter:
 			if is_admin_user:
@@ -1504,7 +1516,7 @@ def get_sales_invoices(
 		items_map = _batch_fetch_items(invoice_names)
 
 		for inv in invoices:
-			inv["can_open"] = _may_read_row(inv.owner, inv.pos_profile, frappe.session.user, pos_doc)
+			inv["can_open"] = _may_read_row(inv.owner, inv.company, frappe.session.user, pos_doc)
 
 		_process_invoices(invoices, cashier_names_map, payment_methods_map, items_map)
 
