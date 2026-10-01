@@ -67,11 +67,10 @@ def get_current_user_info():
 		user_doc = frappe.get_doc("User", user)
 
 		# Get current POS profile
+		from klik_pos.api.shift import may_close_on_till
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
 		pos_profile = get_current_pos_profile()
-
-		from klik_pos.api.shift import may_close_on_till
 
 		_total_time = time.time() - start_time
 

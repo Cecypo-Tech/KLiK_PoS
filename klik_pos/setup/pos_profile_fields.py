@@ -23,7 +23,8 @@ ALLOW_CLOSING_DESCRIPTION = (
     "On (default): this till's users close its shift from the Closing Shift screen. Off: "
     "they do not see that screen or its figures, and cannot close the shift from the till or "
     "the desk; a manager (Sales Manager, System Manager, Express Admin) joins the shift and "
-    "closes it."
+    "closes it - for that, the manager is listed under this till's Applicable for Users and "
+    "has no open shift of their own."
 )
 
 POS_PROFILE_FEATURE_FIELDS = [

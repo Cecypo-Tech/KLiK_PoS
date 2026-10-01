@@ -77,7 +77,12 @@ def opening_suggestion(pos_profile):
 		frappe.throw(_("A POS Profile is required to suggest opening balances."))
 	frappe.has_permission("POS Profile", doc=pos_profile, throw=True)
 
+	from klik_pos.api.shift import may_close_on_till
+
 	previous = last_closing(pos_profile)
+	# On a till whose users do not close it, what the manager counted and banked at the last
+	# close stays with the manager; the float carried into this shift is still shown.
+	show_last_count = may_close_on_till(pos_profile)
 	modes = frappe.get_all(
 		"POS Payment Method",
 		filters={"parent": pos_profile, "parenttype": "POS Profile"},
@@ -105,8 +110,8 @@ def opening_suggestion(pos_profile):
 				"previous_closing_amount": flt(last.get("amount")) if float_mode else 0.0,
 				"previous_closing_entry": last.get("closing_entry") if float_mode else None,
 				"previous_closed_on": last.get("closed_on") if float_mode else None,
-				"previous_counted_amount": flt(last.get("counted")) if float_mode else 0.0,
-				"previous_banked_amount": flt(last.get("banked")) if float_mode else 0.0,
+				"previous_counted_amount": flt(last.get("counted")) if float_mode and show_last_count else 0.0,
+				"previous_banked_amount": flt(last.get("banked")) if float_mode and show_last_count else 0.0,
 			}
 		)
 	return {"pos_profile": pos_profile, "modes": suggestions}

@@ -9,6 +9,7 @@ from frappe.utils import flt, now_datetime, today
 from klik_pos.api.cache import clear_backend_cache
 from klik_pos.api.sales_invoice import delete_draft_invoices_for_opening_entry
 from klik_pos.api.sales_order import delete_held_orders_for_opening_entry
+from klik_pos.api.shift import ensure_may_close_on_till
 from klik_pos.klik_pos.utils import clear_pos_profile_cache, get_current_pos_profile
 
 
@@ -302,8 +303,6 @@ def validate_closing_entry(doc, method):
 	)
 	if not row:
 		return
-	from klik_pos.api.shift import ensure_may_close_on_till
-
 	ensure_may_close_on_till(row.pos_profile, frappe.session.user)
 	_ensure_may_close(row, frappe.session.user)
 
@@ -319,8 +318,6 @@ def create_closing_entry():
 		frappe.logger().info(f"POS Closing Entry Data Received: {data}")
 
 		opening_entry = _get_open_pos_entry(user)
-		from klik_pos.api.shift import ensure_may_close_on_till
-
 		ensure_may_close_on_till(opening_entry.pos_profile, user)
 		_ensure_may_close(opening_entry, user)
 		payment_data = _calculate_payment_reconciliation(opening_entry, data)

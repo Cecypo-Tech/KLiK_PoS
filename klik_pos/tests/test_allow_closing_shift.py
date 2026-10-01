@@ -121,8 +121,10 @@ class TestTheFiguresStayPrivate(ClosingCase):
 			result = get_sales_invoices(surface="")
 			self.assertFalse(result["success"])
 			self.assertIn("Closing is turned off", result["error"])
+			# Any surface other than the three named screens gets the closing scope.
+			self.assertFalse(get_sales_invoices(surface="anything")["success"])
 			# Invoice History is another screen and is unaffected.
-			self.assertNotEqual(get_sales_invoices(surface="history").get("success"), False)
+			self.assertTrue(get_sales_invoices(surface="history")["success"])
 
 	def test_the_user_info_tells_the_till_whether_to_offer_closing(self):
 		from klik_pos.api.user import get_current_user_info
@@ -153,3 +155,43 @@ class TestAStaleShiftWaitsForAManager(ClosingCase):
 			self.assertEqual((conflict["kind"], conflict["can_close"]), ("own_stale", False))
 		with self._as(MANAGER_ROLES):
 			self.assertTrue(current_shift_state()["can_close"])
+
+
+class TestTheDeskAndTheManager(ClosingCase):
+	def test_get_entries_on_the_desk_form_is_refused(self):
+		from klik_pos.overrides.pos_closing_entry import get_invoices
+
+		frappe.set_user(OPENER)
+		with self._as(CASHIER_ROLES):
+			with self.assertRaisesRegex(frappe.PermissionError, "Closing is turned off"):
+				get_invoices(frappe.utils.add_days(frappe.utils.now(), -1), frappe.utils.now(), self.till, OPENER)
+
+	def test_a_manager_joins_the_till_s_shift_and_may_close_it(self):
+		from klik_pos.tests.test_opening_conflict import _user
+		from klik_pos.tests.test_shared_shift import _assign
+
+		manager = _user("closing-off-manager@example.com")
+		_assign(self.till, manager)
+		frappe.set_user(manager)
+		with self._as(MANAGER_ROLES):
+			self.assertEqual(shift.join_shift(self.till)["entry"], self.entry)
+			closing = frappe.new_doc("POS Closing Entry")
+			closing.pos_opening_entry = self.entry
+			validate_closing_entry(closing, "validate")
+
+	def test_the_opening_screen_keeps_the_last_count_from_the_till(self):
+		from klik_pos.api.opening_balances import opening_suggestion
+
+		last = {"Cash": {"amount": 1000.0, "counted": 1200.0, "banked": 200.0, "closing_entry": "X", "closed_on": None}}
+		with (
+			patch("klik_pos.api.opening_balances.last_closing", return_value=last),
+			patch("frappe.has_permission", return_value=True),
+		):
+			frappe.set_user(OPENER)
+			with self._as(CASHIER_ROLES):
+				cash = next(m for m in opening_suggestion(self.till)["modes"] if m["mode_of_payment"] == "Cash")
+			self.assertEqual(cash["suggested_amount"], 1000.0)
+			self.assertEqual((cash["previous_counted_amount"], cash["previous_banked_amount"]), (0.0, 0.0))
+			with self._as(MANAGER_ROLES):
+				cash = next(m for m in opening_suggestion(self.till)["modes"] if m["mode_of_payment"] == "Cash")
+			self.assertEqual((cash["previous_counted_amount"], cash["previous_banked_amount"]), (1200.0, 200.0))

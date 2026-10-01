@@ -1506,7 +1506,9 @@ def get_sales_invoices(
 		if surface == "dashboard" and not _can_view_sales_dashboard(user_roles):
 			return {"success": False, "error": _("Not permitted to view the Sales Dashboard")}
 
-		if surface == "" and current_pos_profile:
+		# Every surface but the three named screens gets Closing Shift's scope (the whole
+		# shift, every cashier), so every one of them is held to the closing rule.
+		if surface not in ("history", "customer", "dashboard") and current_pos_profile:
 			from klik_pos.api.shift import may_close_on_till
 
 			if not may_close_on_till(current_pos_profile):
