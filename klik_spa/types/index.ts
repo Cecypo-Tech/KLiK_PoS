@@ -237,6 +237,8 @@ export interface SalesInvoice {
   cashierId: string
   customer: string
   customerId: string | null
+  /** The walk-in buyer's own name, when the sale or held order recorded one. */
+  walkinName?: string
   items: SalesInvoiceItem[]
   subtotal: number
   giftCardDiscount: number

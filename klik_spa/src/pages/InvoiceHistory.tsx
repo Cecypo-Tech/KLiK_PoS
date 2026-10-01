@@ -51,6 +51,7 @@ import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortabl
 import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "../utils/exportUtils";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
+import { walkinSubline } from "../utils/walkinLabel";
 // import InvoiceViewPage from "./InvoiceViewPage";
 
 interface HeldOrderExtras {
@@ -199,6 +200,7 @@ export default function InvoiceHistoryPage() {
         cashierId: o.owner || "",
         customer: o.customer_name || o.customer || "",
         customerId: o.customer || "",
+        walkinName: o.custom_walkin_customer_name || "",
         items: o.items || [],
         subtotal: Number(o.grand_total) || 0,
         giftCardDiscount: 0,
@@ -456,7 +458,8 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
               : invoiceStatus === tabStatus;
       const matchesPayment = paymentFilter === "all" || invoice.paymentMethod === paymentFilter;
       const matchesCustomer = !customerFilter.trim()
-        || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase());
+        || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
+        || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
       const matchesCashier = cashierFilter === "all" || invoice.cashier === cashierFilter;
       const matchesDate = filterInvoiceByDate(invoice.date);
 
@@ -514,7 +517,8 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
     const invoicesFilteredByOtherFilters = countSource.filter((invoice) => {
       const matchesPayment = paymentFilter === "all" || invoice.paymentMethod === paymentFilter;
       const matchesCustomer = !customerFilter.trim()
-        || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase());
+        || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
+        || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
       const matchesCashier = cashierFilter === "all" || invoice.cashier === cashierFilter;
       const matchesDate = filterInvoiceByDate(invoice.date);
       return matchesPayment && matchesCustomer && matchesCashier && matchesDate;
@@ -724,6 +728,11 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   </td>
                   <td className="px-6 py-4 max-w-[12rem]">
                     <div title={invoice.customer} className="block truncate text-sm text-gray-900 dark:text-white">{invoice.customer}</div>
+                    {walkinSubline(invoice.customer, invoice.walkinName) && (
+                      <div title={invoice.walkinName} className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                        {walkinSubline(invoice.customer, invoice.walkinName)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                     {invoice.cashier}
@@ -839,7 +848,14 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Customer:</span>
-                  <span className="text-gray-900 dark:text-white">{invoice.customer}</span>
+                  <span className="text-gray-900 dark:text-white text-right">
+                    {invoice.customer}
+                    {walkinSubline(invoice.customer, invoice.walkinName) && (
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">
+                        {walkinSubline(invoice.customer, invoice.walkinName)}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Amount:</span>
