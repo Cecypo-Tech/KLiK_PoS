@@ -675,6 +675,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             so_fields.append(APPROVAL_STATE_FIELD)
         if frappe.db.has_column("Sales Order", PRICE_BREACH_FIELD):
             so_fields.append(PRICE_BREACH_FIELD)
+        # Held orders for walk-ins all sit under one customer; the buyer's name tells them apart.
+        if frappe.db.has_column("Sales Order", "custom_walkin_customer_name"):
+            so_fields.append("custom_walkin_customer_name")
 
         orders = frappe.get_all(
             "Sales Order",
@@ -693,6 +696,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                 if term in (o.name or "").lower()
                 or term in (o.customer_name or "").lower()
                 or term in (o.customer or "").lower()
+                or term in (o.get("custom_walkin_customer_name") or "").lower()
             ]
 
         _attach_cashier_names(orders)
