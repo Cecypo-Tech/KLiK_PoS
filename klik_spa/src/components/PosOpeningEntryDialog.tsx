@@ -6,6 +6,7 @@ import { fetchOpeningConflict, fetchOpeningSuggestion, joinShift, useCreatePOSOp
 import { conflictNotice, type OpeningConflict } from '../utils/openingConflict';
 import {
   buildOpeningRows,
+  openingMeta,
   canOpen,
   needsReason,
   setAmount,
@@ -356,11 +357,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                       const drift = variance(method);
                       const wantsReason = needsReason(method);
                       const currency = posDetails?.currency || 'USD';
-                      const meta = method.carriesFloat
-                        ? method.hasHistory
-                          ? `last closed ${formatCurrencyWithSymbol(method.previousClosing, currency)}`
-                          : 'no previous closing'
-                        : 'no float';
+                      const meta = openingMeta(method, (n) => formatCurrencyWithSymbol(n, currency));
                       return (
                       <div key={method.mode_of_payment} className="px-3 py-1">
                         <div className="flex items-center gap-2 min-h-7">

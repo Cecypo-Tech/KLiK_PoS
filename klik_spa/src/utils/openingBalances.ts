@@ -17,7 +17,12 @@ export interface OpeningSuggestionMode {
   type: string;
   carries_float: boolean;
   suggested_amount: number;
+  /** The float left at the last closing: its count less what was banked. */
   previous_closing_amount: number;
+  /** What the last closing counted, and how much of it was handed over for banking.
+   * Optional: an older server sends neither. */
+  previous_counted_amount?: number;
+  previous_banked_amount?: number;
   previous_closing_entry: string | null;
   previous_closed_on: string | null;
 }
@@ -33,6 +38,8 @@ export interface OpeningRow {
   carriesFloat: boolean;
   amount: number;
   previousClosing: number;
+  previousCounted: number;
+  previousBanked: number;
   /** Whether this till has a closing to be measured against at all. */
   hasHistory: boolean;
   closedOn: string | null;
@@ -66,11 +73,23 @@ export function buildOpeningRows(
         carriesFloat,
         amount: carriesFloat ? (hint?.suggested_amount ?? 0) : 0,
         previousClosing: carriesFloat ? (hint?.previous_closing_amount ?? 0) : 0,
+        previousCounted: carriesFloat ? (hint?.previous_counted_amount ?? hint?.previous_closing_amount ?? 0) : 0,
+        previousBanked: carriesFloat ? (hint?.previous_banked_amount ?? 0) : 0,
         hasHistory: carriesFloat && !!hint?.previous_closing_entry,
         closedOn: hint?.previous_closed_on ?? null,
         reason: "",
       };
     });
+}
+
+/** The grey note beside a mode on the opening screen: where its suggested figure came from. */
+export function openingMeta(row: OpeningRow, money: (n: number) => string): string {
+  if (!row.carriesFloat) return "no float";
+  if (!row.hasHistory) return "no previous closing";
+  if (row.previousBanked > 0) {
+    return `left ${money(row.previousClosing)} (counted ${money(row.previousCounted)}, banked ${money(row.previousBanked)})`;
+  }
+  return `last closed ${money(row.previousClosing)}`;
 }
 
 export function setAmount(rows: OpeningRow[], index: number, amount: number): OpeningRow[] {
