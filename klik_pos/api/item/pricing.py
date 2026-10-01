@@ -235,6 +235,8 @@ def _get_uom_conversion_factor(item_code, uom):
 
 def _apply_pricing_rules(erpnext_items, context):
     args = frappe._dict({
+        # ERPNext v16 (since 48635ee6) refuses to price a transaction it is not told the doctype of.
+        "doctype": "Sales Invoice",
         "items": erpnext_items,
         "company": context["company"],
         "currency": context["currency"],
