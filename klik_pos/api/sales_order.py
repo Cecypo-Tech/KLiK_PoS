@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 
 import frappe
 from frappe import _
@@ -110,10 +111,33 @@ def _claim_held_order(order_id):
     return None
 
 
+@contextmanager
+def _keeping_naming_series():
+    """Delete without winding naming series back.
+
+    frappe rewinds a series whenever the document holding its newest number is deleted, so
+    clearing held orders newest-first sent the numbering back to SO-00001 and the same names
+    were reused (and deleted again) several times a day - and an invoice's link to the order
+    it came from could point at a later order of the same name. Any counter that went back
+    is put where it was; one that moved on meanwhile is left alone.
+    """
+    before = dict(frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"))
+    try:
+        yield
+    finally:
+        for name, current in frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"):
+            if name in before and cint(current) < cint(before[name]):
+                frappe.db.sql(
+                    "UPDATE `tabSeries` SET `current` = %s WHERE `name` = %s AND `current` < %s",
+                    (before[name], name, before[name]),
+                )
+
+
 def _remove_checked_out_order(order_id):
     """The order is now an invoice: take it off the Held tab."""
     try:
-        frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
+        with _keeping_naming_series():
+            frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
     except Exception as del_err:
         frappe.logger().warning(
             "Could not delete held SO %s after checkout: %s", order_id, del_err
@@ -888,12 +912,13 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
             if name not in names:
                 names.append(name)
         deleted = 0
-        for name in names:
-            try:
-                frappe.delete_doc("Sales Order", name, ignore_permissions=True)
-                deleted += 1
-            except Exception as e:
-                frappe.logger().error("Error deleting held order %s: %s", name, e)
+        with _keeping_naming_series():
+            for name in names:
+                try:
+                    frappe.delete_doc("Sales Order", name, ignore_permissions=True)
+                    deleted += 1
+                except Exception as e:
+                    frappe.logger().error("Error deleting held order %s: %s", name, e)
         if deleted:
             frappe.logger().info(
                 "Cleared %d held order(s) for opening entry %s", deleted, opening_entry_name
