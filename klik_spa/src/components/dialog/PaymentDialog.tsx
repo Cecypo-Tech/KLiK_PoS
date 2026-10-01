@@ -39,7 +39,7 @@ import {
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
-import { holdBlockedByMpesa, mpesaDraftToDiscard } from "../../utils/mpesaDraftLifecycle";
+import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard } from "../../utils/mpesaDraftLifecycle";
 import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { summaryFigures } from "../../utils/summaryFigures";
@@ -235,12 +235,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     unfinishedMpesaDraftRef.current = mpesaDraftInvoiceName;
   }, [mpesaDraftInvoiceName]);
   const releaseUnfinishedMpesaDraft = useCallback(() => {
-    const abandoned = mpesaDraftToDiscard({
+    const checkout = {
       draftName: unfinishedMpesaDraftRef.current,
       workInFlight: mpesaWorkInFlightRef.current,
       stkSentFrom: stkSentFromRef.current,
-    });
+    };
     unfinishedMpesaDraftRef.current = null;
+    const keptForStk = mpesaDraftKeptForStk(checkout);
+    if (keptForStk) {
+      toast.warning(keptForStk, { autoClose: 15000, toastId: `mpesa-draft-kept-${checkout.draftName}` });
+      return;
+    }
+    const abandoned = mpesaDraftToDiscard(checkout);
     if (abandoned) void discardAbandonedMpesaDraft(abandoned);
   }, []);
   // On the main POS screen the dialog unmounts rather than closing.

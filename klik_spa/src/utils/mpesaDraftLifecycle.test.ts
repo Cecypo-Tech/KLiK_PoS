@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { holdBlockedByMpesa, mpesaDraftToDiscard } from "./mpesaDraftLifecycle";
+import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard } from "./mpesaDraftLifecycle";
 
 const none = new Set<string>();
 
@@ -43,5 +43,18 @@ describe("holdBlockedByMpesa", () => {
 
   it("lets the order be held after the push failed", () => {
     expect(holdBlockedByMpesa({ source: "stk", status: "failed" })).toBeNull();
+  });
+});
+
+describe("mpesaDraftKeptForStk", () => {
+  it("names the draft kept because an STK push was sent from it, so the cashier is told", () => {
+    const message = mpesaDraftKeptForStk({ draftName: "POS-1", workInFlight: 0, stkSentFrom: new Set(["POS-1"]) });
+    expect(message).toContain("POS-1");
+    expect(message).toMatch(/M-Pesa/);
+  });
+
+  it("says nothing for a draft that is discarded, or kept only while work is running", () => {
+    expect(mpesaDraftKeptForStk({ draftName: "POS-1", workInFlight: 0, stkSentFrom: none })).toBeNull();
+    expect(mpesaDraftKeptForStk({ draftName: null, workInFlight: 0, stkSentFrom: new Set(["POS-1"]) })).toBeNull();
   });
 });

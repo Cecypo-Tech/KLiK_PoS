@@ -5541,6 +5541,8 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None):
 			return response
 
 	except frappe.DoesNotExistError:
+		if draft_touched:
+			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		return {"success": False, "error": f"Invoice {invoice_id} not found"}
 	except Exception as e:
 		if draft_touched:

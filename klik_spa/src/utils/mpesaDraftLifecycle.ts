@@ -36,3 +36,12 @@ export function holdBlockedByMpesa(
   }
   return null;
 }
+
+/**
+ * What to tell the cashier when the dialog keeps a draft because an STK push was sent from
+ * it, or null. Kept silently, the cashier could leave, reopen checkout and charge again.
+ */
+export function mpesaDraftKeptForStk({ draftName, stkSentFrom }: MpesaDraftCheckout): string | null {
+  if (!draftName || !stkSentFrom.has(draftName)) return null;
+  return `Draft ${draftName} was kept: an M-Pesa request was sent from it, and its payment needs this invoice. Finish or cancel it from Invoice History before charging this customer again.`;
+}
