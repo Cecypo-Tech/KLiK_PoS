@@ -423,8 +423,13 @@ _PARTY_DETAIL_FIELDS = (
 	"contact_display",
 	"contact_mobile",
 	"contact_email",
+	"contact_phone",
 	"territory",
 	"customer_group",
+	"tax_category",
+	# The receivable: left as is, a switch posts it to the old customer's account.
+	"debit_to",
+	"party_account_currency",
 )
 
 

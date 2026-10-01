@@ -25,6 +25,16 @@ def _payload(customer, **extra):
 	}
 
 
+def _contacts_of(customer):
+	return set(
+		frappe.get_all(
+			"Dynamic Link",
+			filters={"link_doctype": "Customer", "link_name": customer, "parenttype": "Contact"},
+			pluck="parent",
+		)
+	)
+
+
 def _addresses_of(customer):
 	return set(
 		frappe.get_all(
@@ -53,7 +63,8 @@ class TestStalePartyAddress(FrappeTestCase):
 			"Sales Order", first["order_name"], ["customer", "customer_address", "contact_person"], as_dict=True
 		)
 		self.assertEqual(so.customer, SECOND)
-		self.assertNotIn(so.customer_address, _addresses_of(FIRST))
+		self.assertIn(so.customer_address, _addresses_of(SECOND))
+		self.assertFalse(so.contact_person and so.contact_person in _contacts_of(FIRST))
 
 	def test_a_recalled_draft_finished_for_another_customer_takes_their_address(self):
 		from klik_pos.api.sales_invoice import create_draft_invoice
@@ -68,7 +79,7 @@ class TestStalePartyAddress(FrappeTestCase):
 		self.assertTrue(again["success"], again.get("message"))
 		invoice = frappe.db.get_value("Sales Invoice", name, ["customer", "customer_address"], as_dict=True)
 		self.assertEqual(invoice.customer, SECOND)
-		self.assertNotIn(invoice.customer_address, _addresses_of(FIRST))
+		self.assertIn(invoice.customer_address, _addresses_of(SECOND))
 
 	def test_the_customer_name_follows_the_customer(self):
 		first = create_held_order(_payload(FIRST))
@@ -86,3 +97,21 @@ class TestStalePartyAddress(FrappeTestCase):
 
 		self.assertTrue(again["success"], again.get("message"))
 		self.assertEqual(frappe.db.get_value("Sales Order", first["order_name"], "customer_address"), address)
+
+
+class TestPartyAccountFollowsTheCustomer(FrappeTestCase):
+	def test_the_receivable_account_is_taken_again_for_the_new_customer(self):
+		"""debit_to is filled only when empty too: a switch posted the receivable to the old
+		customer's account, silently."""
+		from klik_pos.api.sales_invoice import _set_customer
+
+		invoice = frappe.new_doc("Sales Invoice")
+		invoice.customer = FIRST
+		invoice.debit_to = "Old Customer Receivable"
+		invoice.tax_category = "Old Category"
+
+		_set_customer(invoice, SECOND)
+
+		self.assertEqual(invoice.customer, SECOND)
+		self.assertFalse(invoice.debit_to)
+		self.assertFalse(invoice.tax_category)
