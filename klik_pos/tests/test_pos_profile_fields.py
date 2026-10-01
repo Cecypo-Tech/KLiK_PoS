@@ -174,26 +174,23 @@ class TestPosProfileFormLayout(FrappeTestCase):
         table = order.index("custom_pos_extra_fields")
         self.assertLess(start, column)
         self.assertLess(column, table)
-        # Eight checkboxes, 5 | 3, with the Extra Fields table closing the second column.
-        self.assertEqual(len(order[start + 1:column]), 5)
+        # Seven checkboxes, 4 | 3, with the Extra Fields table closing the second column.
+        self.assertEqual(len(order[start + 1:column]), 4)
         self.assertEqual(len(order[column + 1:table]), 3)
 
-    def test_allow_credit_sales_shows_under_sales_and_checkout_permissions(self):
-        # It shipped hidden while nothing read it; once it became the only switch for credit
-        # sales, no till could turn them on. migrate copies the custom JSON over every site's
-        # Custom Field, so the shipped files are what must be right.
+    def test_one_credit_checkbox_under_sales_and_checkout_permissions(self):
+        """Two near-identical boxes in two sections, and the one that looked like the switch was
+        not: one is left - custom_allow_credit_sales_as_pos, labelled Allow Credit Sales - where
+        the permissions are."""
         import json
 
         custom = json.load(open(frappe.get_app_path("klik_pos", "klik_pos", "custom", "pos_profile.json")))
-        field = next(d for d in custom["custom_fields"] if d["fieldname"] == "custom_allow_credit_sales")
-        self.assertEqual(field["hidden"], 0)
-
-        setters = json.load(open(frappe.get_app_path("klik_pos", "fixtures", "property_setter.json")))
-        self.assertFalse(
-            [r for r in setters if r.get("field_name") == "custom_allow_credit_sales" and r.get("property") == "hidden"]
-        )
+        self.assertNotIn("custom_allow_credit_sales", [d["fieldname"] for d in custom["custom_fields"]])
+        kept = next(f for f in POS_PROFILE_FEATURE_FIELDS if f["fieldname"] == "custom_allow_credit_sales_as_pos")
+        self.assertEqual(kept["label"], "Allow Credit Sales")
 
         order = self._order()
+        self.assertNotIn("custom_allow_credit_sales", order)
         start = order.index("custom_sales__checkout_permissions")
         meta = frappe.get_meta("POS Profile")
         breaks = ("Section Break", "Tab Break")
@@ -201,4 +198,4 @@ class TestPosProfileFormLayout(FrappeTestCase):
             i for i in range(start + 1, len(order))
             if (meta.get_field(order[i]) and meta.get_field(order[i]).fieldtype in breaks)
         )
-        self.assertIn("custom_allow_credit_sales", order[start + 1:end])
+        self.assertIn("custom_allow_credit_sales_as_pos", order[start + 1:end])

@@ -6,23 +6,22 @@ from klik_pos.api.sales_invoice import _is_pos_for_credit_sale
 
 
 class TestIsPosForCreditSale(FrappeTestCase):
-    def test_defaults_to_zero_when_flag_unset(self):
-        # Regression guard for the Jul 6 fix (commit 633227a): credit sales must
-        # stay is_pos=0 unless the POS Profile explicitly opts in.
-        pos_profile = SimpleNamespace()
-        self.assertEqual(_is_pos_for_credit_sale(pos_profile), 0)
+    """One checkbox both allows a credit sale and books it as a POS sale; a till without it
+    never makes one (parse_invoice_data refuses it), so is_pos follows the permission."""
 
-    def test_zero_when_flag_explicitly_off(self):
-        pos_profile = SimpleNamespace(custom_allow_credit_sales_as_pos=0)
-        self.assertEqual(_is_pos_for_credit_sale(pos_profile), 0)
+    def test_a_till_without_credit_books_none(self):
+        self.assertEqual(_is_pos_for_credit_sale(SimpleNamespace()), 0)
+        self.assertEqual(_is_pos_for_credit_sale(SimpleNamespace(custom_allow_credit_sales_as_pos=0)), 0)
 
-    def test_one_when_flag_enabled(self):
-        pos_profile = SimpleNamespace(custom_allow_credit_sales_as_pos=1)
-        self.assertEqual(_is_pos_for_credit_sale(pos_profile), 1)
+    def test_an_allowed_credit_sale_is_a_pos_sale(self):
+        self.assertEqual(_is_pos_for_credit_sale(SimpleNamespace(custom_allow_credit_sales_as_pos=1)), 1)
 
 
 class TestCreditSalesGate(FrappeTestCase):
-    """'Allow Credit Sales' (custom_allow_credit_sales) decides whether a till may sell on credit."""
+    """'Allow Credit Sales' - one checkbox, custom_allow_credit_sales_as_pos - decides whether a
+    till may sell on credit; an allowed credit sale is booked as a POS sale. The second,
+    older custom_allow_credit_sales is gone: two near-identical boxes in two sections, and
+    the one that looked like the switch was not."""
 
     def _parse(self, profile, **extra):
         from unittest.mock import patch
@@ -43,21 +42,21 @@ class TestCreditSalesGate(FrappeTestCase):
         from klik_pos.api.sales_invoice import _credit_sales_allowed
 
         self.assertEqual(_credit_sales_allowed(SimpleNamespace()), 0)
-        self.assertEqual(_credit_sales_allowed(SimpleNamespace(custom_allow_credit_sales=1)), 1)
-        # "as POS" only decides is_pos on a credit sale; it does not allow one.
-        self.assertEqual(_credit_sales_allowed(SimpleNamespace(custom_allow_credit_sales_as_pos=1)), 0)
+        self.assertEqual(_credit_sales_allowed(SimpleNamespace(custom_allow_credit_sales_as_pos=1)), 1)
+        # The dropped field no longer means anything.
+        self.assertEqual(_credit_sales_allowed(SimpleNamespace(custom_allow_credit_sales=1)), 0)
 
     def test_a_credit_sale_on_a_till_without_it_is_refused(self):
         import frappe
 
-        profile = frappe._dict(name="Till X", custom_allow_credit_sales=0, default_sales_type="Cash")
+        profile = frappe._dict(name="Till X", custom_allow_credit_sales_as_pos=0, default_sales_type="Cash")
         with self.assertRaisesRegex(frappe.ValidationError, "Credit sales are turned off"):
             self._parse(profile, isCreditSale=True)
 
     def test_a_till_defaulting_to_credit_without_it_sells_for_cash(self):
         import frappe
 
-        profile = frappe._dict(name="Till X", custom_allow_credit_sales=0, default_sales_type="Credit")
+        profile = frappe._dict(name="Till X", custom_allow_credit_sales_as_pos=0, default_sales_type="Credit")
         parsed = self._parse(profile, paymentMethods=[{"method": "Cash", "amount": 100}], amountPaid=100)
         is_credit_sale = parsed[9]
         self.assertFalse(is_credit_sale)
@@ -74,7 +73,7 @@ class TestCreditSaleNeedsNoPartialPayment(FrappeTestCase):
         profile = make_pos_profile(do_not_insert=1)
         profile.name = f"_Test Credit Gate {frappe.generate_hash(length=5)}"
         profile.allow_partial_payment = 0
-        profile.custom_allow_credit_sales = allow_credit_sales
+        profile.custom_allow_credit_sales_as_pos = allow_credit_sales
         profile.insert(ignore_permissions=True)
         invoice = frappe.new_doc("Sales Invoice")
         invoice.pos_profile = profile.name
@@ -115,6 +114,6 @@ class TestCreditSalesGateAllows(TestCreditSalesGate):
     def test_an_explicit_credit_sale_on_a_credit_till_passes_the_gate(self):
         import frappe
 
-        profile = frappe._dict(name="Till Y", custom_allow_credit_sales=1, default_sales_type="Cash")
+        profile = frappe._dict(name="Till Y", custom_allow_credit_sales_as_pos=1, default_sales_type="Cash")
         parsed = self._parse(profile, isCreditSale=True)
         self.assertTrue(parsed[9], "is_credit_sale")

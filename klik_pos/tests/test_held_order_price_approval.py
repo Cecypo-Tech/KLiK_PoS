@@ -161,7 +161,7 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 
 		cls.till = _profile()
 		# These tests sell on credit; the till must allow it.
-		frappe.db.set_value("POS Profile", cls.till, {"allow_partial_payment": 1, "custom_allow_credit_sales": 1})
+		frappe.db.set_value("POS Profile", cls.till, {"allow_partial_payment": 1, "custom_allow_credit_sales_as_pos": 1})
 		cls.shift = _shift(cls.till, CASHIER)
 		frappe.db.commit()
 

@@ -7,6 +7,11 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 # (allow_warehouse_change), so they silently go missing on DB restores or when
 # a patch is skipped. Re-asserting them here (idempotently) on every migrate
 # makes them self-heal.
+CREDIT_SALES_DESCRIPTION = (
+    "Lets cashiers sell on credit: an unpaid invoice with a due date, for a named customer. "
+    "Credit sales are booked as POS sales and count in the till's shift."
+)
+
 POS_PROFILE_FEATURE_FIELDS = [
     {
         "fieldname": "allow_price_list_switching",
@@ -46,14 +51,10 @@ POS_PROFILE_FEATURE_FIELDS = [
     },
     {
         "fieldname": "custom_allow_credit_sales_as_pos",
-        "label": "Allow Credit Sales as POS Sales",
+        "label": "Allow Credit Sales",
         "fieldtype": "Check",
         "insert_after": "custom_show_overdue_warning",
-        "description": (
-            "When enabled, Credit Sale invoices are marked as POS sales "
-            "(is_pos=1) even though they're unpaid at creation. When "
-            "disabled (default), Credit Sales are always is_pos=0."
-        ),
+        "description": CREDIT_SALES_DESCRIPTION,
         "default": "0",
         "module": "KLiK PoS",
     },
