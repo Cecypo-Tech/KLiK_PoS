@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   buildSummaryQuery,
   collapseModeRows,
@@ -171,6 +171,7 @@ describe("isExternalHref", () => {
 
 describe("contextParts", () => {
   it("names the open shifts and when the earliest started", () => {
+    vi.setSystemTime(new Date(2026, 8, 6, 23, 0));
     const parts = contextParts(
       summary({
         open_shifts: [
@@ -184,6 +185,7 @@ describe("contextParts", () => {
   });
 
   it("names a till once even when it has several shifts open", () => {
+    vi.setSystemTime(new Date(2026, 8, 6, 23, 0));
     const parts = contextParts(
       summary({
         open_shifts: [
@@ -217,9 +219,21 @@ describe("contextParts", () => {
   });
 });
 
+afterEach(() => vi.useRealTimers());
+
 describe("shiftStartTime", () => {
   it("is null when no shift reports a start", () => {
     expect(shiftStartTime([{ name: "x", pos_profile: "Till 1", period_start_date: null }])).toBeNull();
+  });
+
+  it("is the time alone for a shift opened today", () => {
+    const shifts = [{ name: "x", pos_profile: "Till 1", period_start_date: "2026-10-02 09:05:00" }];
+    expect(shiftStartTime(shifts, "2026-10-02")).toBe("09:05");
+  });
+
+  it("names the day for a shift opened earlier (a till without a daily close)", () => {
+    const shifts = [{ name: "x", pos_profile: "Till 1", period_start_date: "2026-09-29 09:05:00" }];
+    expect(shiftStartTime(shifts, "2026-10-02")).toBe("Sep 29 09:05");
   });
 });
 

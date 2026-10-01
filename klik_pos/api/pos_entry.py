@@ -28,16 +28,16 @@ def current_shift_state():
 	Closing Shift instead of the checkout screen."""
 	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-	from klik_pos.api.shift import is_shift_manager
+	from klik_pos.api.shift import _is_stale, is_shift_manager
 
 	entry = get_current_pos_opening_entry()
 	if not entry:
 		return {"entry": None, "stale": False, "pos_profile": None, "manager": is_shift_manager()}
 
 	row = frappe.db.get_value(
-		"POS Opening Entry", entry, ["pos_profile", "period_start_date"], as_dict=True
+		"POS Opening Entry", entry, ["name", "pos_profile", "period_start_date"], as_dict=True
 	)
-	stale = bool(row) and frappe.utils.get_date_str(row.period_start_date) != today()
+	stale = bool(row) and _is_stale(row)
 	return {
 		"entry": entry,
 		"stale": stale,
@@ -136,9 +136,9 @@ def opening_conflict(pos_profile):
 
 	A cashier works in one shift, and a till runs one shift. So the caller's own Open shift
 	(or the one they joined, on this till) comes first; after that, a shift someone else
-	opened on this till, which the caller should join rather than duplicate. A shift opened
-	before today must be closed first (ERPNext's daily shifts); for someone else's that
-	means joining it and then closing it.
+	opened on this till, which the caller should join rather than duplicate. On a till that
+	requires a daily close, a shift opened before today must be closed first (ERPNext's daily
+	shifts); for someone else's that means a manager joining it and then closing it.
 	"""
 	from klik_pos.api.shift import _is_stale, is_shift_manager, joined_shift, open_shifts_on_till
 
@@ -156,8 +156,6 @@ def opening_conflict(pos_profile):
 			"manager": manager,
 		}
 
-	_stale = _is_stale
-
 	def _shifts_payload(shifts):
 		return [
 			{
@@ -165,7 +163,7 @@ def opening_conflict(pos_profile):
 				"user": s.user,
 				"user_name": frappe.db.get_value("User", s.user, "full_name") or s.user,
 				"period_start_date": s.period_start_date,
-				"stale": _stale(s),
+				"stale": _is_stale(s),
 			}
 			for s in shifts
 		]
@@ -180,7 +178,7 @@ def opening_conflict(pos_profile):
 		row = next((s for s in own if s.pos_profile == pos_profile), own[0])
 		if row.pos_profile != pos_profile:
 			return _describe("own_other_profile", row, row.pos_profile)
-		return _describe("own_stale" if _stale(row) else "own_open", row, pos_profile)
+		return _describe("own_stale" if _is_stale(row) else "own_open", row, pos_profile)
 
 	shifts = open_shifts_on_till(pos_profile)
 	if not shifts:
@@ -190,7 +188,7 @@ def opening_conflict(pos_profile):
 	if joined:
 		joined_row = next((s for s in shifts if s.name == joined), None)
 		if joined_row:
-			return _describe("own_stale" if _stale(joined_row) else "own_open", joined_row, pos_profile)
+			return _describe("own_stale" if _is_stale(joined_row) else "own_open", joined_row, pos_profile)
 
 	if len(shifts) > 1:
 		oldest = shifts[0]
@@ -200,7 +198,7 @@ def opening_conflict(pos_profile):
 		return conflict
 
 	shift_row = shifts[0]
-	if _stale(shift_row):
+	if _is_stale(shift_row):
 		kind = "till_stale" if manager else "till_needs_manager"
 		conflict = _describe(kind, shift_row, pos_profile)
 		if kind == "till_needs_manager":
@@ -376,15 +374,14 @@ def _ensure_may_close(opening_entry, user):
 	any shift still on today's date on a till with exactly one open shift, stays open to
 	whoever is in it - see the module docstring in shift.py for why "in it" already means
 	"today or a manager"."""
-	from klik_pos.api.shift import is_shift_manager, open_shifts_on_till
+	from klik_pos.api.shift import _is_stale, is_shift_manager, open_shifts_on_till
 
 	if opening_entry.user == user:
 		return
 	if is_shift_manager(user):
 		return
 
-	stale = frappe.utils.get_date_str(opening_entry.period_start_date) != today()
-	if stale:
+	if _is_stale(opening_entry):
 		frappe.throw(
 			_("Only a manager can close {0}, opened on {1} by {2}.").format(
 				opening_entry.name,

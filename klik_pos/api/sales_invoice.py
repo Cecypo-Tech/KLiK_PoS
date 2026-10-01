@@ -4589,6 +4589,30 @@ def _needs_shift_check(doc):
 
 
 class CustomSalesInvoice(SalesInvoice):
+	def validate_pos_opening_entry(self):
+		"""ERPNext's check, except that a till without 'Require Daily Shift Close' keeps
+		selling in a shift opened on an earlier day."""
+		from klik_pos.api.shift import requires_daily_close
+
+		if requires_daily_close(self.pos_profile):
+			return super().validate_pos_opening_entry()
+
+		open_shifts = frappe.db.count("POS Opening Entry", {"pos_profile": self.pos_profile, "status": "Open"})
+		if not open_shifts:
+			frappe.throw(
+				title=_("POS Opening Entry Missing"),
+				msg=_("No open POS Opening Entry found for POS Profile {0}.").format(
+					frappe.bold(self.pos_profile)
+				),
+			)
+		if open_shifts > 1:
+			frappe.throw(
+				title=_("Multiple POS Opening Entry"),
+				msg=_(
+					"POS Profile - {0} has multiple open POS Opening Entries. Please close or cancel the existing entries before proceeding."
+				).format(self.pos_profile),
+			)
+
 	def before_submit(self):
 		from klik_pos.api.mpesa import assert_mpesa_rows_backed
 
@@ -4597,7 +4621,8 @@ class CustomSalesInvoice(SalesInvoice):
 		if _needs_shift_check(self):
 			# ERPNext only runs this from validate_created_using_pos, which klik never
 			# reaches (it never sets is_created_using_pos). Call it directly so a klik
-			# sale still needs exactly one Open shift on its till, opened today.
+			# sale still needs exactly one Open shift on its till, opened today unless
+			# the till does not require a daily close.
 			self.validate_pos_opening_entry()
 
 		# Only a sale that went through the queue has a queue status to finish - Queued or

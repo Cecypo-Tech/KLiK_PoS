@@ -24,8 +24,26 @@ def is_shift_manager(user=None):
 	return bool(SHIFT_MANAGER_ROLES & set(frappe.get_roles(user or frappe.session.user)))
 
 
+DAILY_CLOSE_FIELD = "custom_require_daily_shift_close"
+
+
+def requires_daily_close(pos_profile):
+	"""Whether `pos_profile`'s shift is good only for the day it was opened (ERPNext's rule,
+	and the default). Off, an open shift is good until someone closes it."""
+	if not pos_profile or not frappe.db.has_column("POS Profile", DAILY_CLOSE_FIELD):
+		return True
+	# Read on every sale and every shift lookup; the profile's document cache is cleared
+	# whenever it is saved.
+	value = frappe.get_cached_value("POS Profile", pos_profile, DAILY_CLOSE_FIELD)
+	return value is None or bool(value)
+
+
 def _is_stale(row):
-	return frappe.utils.get_date_str(row.period_start_date) != frappe.utils.today()
+	"""A shift opened before today, on a till that requires a daily close."""
+	if frappe.utils.get_date_str(row.period_start_date) == frappe.utils.today():
+		return False
+	till = row.get("pos_profile") or frappe.db.get_value("POS Opening Entry", row.name, "pos_profile")
+	return requires_daily_close(till)
 
 
 def open_shifts_on_till(pos_profile):
@@ -34,7 +52,7 @@ def open_shifts_on_till(pos_profile):
 	return frappe.get_all(
 		"POS Opening Entry",
 		filters={"pos_profile": pos_profile, "docstatus": 1, "status": "Open"},
-		fields=["name", "user", "period_start_date"],
+		fields=["name", "user", "pos_profile", "period_start_date"],
 		order_by="period_start_date asc, name asc",
 	)
 
@@ -47,7 +65,7 @@ def joined_shift(user=None):
 	row = frappe.db.get_value(
 		"POS Opening Entry",
 		{"name": entry, "docstatus": 1, "status": "Open"},
-		["name", "period_start_date"],
+		["name", "pos_profile", "period_start_date"],
 		as_dict=True,
 	)
 	if not row:
