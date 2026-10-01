@@ -9,6 +9,7 @@ from klik_pos.api.sales_invoice import (
     _apply_pos_tax_treatment,
     _apply_walkin_party_fields,
     _get_active_pos_profile,
+    _keeping_naming_series,
     _parse_extra_fields,
     _resolve_item_tax_details_for_line,
     _set_customer,
@@ -113,7 +114,8 @@ def _claim_held_order(order_id):
 def _remove_checked_out_order(order_id):
     """The order is now an invoice: take it off the Held tab."""
     try:
-        frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
+        with _keeping_naming_series():
+            frappe.delete_doc("Sales Order", order_id, ignore_permissions=True)
     except Exception as del_err:
         frappe.logger().warning(
             "Could not delete held SO %s after checkout: %s", order_id, del_err
@@ -605,7 +607,8 @@ def delete_held_order(order_id):
         _assert_held_order_access(so)
         if so.docstatus != 0:
             return {"success": False, "error": f"Cannot delete {order_id}: not a draft."}
-        so.delete(ignore_permissions=True)
+        with _keeping_naming_series():
+            so.delete(ignore_permissions=True)
         return {"success": True, "message": f"Held order {order_id} deleted."}
     except frappe.DoesNotExistError:
         return {"success": False, "error": f"Order {order_id} not found."}
@@ -888,12 +891,13 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
             if name not in names:
                 names.append(name)
         deleted = 0
-        for name in names:
-            try:
-                frappe.delete_doc("Sales Order", name, ignore_permissions=True)
-                deleted += 1
-            except Exception as e:
-                frappe.logger().error("Error deleting held order %s: %s", name, e)
+        with _keeping_naming_series():
+            for name in names:
+                try:
+                    frappe.delete_doc("Sales Order", name, ignore_permissions=True)
+                    deleted += 1
+                except Exception as e:
+                    frappe.logger().error("Error deleting held order %s: %s", name, e)
         if deleted:
             frappe.logger().info(
                 "Cleared %d held order(s) for opening entry %s", deleted, opening_entry_name

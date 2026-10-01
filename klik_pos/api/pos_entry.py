@@ -682,10 +682,19 @@ def _clear_draft_invoices_on_close_if_enabled(opening_entry):
 
 
 def _clear_held_orders_on_close(opening_entry):
-	"""Always delete held Sales Orders for the session when shift is closed."""
+	"""Delete the session's held Sales Orders when the shift closes - only where the till's
+	"Clear Draft Invoices on Closing Shift" is on.
+
+	Held orders are what the POS now holds a sale as, so that checkbox decides for them too.
+	They used to be cleared on every close regardless: at Allparts, where the sales staff hold
+	orders against one shared shift, closing it deleted 61 orders still waiting on customers.
+	"""
 	try:
+		pos_profile_name = opening_entry.get("pos_profile") if isinstance(opening_entry, dict) else getattr(opening_entry, "pos_profile", None)
 		opening_entry_name = opening_entry.get("name") if isinstance(opening_entry, dict) else getattr(opening_entry, "name", None)
-		if not opening_entry_name:
+		if not pos_profile_name or not opening_entry_name:
+			return
+		if not frappe.db.get_value("POS Profile", pos_profile_name, "custom_clear_draft_invoices"):
 			return
 		delete_held_orders_for_opening_entry(opening_entry_name)
 	except Exception as e:

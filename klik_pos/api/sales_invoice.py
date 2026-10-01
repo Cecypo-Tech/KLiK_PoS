@@ -1,5 +1,6 @@
 import json
 import re
+from contextlib import contextmanager
 
 import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
@@ -408,6 +409,28 @@ def _refuse_unapproved_price_breach(doc):
 		return
 	if cint(doc.get("powerpack_price_breach")) and not doc.get("powerpack_price_approved_rows"):
 		frappe.throw(_("Prices below the minimum need approval. Hold the order to request it."))
+
+
+@contextmanager
+def _keeping_naming_series():
+	"""Delete without winding naming series back.
+
+	frappe rewinds a series whenever the document holding its newest number is deleted, so
+	clearing held orders newest-first sent the numbering back to SO-00001 and the same names
+	were reused (and deleted again) several times a day - and an invoice's link to the order
+	it came from could point at a later order of the same name. Any counter that went back
+	is put where it was; one that moved on meanwhile is left alone.
+	"""
+	before = dict(frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"))
+	try:
+		yield
+	finally:
+		for name, current in frappe.db.sql("SELECT `name`, `current` FROM `tabSeries`"):
+			if name in before and cint(current) < cint(before[name]):
+				frappe.db.sql(
+					"UPDATE `tabSeries` SET `current` = %s WHERE `name` = %s AND `current` < %s",
+					(before[name], name, before[name]),
+				)
 
 
 # Filled from the customer by ERPNext's set_missing_values - but only when empty, so a document
