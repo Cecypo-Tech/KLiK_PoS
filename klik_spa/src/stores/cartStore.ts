@@ -9,6 +9,7 @@ import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
+import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 
 interface SerialBatchEntry {
@@ -114,13 +115,6 @@ const fetchItemTaxDetails = async (
 export interface WalkinDetails { name: string; taxId: string; phone: string }
 const EMPTY_WALKIN: WalkinDetails = { name: '', taxId: '', phone: '' };
 
-export interface RateOverride {
-  itemId: string
-  rate: number
-  includesTax: boolean
-  nonce: number
-}
-
 interface CartState {
   cartItems: CartItem[]
   appliedCoupons: GiftCoupon[]
@@ -135,7 +129,13 @@ interface CartState {
 
   addToCart: (item: Omit<CartItem, 'quantity'>) => Promise<void>
   addToCartQueued: (item: Omit<CartItem, 'quantity'>) => Promise<void>
-  addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number) => Promise<void>
+  /** The cart line the quantity went to, or null when the cart refused it (stock). With
+   * refresh false the caller refreshes pricing once after several adds. */
+  addToCartWithQuantity: (
+    item: Omit<CartItem, 'quantity'>,
+    quantity: number,
+    options?: { refresh?: boolean },
+  ) => Promise<string | null>
   updateQuantity: (id: string, quantity: number) => Promise<void>
   adjustQuantity: (id: string, delta: number) => Promise<void>
   updateUOM: (id: string, uom: string, price: number, conversionFactor?: number) => Promise<void>
@@ -222,15 +222,12 @@ export const useCartStore = create<CartState>()(
       })),
       pendingRateOverrides: [],
       rateOverrideNonce: 0,
-      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => ({
-        pendingRateOverrides: [
-          ...s.pendingRateOverrides,
-          { itemId, rate, includesTax, nonce: s.rateOverrideNonce + 1 },
-        ],
-        rateOverrideNonce: s.rateOverrideNonce + 1,
-      })),
+      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => {
+        const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax });
+        return { pendingRateOverrides: next.queue, rateOverrideNonce: next.nonce };
+      }),
       consumeRateOverrides: (nonce) => set((s) => ({
-        pendingRateOverrides: s.pendingRateOverrides.filter((o) => o.nonce > nonce),
+        pendingRateOverrides: consumeRateOverrides(s.pendingRateOverrides, nonce),
       })),
 
       refreshCartPricing: async () => {
@@ -395,7 +392,7 @@ export const useCartStore = create<CartState>()(
         return run;
       },
 
-      addToCartWithQuantity: async (item, quantity) => {
+      addToCartWithQuantity: async (item, quantity, options) => {
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
@@ -408,16 +405,18 @@ export const useCartStore = create<CartState>()(
 
         if (hasFiniteAvailableStock(item) && item.available < quantity) {
           toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
-          return;
+          return null;
         }
 
+        let lineId: string;
         if (existingItem) {
           if (hasFiniteAvailableStock(item) && (totalMatchingQty + quantity) > item.available) {
             toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
-            return;
+            return null;
           }
 
           const targetId = existingItem.id;
+          lineId = targetId;
           const updatedQty = existingItem.quantity + quantity;
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
@@ -465,6 +464,7 @@ export const useCartStore = create<CartState>()(
           const newCartItems = shouldInsertNewItemsAtTop()
             ? [newItem, ...state.cartItems]
             : [...state.cartItems, newItem];
+          lineId = newItem.id;
           set((s) => ({
             cartItems: newCartItems,
             highlightItemId: newItem.id,
@@ -472,7 +472,8 @@ export const useCartStore = create<CartState>()(
           }));
         }
 
-        await get().refreshCartPricing();
+        if (options?.refresh !== false) await get().refreshCartPricing();
+        return lineId;
       },
 
       updateQuantity: async (id, quantity) => {

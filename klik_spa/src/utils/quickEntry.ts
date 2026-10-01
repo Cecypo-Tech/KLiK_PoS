@@ -28,9 +28,11 @@ export interface QuickEntryPlan {
 }
 
 const SEPARATOR_LINE = /^[-=_*\s]+$/;
+/** Same as the server's cap (klik_pos.api.item.quick_entry.MAX_LINES). */
+export const MAX_LINES = 50;
 
 function parseNumber(value: string): number | null {
-  if (!/^-?\d+(\.\d+)?$/.test(value)) return null;
+  if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(value)) return null;
   return Number(value);
 }
 
@@ -39,7 +41,8 @@ export function parseQuickEntry(text: string): QuickEntryLine[] {
   text.split(/\r?\n/).forEach((raw, index) => {
     const trimmed = raw.trim();
     if (!trimmed || SEPARATOR_LINE.test(trimmed)) return;
-    const [query = "", qtyText = "", rateText = "", ...extra] = trimmed.split(",").map((part) => part.trim());
+    // A tab separates as well as a comma: rows copied from a spreadsheet arrive that way.
+    const [query = "", qtyText = "", rateText = "", ...extra] = trimmed.split(/[,\t]/).map((part) => part.trim());
     const entry: QuickEntryLine = { line: index + 1, text: trimmed, query, qty: 0, rate: null, error: null };
     const qty = parseNumber(qtyText);
     const rate = rateText === "" ? null : parseNumber(rateText);
@@ -50,7 +53,7 @@ export function parseQuickEntry(text: string): QuickEntryLine[] {
     else if (qty === null) entry.error = "Quantity must be a number";
     else if (qty <= 0) entry.error = "Quantity must be more than 0";
     else if (rateText !== "" && rate === null) entry.error = "Rate must be a number";
-    else if (rate !== null && rate < 0) entry.error = "Rate cannot be negative";
+    else if (rate !== null && rate <= 0) entry.error = "Rate must be more than 0 (leave it out for the till's price)";
 
     entry.qty = qty ?? 0;
     entry.rate = rate;

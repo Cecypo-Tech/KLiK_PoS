@@ -25,7 +25,13 @@ def get_items(
     customer: str | None = None,
     price_list: str | None = None,
     warehouse: str | None = None,
+    item_codes=None,
 ):
+    """`item_codes` (a list, or its JSON) limits the list to exactly those items - quick
+    entry's way to fetch the items it matched as the product list would offer them."""
+    if isinstance(item_codes, str):
+        item_codes = frappe.parse_json(item_codes)
+    item_codes = [str(code) for code in (item_codes or []) if code]
     try:
         limit = int(limit) if limit else 1000
         offset = int(offset) if offset else 0
@@ -150,6 +156,13 @@ def get_items(
             count_query.append(f"AND i.item_group IN ({placeholders})")
             params_list.extend(allowed_item_groups)
             count_params.extend(allowed_item_groups)
+
+        if item_codes:
+            placeholders = ", ".join(["%s"] * len(item_codes))
+            base_query.append(f"AND i.name IN ({placeholders})")
+            count_query.append(f"AND i.name IN ({placeholders})")
+            params_list.extend(item_codes)
+            count_params.extend(item_codes)
 
         # Apply category filter from request
         if category and category != "all":

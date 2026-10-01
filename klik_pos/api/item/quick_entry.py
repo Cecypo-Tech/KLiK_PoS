@@ -16,7 +16,8 @@ from klik_pos.klik_pos.utils import get_current_pos_profile
 from ..sql_builder import apply_sql_permissions
 from .item_listing import get_items
 
-MAX_LINES = 200
+# A typed order, not a stock import: each line costs a cart add with its own tax lookup.
+MAX_LINES = 50
 # Candidates named back for a line that matched several items.
 CANDIDATES_SHOWN = 5
 
@@ -42,15 +43,11 @@ def _candidates(condition, value, allowed_groups):
 	)
 
 
-def _cart_item(code, customer, price_list, warehouse):
-	"""The item as this till's product list offers it, or None when the list would not (out
-	of stock on a till that hides those, a service item on a till without them)."""
-	listing = get_items(limit=50, search=code, customer=customer, price_list=price_list, warehouse=warehouse)
-	return next((item for item in listing.get("items") or [] if str(item.get("id")).lower() == code.lower()), None)
-
-
-def _match(query, allowed_groups, customer, price_list, warehouse):
+def _resolve(query, allowed_groups):
+	"""The one item code `query` means, or why there is none."""
 	result = {"query": query, "status": "none", "item": None, "candidates": []}
+	if not query:
+		return result
 	for condition, value in (
 		("i.name = %(value)s", query),
 		("i.name LIKE %(value)s", _like(query)),
@@ -62,13 +59,9 @@ def _match(query, allowed_groups, customer, price_list, warehouse):
 		if len(codes) > 1:
 			result.update(status="many", candidates=codes[:CANDIDATES_SHOWN])
 			return result
-		code = codes[0]
-		result["candidates"] = [code]
-		if frappe.db.get_value("Item", code, "has_variants"):
+		result.update(status="ok", candidates=codes)
+		if frappe.db.get_value("Item", codes[0], "has_variants"):
 			result["status"] = "template"
-			return result
-		item = _cart_item(code, customer, price_list, warehouse)
-		result.update(status="ok" if item else "unavailable", item=item)
 		return result
 	return result
 
@@ -78,7 +71,8 @@ def match_items(queries, customer=None, price_list=None, warehouse=None):
 	"""One answer per query, in the order asked: {query, status, item, candidates}.
 
 	status: ok (item is cart-ready), many (candidates lists them), none, template (an item
-	with variants - the variant's code is needed), unavailable (the till does not offer it).
+	with variants - the variant's code is needed), unavailable (the till's product list does
+	not offer it: out of stock on a till that hides those, a service item on one without).
 	"""
 	queries = frappe.parse_json(queries) if isinstance(queries, str) else queries
 	if not isinstance(queries, list):
@@ -90,14 +84,23 @@ def match_items(queries, customer=None, price_list=None, warehouse=None):
 	allowed_groups = [row.item_group for row in (getattr(till, "item_groups", None) or []) if row.item_group]
 
 	answers = {}
-	results = []
 	for raw in queries:
 		query = str(raw or "").strip()
 		if query not in answers:
-			answers[query] = (
-				_match(query, allowed_groups, customer, price_list, warehouse)
-				if query
-				else {"query": query, "status": "none", "item": None, "candidates": []}
-			)
-		results.append(dict(answers[query]))
-	return results
+			answers[query] = _resolve(query, allowed_groups)
+
+	# The matched items as the product list offers them, in one listing call.
+	codes = sorted({a["candidates"][0] for a in answers.values() if a["status"] == "ok"})
+	offered = {}
+	if codes:
+		listing = get_items(
+			limit=len(codes), customer=customer, price_list=price_list, warehouse=warehouse, item_codes=codes
+		)
+		offered = {str(item.get("id")).lower(): item for item in listing.get("items") or []}
+	for answer in answers.values():
+		if answer["status"] == "ok":
+			answer["item"] = offered.get(answer["candidates"][0].lower())
+			if not answer["item"]:
+				answer["status"] = "unavailable"
+
+	return [dict(answers[str(raw or "").strip()]) for raw in queries]

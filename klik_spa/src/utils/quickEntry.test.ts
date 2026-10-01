@@ -24,6 +24,15 @@ describe("parseQuickEntry", () => {
 
   it("accepts decimal quantities and rates", () => {
     expect(parseQuickEntry("rope, 2.5, 99.50")[0]).toMatchObject({ qty: 2.5, rate: 99.5 });
+    expect(parseQuickEntry("rope, .5")[0]).toMatchObject({ qty: 0.5, error: null });
+  });
+
+  it("reads rows pasted from a spreadsheet", () => {
+    expect(parseQuickEntry("twist300\t5\t220")[0]).toMatchObject({ query: "twist300", qty: 5, rate: 220 });
+  });
+
+  it("does not take a zero rate as free", () => {
+    expect(parseQuickEntry("rope, 1, 0")[0]?.error).toMatch(/more than 0/);
   });
 
   it("explains a line it cannot read", () => {
@@ -37,7 +46,7 @@ describe("parseQuickEntry", () => {
       "Quantity must be more than 0",
       "Quantity must be a number",
       "Rate must be a number",
-      "Rate cannot be negative",
+      "Rate must be more than 0 (leave it out for the till's price)",
       "Too many values: enter item, qty, rate",
     ]);
   });

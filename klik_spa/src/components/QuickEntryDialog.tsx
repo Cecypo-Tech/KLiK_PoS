@@ -8,12 +8,17 @@ import type { CartItem } from "../../types";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useProductStore } from "../stores/productStore";
+import { useSalespersonStore } from "../stores/salespersonStore";
 import { getCSRFToken } from "../utils/csrf";
-import { parseQuickEntry, planQuickEntry, type MatchResult, type QuickEntryPlan } from "../utils/quickEntry";
+import { isItemOutOfStock } from "../utils/stock";
+import { MAX_LINES, parseQuickEntry, planQuickEntry, type MatchResult, type QuickEntryPlan } from "../utils/quickEntry";
+import type { MenuItem } from "../../types";
 
 interface QuickEntryDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** The till needs a salesperson signed in before anything goes into the cart. */
+  onNeedSalesperson: () => void;
 }
 
 async function matchItems(queries: string[], context: Record<string, string | undefined>): Promise<MatchResult[]> {
@@ -23,31 +28,38 @@ async function matchItems(queries: string[], context: Record<string, string | un
     headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": getCSRFToken() ?? "" },
     body: JSON.stringify({ queries, ...context }),
   });
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
   if (!response.ok || !Array.isArray(result.message)) {
     const messages = JSON.parse(result._server_messages || "[]").map((m: string) => JSON.parse(m).message);
-    throw new Error(messages.join(" ").replace(/<[^>]*>/g, "") || "Could not match the items");
+    throw new Error(
+      messages.join(" ").replace(/<[^>]*>/g, "") || `Could not match the items (server answered ${response.status})`
+    );
   }
   return result.message;
 }
 
-const qtyOf = (code: string) =>
-  useCartStore
-    .getState()
-    .cartItems.filter((ci) => (ci.item_code || ci.id) === code)
-    .reduce((sum, ci) => sum + ci.quantity, 0);
-
-export default function QuickEntryDialog({ isOpen, onClose }: QuickEntryDialogProps) {
+export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }: QuickEntryDialogProps) {
   const [text, setText] = useState("");
   const [failed, setFailed] = useState<QuickEntryPlan["failed"]>([]);
   const [busy, setBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const posDetails = usePOSProfileStore((s) => s.posDetails);
   const warehouse = usePOSProfileStore((s) => s.warehouse);
+  const isTaxIncludedInBasicRate =
+    posDetails?.is_tax_included_in_basic_rate === 1
+    || posDetails?.is_tax_included_in_basic_rate === "1"
+    || posDetails?.is_tax_included_in_basic_rate === true;
 
   useEffect(() => {
     if (!isOpen) return;
+    // Back to wherever the cashier was (the search box, usually) once the box closes.
+    const returnFocusTo = document.activeElement as HTMLElement | null;
     setTimeout(() => textareaRef.current?.focus(), 0);
+    return () => returnFocusTo?.focus?.();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) {
         e.preventDefault();
@@ -63,6 +75,19 @@ export default function QuickEntryDialog({ isOpen, onClose }: QuickEntryDialogPr
   const submit = async () => {
     const lines = parseQuickEntry(text);
     if (lines.length === 0 || busy) return;
+    if (lines.length > MAX_LINES) {
+      toast.error(`Enter at most ${MAX_LINES} lines at a time`);
+      return;
+    }
+    // The product list's own gate: a till that needs a salesperson signed in first.
+    if (posDetails?.custom_sales_person_pin_required) {
+      const salespeople = useSalespersonStore.getState();
+      await salespeople.ensureInitialized();
+      if (!useSalespersonStore.getState().activeSalesperson) {
+        onNeedSalesperson();
+        return;
+      }
+    }
     setBusy(true);
     try {
       const products = useProductStore.getState();
@@ -77,23 +102,32 @@ export default function QuickEntryDialog({ isOpen, onClose }: QuickEntryDialogPr
       const plan = planQuickEntry(lines, results, { allowRateChange: !!posDetails?.allow_rate_change });
 
       const cart = useCartStore.getState();
+      const stockUnavailable = useProductStore.getState().stockUnavailable;
+      const textOf = (line: number) => lines.find((l) => l.line === line)?.text ?? "";
       let added = 0;
       for (const entry of plan.toAdd) {
         const code = String(entry.item.id);
-        const before = qtyOf(code);
-        // One at a time: each add reads the cart the previous one left.
-        await cart.addToCartWithQuantity({ ...(entry.item as unknown as CartItem), item_code: code }, entry.qty);
-        if (qtyOf(code) === before) {
+        if (isItemOutOfStock(entry.item as unknown as MenuItem, stockUnavailable)) {
+          plan.failed.push({ line: entry.line, text: textOf(entry.line), reason: `${code} is out of stock` });
+          continue;
+        }
+        // One at a time: each add reads the cart the previous one left. Pricing is
+        // refreshed once, after the last.
+        const lineId = await cart.addToCartWithQuantity(
+          { ...(entry.item as unknown as CartItem), item_code: code },
+          entry.qty,
+          { refresh: false },
+        );
+        if (!lineId) {
           // The cart refused it (not enough stock) and said why in its own toast.
-          plan.failed.push({ line: entry.line, text: lines.find((l) => l.line === entry.line)?.text ?? code, reason: "Not added: see the message above" });
+          plan.failed.push({ line: entry.line, text: textOf(entry.line), reason: "Not added: see the message above" });
           continue;
         }
         added += 1;
-        if (entry.rate !== null) {
-          const lineInCart = useCartStore.getState().cartItems.find((ci) => (ci.item_code || ci.id) === code);
-          if (lineInCart) cart.requestCustomRate(lineInCart.id, entry.rate);
-        }
+        // As the item list's '*' shortcut: a typed price is in the till's own tax terms.
+        if (entry.rate !== null) cart.requestCustomRate(lineId, entry.rate, isTaxIncludedInBasicRate);
       }
+      if (added) await useCartStore.getState().refreshCartPricing();
 
       plan.failed.sort((a, b) => a.line - b.line);
       setFailed(plan.failed);
@@ -114,6 +148,11 @@ export default function QuickEntryDialog({ isOpen, onClose }: QuickEntryDialogPr
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-entry-title"
+        // Keys typed here are for the box: the POS's own shortcuts (F2, F3, F10...) listen on
+        // the document and must not act behind it. Esc still closes it.
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") e.stopPropagation();
+        }}
         className="relative z-10 w-[520px] max-w-[92vw] max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700"
         onClick={(e) => e.stopPropagation()}
       >
@@ -153,6 +192,7 @@ export default function QuickEntryDialog({ isOpen, onClose }: QuickEntryDialogPr
             }}
             rows={8}
             spellCheck={false}
+            disabled={busy}
             placeholder={"mimosa, 1\ntwist300, 5, 220"}
             className="w-full px-3 py-2 font-mono text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
           />

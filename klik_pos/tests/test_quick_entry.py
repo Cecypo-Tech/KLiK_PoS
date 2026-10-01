@@ -29,6 +29,14 @@ class TestQuickEntryMatching(FrappeTestCase):
 		frappe.set_user("Administrator")
 		_group(GROUP)
 		_group(OTHER_GROUP)
+		if not frappe.db.exists("Item Attribute", "_Test QE Size"):
+			frappe.get_doc(
+				{
+					"doctype": "Item Attribute",
+					"attribute_name": "_Test QE Size",
+					"item_attribute_values": [{"attribute_value": "Small", "abbr": "S"}],
+				}
+			).insert()
 		for code, name, group, extra in (
 			("QE-MIMOSA-01", "Mimosa Juice", GROUP, {}),
 			("QE-TWIST300", "Twist 300ml", GROUP, {}),
@@ -36,6 +44,7 @@ class TestQuickEntryMatching(FrappeTestCase):
 			("QE-MIMOSA-OFF", "Mimosa Off", GROUP, {"disabled": 1}),
 			("QE-MIMOSA-ELSEWHERE", "Mimosa Elsewhere", OTHER_GROUP, {}),
 			("QE-NOT-FOR-SALE", "Not For Sale", GROUP, {"is_sales_item": 0}),
+			("QE-SHIRT", "Shirt Template", GROUP, {"has_variants": 1, "attributes": [{"attribute": "_Test QE Size"}]}),
 		):
 			if not frappe.db.exists("Item", code):
 				make_item(code, {"item_name": name, "item_group": group, "is_stock_item": 0, **extra})
@@ -55,13 +64,15 @@ class TestQuickEntryMatching(FrappeTestCase):
 		frappe.set_user("Administrator")
 		for code in frappe.get_all("Item", filters={"name": ["like", "QE-%"]}, pluck="name"):
 			frappe.delete_doc("Item", code, force=True)
+		frappe.delete_doc("Item Attribute", "_Test QE Size", force=True, ignore_missing=True)
 		frappe.db.commit()
 		super().tearDownClass()
 
-	def _match(self, *queries):
+	def _match(self, *queries, till=None):
+		till = till or self.till
 		with (
-			patch("klik_pos.api.item.quick_entry.get_current_pos_profile", return_value=self.till),
-			patch("klik_pos.api.item.item_listing.get_current_pos_profile", return_value=self.till),
+			patch("klik_pos.api.item.quick_entry.get_current_pos_profile", return_value=till),
+			patch("klik_pos.api.item.item_listing.get_current_pos_profile", return_value=till),
 		):
 			return match_items(list(queries))
 
@@ -113,3 +124,34 @@ class TestQuickEntryMatching(FrappeTestCase):
 	def test_a_huge_paste_is_refused(self):
 		with self.assertRaises(frappe.ValidationError):
 			self._match(*["x"] * (MAX_LINES + 1))
+
+	def test_an_item_with_variants_asks_for_the_variant(self):
+		result = self._one("QE-SHIRT")
+		self.assertEqual(result["status"], "template")
+		self.assertEqual(result["candidates"], ["QE-SHIRT"])
+
+	def test_an_item_the_till_does_not_offer_is_unavailable(self):
+		"""A service item on a till without service items: matched, but not sellable here."""
+		till = frappe._dict(self.till, custom_enable_service_items=0)
+		result = self._match("QE-TWIST300", till=till)[0]
+		self.assertEqual(result["status"], "unavailable")
+		self.assertIsNone(result["item"])
+
+	def test_a_backslash_is_taken_literally(self):
+		self.assertEqual(self._one("qe\\twist")["status"], "none")
+
+	def test_a_payload_that_is_not_a_list_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			match_items('{"a": 1}')
+
+	def test_someone_who_cannot_read_items_matches_nothing(self):
+		user = "quick-entry-no-item-read@example.com"
+		if not frappe.db.exists("User", user):
+			frappe.get_doc({"doctype": "User", "email": user, "first_name": "NoItem", "send_welcome_email": 0}).insert(
+				ignore_permissions=True
+			)
+		frappe.set_user(user)
+		try:
+			self.assertEqual(self._one("QE-TWIST300")["status"], "none")
+		finally:
+			frappe.set_user("Administrator")
