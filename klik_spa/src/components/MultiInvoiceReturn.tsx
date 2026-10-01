@@ -27,6 +27,7 @@ import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
+import StepperInput, { NO_NATIVE_SPINNER } from "./common/StepperInput";
 
 interface MultiInvoiceReturnProps {
   customer?: string;
@@ -302,6 +303,19 @@ export default function MultiInvoiceReturn({
     } else {
       setSelectedItems(prev => prev.filter(item => item.item_code !== itemCode));
     }
+  };
+
+  /** The cash handed back on one invoice: never more than the sale can give back, in cents. */
+  const setRefundAmount = (invoice: { name: string; refundable_cash?: number | null }, value: number) => {
+    const capped = Math.min(value, invoice.refundable_cash ?? value);
+    const roundedValue = Math.round(capped * 100) / 100;
+    setInvoicePayments(prev => ({
+      ...prev,
+      [invoice.name]: {
+        method: prev[invoice.name]?.method || (defaultCashRefundMode(paymentModes) || 'Cash'),
+        amount: roundedValue
+      }
+    }));
   };
 
   const handleReturnQtyChange = (invoiceName: string, itemCode: string, newQty: number) => {
@@ -679,10 +693,14 @@ export default function MultiInvoiceReturn({
                   </label>
                   <div className="flex items-center space-x-2">
                     <Clock className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="number"
+                    <StepperInput
+                      aria-label="Days to look back"
                       min="1"
                       max="365"
+                      minValue={1}
+                      maxValue={365}
+                      onStep={(next) => setDaysBack(next)}
+                      wrapperClassName="w-24 sm:w-28"
                       value={daysBack || ''}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -700,7 +718,7 @@ export default function MultiInvoiceReturn({
                           setDaysBack(90);
                         }
                       }}
-                      className="w-20 sm:w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     />
                     <span className="text-sm text-gray-600 dark:text-gray-400">days</span>
                     <button
@@ -1118,7 +1136,7 @@ export default function MultiInvoiceReturn({
                                     item.item_code,
                                     parseInt(e.target.value) || 0
                                   )}
-                                  className="w-12 px-1 py-1 text-center border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+                                  className={`w-12 px-1 py-1 text-center border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs ${NO_NATIVE_SPINNER}`}
                                   disabled={item.available_qty === 0}
                                 />
                                 <button
@@ -1214,29 +1232,19 @@ export default function MultiInvoiceReturn({
                         <div>
                           <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Amount</label>
                           <div className="relative">
-                            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
+                            <span className="pointer-events-none absolute inset-y-0 left-0 z-10 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
                               {currencySymbol}
                             </span>
-                            <input
-                              type="number"
+                            <StepperInput
+                              aria-label={`Refund amount ${invoice.name}`}
                               step="0.01"
                               min="0"
                               max={invoice.refundable_cash ?? undefined}
+                              maxValue={invoice.refundable_cash ?? undefined}
                               value={invoicePayments[invoice.name]?.amount ?? cashRefundDefault(invoice)}
-                              onChange={(e) => {
-                                const value = parseFloat(e.target.value) || 0;
-                                // Never more cash than the sale can give back; round to cents.
-                                const capped = Math.min(value, invoice.refundable_cash ?? value);
-                                const roundedValue = Math.round(capped * 100) / 100;
-                                setInvoicePayments(prev => ({
-                                  ...prev,
-                                  [invoice.name]: {
-                                    method: prev[invoice.name]?.method || (defaultCashRefundMode(paymentModes) || 'Cash'),
-                                    amount: roundedValue
-                                  }
-                                }));
-                              }}
-                              className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 text-right"
+                              onChange={(e) => setRefundAmount(invoice, parseFloat(e.target.value) || 0)}
+                              onStep={(next) => setRefundAmount(invoice, next)}
+                              className="w-full pl-8 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 text-right"
                               placeholder="0.00"
                             />
                           </div>

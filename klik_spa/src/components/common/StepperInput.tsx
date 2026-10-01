@@ -3,6 +3,11 @@ import type { InputHTMLAttributes } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { stepValue } from "../../utils/stepValue";
 
+/** Hides the browser's own spin buttons: tiny, hugging the digits, and doubling up beside
+ * a field's own -/+ or arrow buttons. */
+export const NO_NATIVE_SPINNER =
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
 interface StepperInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   /** Called with the new value when an arrow is pressed. Typing still goes through onChange. */
   onStep: (next: number) => void;
@@ -41,7 +46,7 @@ const StepperInput = forwardRef<HTMLInputElement, StepperInputProps>(function St
         value={value}
         disabled={disabled}
         {...rest}
-        className={`${className} pr-10 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+        className={`${className} pr-10 ${NO_NATIVE_SPINNER}`}
       />
       <div className="absolute inset-y-1 right-1 flex w-7 flex-col overflow-hidden border-l border-gray-200 dark:border-gray-600">
         <button
