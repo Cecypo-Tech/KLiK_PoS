@@ -28,11 +28,17 @@ def current_shift_state():
 	Closing Shift instead of the checkout screen."""
 	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-	from klik_pos.api.shift import _is_stale, is_shift_manager
+	from klik_pos.api.shift import _is_stale, is_shift_manager, may_close_on_till
 
 	entry = get_current_pos_opening_entry()
 	if not entry:
-		return {"entry": None, "stale": False, "pos_profile": None, "manager": is_shift_manager()}
+		return {
+			"entry": None,
+			"stale": False,
+			"pos_profile": None,
+			"manager": is_shift_manager(),
+			"can_close": True,
+		}
 
 	row = frappe.db.get_value(
 		"POS Opening Entry", entry, ["name", "pos_profile", "period_start_date"], as_dict=True
@@ -43,6 +49,9 @@ def current_shift_state():
 		"stale": stale,
 		"pos_profile": row.pos_profile if row else None,
 		"manager": is_shift_manager(),
+		# Whether the caller closes this shift themselves ('Allow Closing Shift', or a
+		# manager); when not, a stale shift waits for a manager.
+		"can_close": may_close_on_till(row.pos_profile if row else None),
 	}
 
 
@@ -140,7 +149,13 @@ def opening_conflict(pos_profile):
 	requires a daily close, a shift opened before today must be closed first (ERPNext's daily
 	shifts); for someone else's that means a manager joining it and then closing it.
 	"""
-	from klik_pos.api.shift import _is_stale, is_shift_manager, joined_shift, open_shifts_on_till
+	from klik_pos.api.shift import (
+		_is_stale,
+		is_shift_manager,
+		joined_shift,
+		may_close_on_till,
+		open_shifts_on_till,
+	)
 
 	user = frappe.session.user
 	manager = is_shift_manager(user)
@@ -154,6 +169,7 @@ def opening_conflict(pos_profile):
 			"user": row.user,
 			"user_name": frappe.db.get_value("User", row.user, "full_name") or row.user,
 			"manager": manager,
+			"can_close": may_close_on_till(profile, user),
 		}
 
 	def _shifts_payload(shifts):
@@ -286,6 +302,9 @@ def validate_closing_entry(doc, method):
 	)
 	if not row:
 		return
+	from klik_pos.api.shift import ensure_may_close_on_till
+
+	ensure_may_close_on_till(row.pos_profile, frappe.session.user)
 	_ensure_may_close(row, frappe.session.user)
 
 
@@ -300,6 +319,9 @@ def create_closing_entry():
 		frappe.logger().info(f"POS Closing Entry Data Received: {data}")
 
 		opening_entry = _get_open_pos_entry(user)
+		from klik_pos.api.shift import ensure_may_close_on_till
+
+		ensure_may_close_on_till(opening_entry.pos_profile, user)
 		_ensure_may_close(opening_entry, user)
 		payment_data = _calculate_payment_reconciliation(opening_entry, data)
 

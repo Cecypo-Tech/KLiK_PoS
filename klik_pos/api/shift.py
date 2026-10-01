@@ -38,6 +38,30 @@ def requires_daily_close(pos_profile):
 	return value is None or bool(value)
 
 
+CLOSING_FIELD = "custom_allow_closing_shift"
+
+
+def till_allows_closing(pos_profile):
+	"""Whether `pos_profile`'s own users close its shift (the default). Off, only a manager
+	does, and the till's users do not see the closing figures."""
+	if not pos_profile or not frappe.db.has_column("POS Profile", CLOSING_FIELD):
+		return True
+	value = frappe.get_cached_value("POS Profile", pos_profile, CLOSING_FIELD)
+	return value is None or bool(value)
+
+
+def may_close_on_till(pos_profile, user=None):
+	return till_allows_closing(pos_profile) or is_shift_manager(user)
+
+
+def ensure_may_close_on_till(pos_profile, user=None):
+	if not may_close_on_till(pos_profile, user):
+		frappe.throw(
+			_("Closing is turned off on {0}. A manager closes this till's shift.").format(pos_profile),
+			frappe.PermissionError,
+		)
+
+
 def _is_stale(row):
 	"""A shift opened before today, on a till that requires a daily close."""
 	if frappe.utils.get_date_str(row.period_start_date) == frappe.utils.today():

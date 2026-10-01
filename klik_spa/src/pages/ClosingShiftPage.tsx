@@ -19,6 +19,7 @@ import { createSalesReturn } from "../services/salesInvoice";
 import { useAllPaymentModes } from "../hooks/usePaymentModes";
 
 import { usePOSProfileStore } from "../stores/posProfileStore";
+import { useUserInfo } from "../hooks/useUserInfo";
 import { useCreatePOSClosingEntry } from "../services/closingEntry";
 import BottomNavigation from "../components/BottomNavigation";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -37,6 +38,7 @@ import ClosingCountRows from "../components/closing/ClosingCountRows";
 
 export default function ClosingShiftPage() {
   const navigate = useNavigate();
+  const { userInfo } = useUserInfo();
   const isMobile = useMediaQuery("(max-width: 1024px)");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -211,6 +213,25 @@ export default function ClosingShiftPage() {
   // Modes that keep cash in the drawer: the only ones asked how much is banked at close.
   const floatModes = useMemo(() => floatModeNames(modes || []), [modes]);
   const hasPaymentStats = Object.keys(paymentStats).length > 0;
+
+  // Closing is turned off on this till (POS Profile 'Allow Closing Shift'). The server
+  // refuses the figures and the close anyway; say so instead of a page of refusals.
+  if (userInfo?.can_close_shift === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow max-w-md text-center">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Closing is turned off on this till</h3>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">A manager closes this till's shift.</p>
+          <button
+            onClick={() => navigate("/pos")}
+            className="mt-4 px-4 py-2 bg-beveren-600 text-white rounded-md hover:bg-beveren-700"
+          >
+            Back to POS
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Loading state
   if (isLoading || modesLoading) {

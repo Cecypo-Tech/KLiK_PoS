@@ -27,6 +27,9 @@ export interface OpeningConflict {
   user: string;
   user_name: string;
   manager?: boolean;
+  /** false: the caller does not close shifts on that till (POS Profile 'Allow Closing
+   * Shift' off, and not a manager), so a shift that must be closed waits for a manager. */
+  can_close?: boolean;
   open_shifts?: OpenShiftRow[];
 }
 
@@ -42,6 +45,12 @@ export interface ConflictNotice {
 
 export function conflictNotice(conflict: OpeningConflict): ConflictNotice {
   const { entry, pos_profile } = conflict;
+  if (conflict.can_close === false && (conflict.kind === "own_stale" || conflict.kind === "own_other_profile")) {
+    return {
+      message: `Your shift ${entry} on ${pos_profile} has to be closed first, and closing is turned off on that till. A manager must close it.`,
+      action: "none",
+    };
+  }
   switch (conflict.kind) {
     case "own_open":
       return {

@@ -19,6 +19,13 @@ DAILY_CLOSE_DESCRIPTION = (
     "shift from an earlier day is open stops sales on the till until that shift is closed."
 )
 
+ALLOW_CLOSING_DESCRIPTION = (
+    "On (default): this till's users close its shift from the Closing Shift screen. Off: "
+    "they do not see that screen or its figures, and cannot close the shift from the till or "
+    "the desk; a manager (Sales Manager, System Manager, Express Admin) joins the shift and "
+    "closes it."
+)
+
 POS_PROFILE_FEATURE_FIELDS = [
     {
         "fieldname": "allow_price_list_switching",
@@ -116,6 +123,15 @@ POS_PROFILE_FEATURE_FIELDS = [
         "fieldtype": "Check",
         "insert_after": "custom_clear_draft_invoices",
         "description": DAILY_CLOSE_DESCRIPTION,
+        "default": "1",
+        "module": "KLiK PoS",
+    },
+    {
+        "fieldname": "custom_allow_closing_shift",
+        "label": "Allow Closing Shift",
+        "fieldtype": "Check",
+        "insert_after": "custom_require_daily_shift_close",
+        "description": ALLOW_CLOSING_DESCRIPTION,
         "default": "1",
         "module": "KLiK PoS",
     },

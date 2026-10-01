@@ -124,6 +124,14 @@ export default function POSOpeningEntryGuard({
       if (cancelled || !state?.stale || location.pathname.includes('/closing_shift')) {
         return;
       }
+      if (state.can_close === false) {
+        // Closing is turned off on this till: the Closing screen would only refuse them.
+        toast.warning(
+          `Shift ${state.entry} was opened on an earlier day. A manager must close it before this till can sell.`,
+          { toastId: 'stale-shift' }
+        );
+        return;
+      }
       toast.warning(
         `Shift ${state.entry} was opened on an earlier day. Close it before selling.`,
         { toastId: 'stale-shift' }
