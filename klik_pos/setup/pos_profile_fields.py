@@ -12,6 +12,12 @@ CREDIT_SALES_DESCRIPTION = (
     "Credit sales are booked as POS sales and count in the till's shift."
 )
 
+DAILY_CLOSE_DESCRIPTION = (
+    "On (default): a shift is good for the day it was opened. The next day the till cannot "
+    "sell until that shift is closed. Off: a shift stays good until someone closes it, so "
+    "closing is when the money is counted, not a daily chore."
+)
+
 POS_PROFILE_FEATURE_FIELDS = [
     {
         "fieldname": "allow_price_list_switching",
@@ -101,6 +107,15 @@ POS_PROFILE_FEATURE_FIELDS = [
             "it comes from the selected Print Format, not this display."
         ),
         "default": "0",
+        "module": "KLiK PoS",
+    },
+    {
+        "fieldname": "custom_require_daily_shift_close",
+        "label": "Require Daily Shift Close",
+        "fieldtype": "Check",
+        "insert_after": "custom_clear_draft_invoices",
+        "description": DAILY_CLOSE_DESCRIPTION,
+        "default": "1",
         "module": "KLiK PoS",
     },
 ]

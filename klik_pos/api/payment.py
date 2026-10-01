@@ -641,8 +641,12 @@ def get_opening_entry_payment_summary():
 		if not opening_doc:
 			return _error_response("No open POS Opening Entry found.")
 
+		from klik_pos.api.shift import requires_daily_close
+
 		opening_info = _extract_opening_info(opening_doc)
-		is_admin = _check_admin_privileges()
+		# The admin view sums the till's day. A shift on a till without a daily close can
+		# run for days, and its first day is not the shift: sum the shift instead.
+		is_admin = _check_admin_privileges() and requires_daily_close(opening_doc.pos_profile)
 
 		sales_data = _fetch_sales_data(
 			opening_info["profile"], opening_info["entry_name"], opening_info["date"], is_admin

@@ -601,6 +601,14 @@ def _shortcode_to_mode(company: str) -> dict:
 	}
 
 
+def _tills_without_daily_close() -> tuple:
+	from klik_pos.api.shift import DAILY_CLOSE_FIELD
+
+	if not frappe.db.has_column("POS Profile", DAILY_CLOSE_FIELD):
+		return ()
+	return tuple(frappe.get_all("POS Profile", filters={DAILY_CLOSE_FIELD: 0}, pluck="name"))
+
+
 def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 	"""Only what is actually wrong, each row carrying where to go and see it.
 
@@ -673,11 +681,14 @@ def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 		FROM `tabPOS Opening Entry`
 		WHERE status = 'Open' AND docstatus = 1 AND period_start_date < %(today)s
 			AND (company = %(company)s OR pos_profile IN %(profiles)s)
+			AND pos_profile NOT IN %(no_daily_close)s
 		""",
 		{
 			"today": nowdate(),
 			"company": company,
 			"profiles": tuple(scope.get("available_profiles") or [""]) or ("",),
+			# A shift running for days is how a till without a daily close works.
+			"no_daily_close": _tills_without_daily_close() or ("",),
 		},
 	)[0][0]
 	if stale_shifts:

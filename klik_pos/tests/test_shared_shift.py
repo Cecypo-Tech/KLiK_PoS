@@ -184,13 +184,14 @@ class TestOneShiftPerTill(SharedShiftCase):
 		):
 			doc.before_submit()
 
-	def test_sales_invoices_use_erpnext_s_own_shift_check(self):
-		"""klik must not reimplement ERPNext's shift rule."""
+	def test_a_till_with_a_daily_close_uses_erpnext_s_own_shift_check(self):
+		"""klik must not reimplement ERPNext's shift rule for a till that keeps it."""
 		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 
-		from klik_pos.api.sales_invoice import CustomSalesInvoice
-
-		self.assertIs(CustomSalesInvoice.validate_pos_opening_entry, SalesInvoice.validate_pos_opening_entry)
+		doc = self._invoice()
+		with patch.object(SalesInvoice, "validate_pos_opening_entry") as erpnext_check:
+			doc.validate_pos_opening_entry()
+		erpnext_check.assert_called_once()
 
 	def test_before_submit_refuses_a_klik_sale_with_no_open_shift(self):
 		frappe.set_user(OPENER)
