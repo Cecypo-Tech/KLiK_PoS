@@ -3545,11 +3545,21 @@ def _set_roundoff_fields(doc, roundoff_amount):
 
 
 def _set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile):
-	"""Set the taxes and charges template."""
-	if sales_and_tax_charges:
-		doc.taxes_and_charges = sales_and_tax_charges
-	else:
-		doc.taxes_and_charges = pos_profile.taxes_and_charges
+	"""Set the taxes and charges template: the one chosen at checkout, else the till's, else
+	the company's default - ERPNext's own fallback, applied here rather than left to it.
+
+	ERPNext fills in the default only on a new document, and only after klik has built the
+	tax rows. Left to it, a re-held order (an existing Sales Order) lost its tax altogether,
+	and on a till whose rates include tax the default was added on top of the price.
+	"""
+	template = sales_and_tax_charges or pos_profile.taxes_and_charges
+	if not template:
+		company = doc.get("company") or pos_profile.get("company")
+		if company:
+			template = frappe.db.get_value(
+				"Sales Taxes and Charges Template", {"company": company, "is_default": 1, "disabled": 0}, "name"
+			)
+	doc.taxes_and_charges = template
 
 
 def _apply_pos_tax_treatment(
