@@ -1,3 +1,5 @@
+import type { MpesaPushInfo } from './mpesaOrder';
+
 const csrf = () => (window as { csrf_token?: string }).csrf_token as string;
 
 /** The held order being finished was checked out, cleared or completed elsewhere. */
@@ -61,6 +63,9 @@ export async function getHeldOrderDetails(orderId: string) {
     message?: string;
     approval_state?: string | null;
     price_breach?: number;
+    /** An M-Pesa order kept for its push, and that push. */
+    mpesa_order?: number;
+    mpesa_request?: MpesaPushInfo | null;
   };
 }
 

@@ -1,6 +1,7 @@
 import { EMPTY_CHECKOUT_EXTRAS } from './heldOrderPayload';
 import { useCartStore } from '../stores/cartStore';
 import type { CartItem, Customer } from '../../types';
+import type { MpesaPushInfo } from '../services/mpesaOrder';
 
 interface DraftInvoiceCache {
   items: CartItem[];
@@ -11,6 +12,8 @@ interface DraftInvoiceCache {
   originalHeldOrderId?: string;   // SO-based held order
   originalHeldOrderApprovalState?: string | null; // price approval workflow_state as loaded
   originalHeldOrderPriceBreach?: number;          // price breach flag as loaded
+  originalHeldOrderIsMpesa?: boolean;             // an M-Pesa order kept for its push
+  originalHeldOrderMpesaRequest?: MpesaPushInfo | null; // that push, as loaded
   orderDiscountAmount?: number;   // additional discount amount carried over from hold/draft
   remarks?: string;               // a recalled draft invoice's own remarks
 }
@@ -49,6 +52,7 @@ export function cacheHeldOrder(
   customer: Customer | null,
   orderDiscountAmount = 0,
   approval?: { state?: string | null; priceBreach?: number },
+  mpesa?: { isMpesaOrder: boolean; request: MpesaPushInfo | null },
 ): void {
   const cache: DraftInvoiceCache = {
     items,
@@ -59,6 +63,8 @@ export function cacheHeldOrder(
     originalHeldOrderId: orderId,
     originalHeldOrderApprovalState: approval?.state ?? null,
     originalHeldOrderPriceBreach: approval?.priceBreach ?? 0,
+    originalHeldOrderIsMpesa: Boolean(mpesa?.isMpesaOrder),
+    originalHeldOrderMpesaRequest: mpesa?.request ?? null,
     orderDiscountAmount,
   };
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
@@ -208,6 +214,19 @@ export function getOriginalHeldOrderApproval(): { state: string | null; priceBre
   return {
     state: cache?.originalHeldOrderApprovalState ?? null,
     priceBreach: cache?.originalHeldOrderPriceBreach ?? 0,
+  };
+}
+
+/**
+ * Whether the held order in the cart is an M-Pesa order kept for its push, and that push: the
+ * checkout picks it up instead of sending the customer another.
+ */
+export function getOriginalHeldOrderMpesa(): { isMpesaOrder: boolean; request: MpesaPushInfo | null } {
+  const cache = readCacheIgnoringAge();
+  if (!cache?.originalHeldOrderId) return { isMpesaOrder: false, request: null };
+  return {
+    isMpesaOrder: Boolean(cache.originalHeldOrderIsMpesa),
+    request: cache.originalHeldOrderMpesaRequest ?? null,
   };
 }
 

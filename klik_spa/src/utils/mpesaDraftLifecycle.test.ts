@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard, stkRetryAction } from "./mpesaDraftLifecycle";
+import {
+  holdBlockedByMpesa,
+  mpesaDraftKeptForStk,
+  mpesaDraftToDiscard,
+  mpesaOrderToRelease,
+  normalizeMpesaStatus,
+  resumedMpesaFlow,
+  stkRetryAction,
+} from "./mpesaDraftLifecycle";
 
 const none = new Set<string>();
 
@@ -90,5 +98,73 @@ describe("stkRetryAction", () => {
     expect(stkRetryAction({ method: "Mpesa-Sandbox-174379", amount: 0 }, "0712345678", undefined)).toMatchObject({
       send: false,
     });
+  });
+});
+
+describe("mpesaOrderToRelease", () => {
+  it("hands the order to the server to delete or keep once nothing runs against it", () => {
+    expect(mpesaOrderToRelease("SAL-ORD-9", 0)).toBe("SAL-ORD-9");
+  });
+
+  it("leaves it while a push or the submit is still running: the server cannot see the push yet", () => {
+    expect(mpesaOrderToRelease("SAL-ORD-9", 1)).toBeNull();
+  });
+
+  it("has nothing to release without an order", () => {
+    expect(mpesaOrderToRelease(null, 0)).toBeNull();
+  });
+});
+
+describe("resumedMpesaFlow", () => {
+  const request = {
+    name: "MEXP-7",
+    status: "Completed",
+    amount: 4,
+    phone_number: "254700000123",
+    transaction_id: "UJ1TEST",
+    checkout_request_id: "ws_CO_1",
+    payment_gateway: "Mpesa-Sandbox-174379",
+  };
+
+  it("picks up the push the kept order was sent with, on the mode it went through", () => {
+    expect(resumedMpesaFlow("SAL-ORD-9", request, ["Mpesa-111222", "Mpesa-Sandbox-174379"])).toEqual({
+      modeOfPayment: "Mpesa-Sandbox-174379",
+      amount: 4,
+      phoneNumber: "254700000123",
+      accountReference: "SAL-ORD-9",
+      source: "stk",
+      requestName: "MEXP-7",
+      transactionId: "UJ1TEST",
+      checkoutRequestId: "ws_CO_1",
+      status: "completed",
+      message: undefined,
+    });
+  });
+
+  it("falls back to the first M-Pesa mode when the push's gateway is not one of the till's", () => {
+    expect(resumedMpesaFlow("SAL-ORD-9", { ...request, payment_gateway: "Mpesa-Gone" }, ["Mpesa-111222"])?.modeOfPayment).toBe(
+      "Mpesa-111222",
+    );
+  });
+
+  it("carries a failed push's reason", () => {
+    const flow = resumedMpesaFlow("SAL-ORD-9", { ...request, status: "Failed", result_desc: "DS timeout" }, ["Mpesa-111222"]);
+    expect(flow).toMatchObject({ status: "failed", message: "DS timeout" });
+  });
+
+  it("has nothing to pick up without a push or an M-Pesa mode", () => {
+    expect(resumedMpesaFlow("SAL-ORD-9", null, ["Mpesa-111222"])).toBeNull();
+    expect(resumedMpesaFlow("SAL-ORD-9", request, [])).toBeNull();
+  });
+});
+
+describe("normalizeMpesaStatus", () => {
+  it.each([
+    ["Completed", "completed"],
+    ["Failed", "failed"],
+    ["In Progress", "in_progress"],
+    ["idle", "idle"],
+  ])("%s is %s", (status, expected) => {
+    expect(normalizeMpesaStatus(status)).toBe(expected);
   });
 });

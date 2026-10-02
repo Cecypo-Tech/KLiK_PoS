@@ -25,7 +25,7 @@ import {
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
 import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
-import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalHeldOrderMpesa, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
 import { priceApprovalMessage } from "../../utils/priceApproval";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
@@ -40,7 +40,16 @@ import {
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
-import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard, stkRetryAction } from "../../utils/mpesaDraftLifecycle";
+import {
+  holdBlockedByMpesa,
+  mpesaDraftKeptForStk,
+  mpesaDraftToDiscard,
+  mpesaOrderToRelease,
+  normalizeMpesaStatus,
+  resumedMpesaFlow,
+  stkRetryAction,
+} from "../../utils/mpesaDraftLifecycle";
+import { discardMpesaOrder, saveMpesaOrder, submitMpesaOrder } from "../../services/mpesaOrder";
 import { checkoutWasQueued } from "../../utils/checkoutOutcome";
 import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
@@ -162,12 +171,23 @@ async function discardAbandonedMpesaDraft(invoiceName: string) {
   }
 }
 
-function normalizeMpesaStatus(status?: string) {
-  const normalized = (status || "").toLowerCase();
-  if (["completed", "success", "successful"].includes(normalized)) return "completed" as const;
-  if (["failed", "cancelled", "timed out", "timeout"].includes(normalized)) return "failed" as const;
-  if (normalized === "idle") return "idle" as const;
-  return "in_progress" as const;
+/**
+ * The cashier left checkout with the M-Pesa sale unfinished: hand its order back. The server
+ * deletes it, or keeps it as a held order when a push sent from it may still pay - say so, or
+ * the cashier may charge the customer again.
+ */
+async function discardAbandonedMpesaOrder(orderName: string) {
+  try {
+    const result = await discardMpesaOrder(orderName);
+    if (result.kept) {
+      toast.warning(result.message, { autoClose: 15000, toastId: `mpesa-order-kept-${orderName}` });
+    }
+  } catch (err) {
+    toast.warning(err instanceof Error ? err.message : `Order ${orderName} was kept.`, {
+      autoClose: 10000,
+      toastId: `mpesa-order-kept-${orderName}`,
+    });
+  }
 }
 
 export default function PaymentDialog(props: PaymentDialogProps) {
@@ -238,6 +258,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
+  // The draft Sales Order STK pushes are sent from (klik_pos.api.mpesa_order), until submit.
+  const [mpesaOrderName, setMpesaOrderName] = useState<string | null>(null);
+  // Set once a push is sent from it in this dialog: only then does leaving checkout let it go.
+  // A kept order resumed and closed again without a new push stays as it was, on the Held tab.
+  const unfinishedMpesaOrderRef = useRef<string | null>(null);
   // The M-Pesa draft not yet submitted, read when the dialog closes or unmounts.
   const unfinishedMpesaDraftRef = useRef<string | null>(null);
   // Draft creation, STK initiation, receipt reconcile or submit still running.
@@ -248,6 +273,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     unfinishedMpesaDraftRef.current = mpesaDraftInvoiceName;
   }, [mpesaDraftInvoiceName]);
   const releaseUnfinishedMpesaDraft = useCallback(() => {
+    const order = mpesaOrderToRelease(unfinishedMpesaOrderRef.current, mpesaWorkInFlightRef.current);
+    unfinishedMpesaOrderRef.current = null;
+    if (order) void discardAbandonedMpesaOrder(order);
+
     const checkout = {
       draftName: unfinishedMpesaDraftRef.current,
       workInFlight: mpesaWorkInFlightRef.current,
@@ -938,6 +967,26 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return draftName;
   };
 
+  /**
+   * The order the push is sent from: created on the first push, brought up to the cart on each
+   * one after, so the order - and what the push asks for - is what the cashier is charging.
+   * A kept M-Pesa order resumed from the Held tab is reused rather than copied.
+   */
+  const ensureMpesaOrder = async () => {
+    const resumed = getOriginalHeldOrderMpesa().isMpesaOrder ? getOriginalHeldOrderId() : null;
+    const name = await saveMpesaOrder(
+      {
+        ...buildPaymentData(selectedDeliveryPersonnel, { excludeActiveMpesa: true }),
+        status: "held",
+      },
+      mpesaOrderName || resumed,
+    );
+    setMpesaOrderName(name);
+    // From here a push may go out: leaving checkout hands the order back to the server.
+    unfinishedMpesaOrderRef.current = name;
+    return name;
+  };
+
   /** Send an STK push; true once Safaricom accepted it. */
   const initiateMpesaFlow = async (method: string, amount: number, phoneNumber: string): Promise<boolean> => {
     if (!selectedCustomer || !selectedCustomer.name) {
@@ -956,19 +1005,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     mpesaWorkInFlightRef.current += 1;
     try {
       setIsProcessingPayment(true);
-      const draftInvoiceName = await ensureMpesaDraftInvoice();
-      // From here the customer's phone may ring: a payment may come for this draft.
-      stkSentFromRef.current.add(draftInvoiceName);
+      // A draft Sales Order, not an invoice: a push the customer never pays leaves no invoice.
+      const orderName = await ensureMpesaOrder();
 
-      const accountReference = draftInvoiceName;
+      const accountReference = orderName;
       const response = await initiateKlikPosStkPush({
         phone_number: phoneNumber,
         amount,
         mode_of_payment: method,
         company: posCompanyName,
         account_reference: accountReference,
-        reference_doctype: "Sales Invoice",
-        reference_name: draftInvoiceName,
+        reference_doctype: "Sales Order",
+        reference_name: orderName,
         currency: "KES",
         prevent_duplicates: 1,
       });
@@ -979,7 +1027,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         phoneNumber: phoneNumber,
         accountReference,
         source: "stk",
-        draftInvoiceName,
         requestName: response.request_name,
         checkoutRequestId: response.checkout_request_id,
         transactionId: response.transaction_id,
@@ -1505,6 +1552,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       releaseUnfinishedMpesaDraft();
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
+      setMpesaOrderName(null);
       setAlreadySubmittedAs(null);
       setMpesaPanelDismissed(false);
       setMpesaSearchTerm("");
@@ -1512,6 +1560,35 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setDeliveryCharge(0);
     }
   }, [isOpen, releaseUnfinishedMpesaDraft]);
+
+  // Checkout resumed from an M-Pesa order kept for its push picks that push up: a paid one is
+  // submitted, a pending one is waited on - neither is charged again.
+  const resumedMpesaOrderRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) {
+      resumedMpesaOrderRef.current = null;
+      return;
+    }
+    const orderId = getOriginalHeldOrderId();
+    const { isMpesaOrder, request } = getOriginalHeldOrderMpesa();
+    if (!orderId || !isMpesaOrder || resumedMpesaOrderRef.current === orderId) return;
+    const mpesaModes = modes
+      .filter((mode) => isMpesaPaymentMode(mode, mode.mode_of_payment || ""))
+      .map((mode) => mode.mode_of_payment)
+      .filter((name): name is string => Boolean(name));
+    if (!mpesaModes.length) return; // the till's modes are still loading
+    resumedMpesaOrderRef.current = orderId;
+    setMpesaOrderName(orderId);
+    const flow = resumedMpesaFlow(orderId, request, mpesaModes);
+    if (!flow) return;
+    setMpesaFlow(flow);
+    setMpesaPhoneNumber((current) => current || flow.phoneNumber);
+    if (flow.status === "completed") {
+      // Exactly what the customer paid, on the mode it came through.
+      setLastModifiedMethodId(flow.modeOfPayment);
+      setPaymentAmounts({ [flow.modeOfPayment]: flow.amount });
+    }
+  }, [isOpen, modes]);
 
   useEffect(() => {
     clearLoyaltyRedemption();
@@ -1565,7 +1642,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     try {
       let response;
 
-      if (mpesaDraftInvoiceName) {
+      if (mpesaOrderName && mpesaFlow?.source === "stk") {
+        // The order the push went out from becomes the invoice; a held order the cart came
+        // from (when it is not that order itself) is finished with it.
+        response = await submitMpesaOrder(
+          mpesaOrderName,
+          { ...paymentData, enable_background_invoice_submission: enableBackgroundSubmission },
+          originalHeldOrderId,
+          remarks.trim(),
+        );
+        unfinishedMpesaOrderRef.current = null;
+      } else if (mpesaDraftInvoiceName) {
         // Receipt-paid M-Pesa reaches the draft as advances, so its row stays out of the
         // payments; everything else the cashier took (cash added after the pick) goes in.
         const receiptData =
@@ -1634,6 +1721,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setInvoiceData(response.invoice);
       setMpesaFlow(null);
       setMpesaDraftInvoiceName(null);
+      setMpesaOrderName(null);
       toast.success(queued ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
 
       // What the receipts held beyond this sale stays on them for the customer's next
@@ -1676,6 +1764,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         return;
       }
       if (err instanceof HeldOrderGoneError) {
+        if (err.orderId === mpesaOrderName) {
+          // Finished or cleared elsewhere: its push went with it. Start M-Pesa afresh.
+          unfinishedMpesaOrderRef.current = null;
+          setMpesaOrderName(null);
+          setMpesaFlow(null);
+        }
         // The server ruled out a replay of this checkout first, so nothing was created
         // under this attempt; start the next Submit on a fresh one.
         if (activeCheckoutRequestId) clearCheckoutAttempt(activeCheckoutRequestId);
@@ -1827,12 +1921,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               loyalty_points: appliedLoyalty.loyalty_points,
             }
           : null,
-        held_order_id: getOriginalHeldOrderId(),
+        // The M-Pesa order (its push failed) becomes the held order, rather than a copy.
+        held_order_id: getOriginalHeldOrderId() || mpesaOrderName,
       };
 
       const result = await createHeldOrder(orderData);
       if (!result?.success) {
         throw new Error("Failed to hold order");
+      }
+      if (result.order_name && result.order_name === mpesaOrderName) {
+        // It is an ordinary held order now; closing checkout must not discard it.
+        unfinishedMpesaOrderRef.current = null;
+        setMpesaOrderName(null);
       }
 
       clearCart();
