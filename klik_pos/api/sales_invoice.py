@@ -4660,6 +4660,14 @@ class CustomSalesInvoice(SalesInvoice):
 				).format(self.pos_profile),
 			)
 
+	def calculate_taxes_and_totals(self):
+		super().calculate_taxes_and_totals()
+		# A return applied to its original books its Debtors legs - credit and refund alike -
+		# against the original, so the return itself owes nothing. ERPNext zeroes this only
+		# for non-POS returns; a POS return kept -grand_total and its credit read twice.
+		if self.is_return and self.return_against and self.is_pos and not self.update_outstanding_for_self:
+			self.outstanding_amount = 0
+
 	def before_submit(self):
 		from klik_pos.api.mpesa import assert_mpesa_rows_backed
 
