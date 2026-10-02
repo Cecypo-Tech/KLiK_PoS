@@ -2918,6 +2918,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onTogglePayment={handleToggleMpesaPayment}
           onInitiateStk={() => void handleInitiateMpesaPayment()}
           stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
+          stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
       </div>
@@ -3079,6 +3080,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     onTogglePayment={handleToggleMpesaPayment}
                     onInitiateStk={() => void handleInitiateMpesaPayment()}
           stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
+          stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
                     onAddPayments={() => void handleReconcileMpesaPayments()}
                     variant="panel"
                   />
