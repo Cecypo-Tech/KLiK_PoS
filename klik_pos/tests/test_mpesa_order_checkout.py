@@ -16,6 +16,7 @@ from frappe.tests.utils import FrappeTestCase
 from klik_pos.api import mpesa_order, sales_order
 from klik_pos.api.mpesa_order import discard_mpesa_order, save_mpesa_order, submit_mpesa_order
 from klik_pos.api.sales_order import (
+	create_held_order,
 	delete_held_order,
 	delete_held_orders_for_opening_entry,
 	get_held_order_details,
@@ -345,3 +346,63 @@ class TestResumingAKeptOrder(FrappeTestCase):
 		row = next((o for o in listed["data"] if o["name"] == self.order), None)
 		self.assertIsNotNone(row, "kept order not on the Held tab")
 		self.assertTrue(row["mpesa_order"])
+
+
+class TestAnOrderLeftInCheckout(FrappeTestCase):
+	"""The browser died with checkout open: the order was never handed to the Held tab."""
+
+	def setUp(self):
+		self.addCleanup(frappe.db.rollback)
+		self.order = _order()
+		frappe.db.set_value("Sales Order", self.order, "custom_pos_opening_entry", "POS-OPE-MPESA")
+
+	def test_a_shift_close_clears_it_when_no_push_is_live(self):
+		_push(self.order, "Failed")
+
+		delete_held_orders_for_opening_entry("POS-OPE-MPESA")
+
+		self.assertFalse(_exists(self.order))
+
+	def test_a_shift_close_puts_it_on_the_held_tab_when_its_push_is_live(self):
+		_push(self.order, "Completed")
+
+		delete_held_orders_for_opening_entry("POS-OPE-MPESA")
+
+		self.assertTrue(_exists(self.order))
+		self.assertEqual(frappe.db.get_value("Sales Order", self.order, "custom_is_klik_held"), 1)
+
+
+class TestHoldingAnMpesaOrder(FrappeTestCase):
+	"""Resumed from the Held tab, pushed again, the push failed: the cashier holds the sale."""
+
+	def setUp(self):
+		self.addCleanup(frappe.db.rollback)
+		self.order = _order()
+
+	def _hold(self):
+		with _at_till():
+			return create_held_order({**_cart(), "held_order_id": self.order})
+
+	def test_it_becomes_an_ordinary_held_order(self):
+		_push(self.order, "Failed")
+
+		result = self._hold()
+
+		self.assertTrue(result["success"], result)
+		self.assertEqual(result["order_name"], self.order)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Sales Order", self.order, ["custom_is_klik_held", "custom_klik_mpesa_order"]
+			),
+			(1, 0),
+		)
+
+	def test_refused_while_a_push_from_it_is_live(self):
+		_push(self.order, "In Progress")
+
+		result = self._hold()
+
+		# create_held_order rolls back everything on a refusal, the test's own order included,
+		# so the reply is all there is to check.
+		self.assertFalse(result["success"])
+		self.assertIn("M-Pesa", result["message"])
