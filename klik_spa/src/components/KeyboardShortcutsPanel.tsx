@@ -38,7 +38,7 @@ const GROUPS: ShortcutGroup[] = [
       { keys: ["F2"], description: "Open customer dropdown" },
       { keys: ["F4"], description: "Open Additional Info" },
       { keys: ["F10"], description: "Checkout / submit payment" },
-      { keys: ["Shift", "F10"], description: "Hold order" },
+      { keys: ["Shift", "F10"], description: "Open checkout; again to hold the order" },
       { keys: ["Esc"], description: "Collapse an expanded cart line" },
     ],
   },

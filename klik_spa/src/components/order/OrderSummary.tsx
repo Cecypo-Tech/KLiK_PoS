@@ -20,10 +20,7 @@ import {
   getCheckoutAttemptForCart,
   getCheckoutCartFingerprint,
 } from "../../utils/checkoutAttempt";
-import { createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
-import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
-import { forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderId } from "../../utils/draftInvoiceCache";
-import { heldOrderGoneMessage } from "../../utils/staleDraft";
+import { getOriginalDraftInvoiceId, getOriginalHeldOrderId } from "../../utils/draftInvoiceCache";
 import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
 import { CartItemRow } from "./CartItemRow";
@@ -62,20 +59,13 @@ export default function OrderSummary({
     toggleItemExpansion,
     pendingRateOverrides,
     consumeRateOverrides,
-    walkinDetails,
-    extraFields,
-    shippingRule,
-    checkoutExtras,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showSalespersonAuthModal, setShowSalespersonAuthModal] = useState(false);
   const [isValidatingCheckout, setIsValidatingCheckout] = useState(false);
   const [isRecoveringCheckout, setIsRecoveringCheckout] = useState(false);
-  const [isHoldingOrder, setIsHoldingOrder] = useState(false);
-  const [pendingSalespersonAction, setPendingSalespersonAction] = useState<
-    "checkout" | "hold" | null
-  >(null);
+  const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | null>(null);
 
   const { posDetails } = usePOSProfileStore();
   const { refreshStockOnly } = useProductStore();
@@ -480,66 +470,10 @@ export default function OrderSummary({
     }
   };
 
-  const holdCurrentOrder = async () => {
-    if (!selectedCustomer) {
-      toast.error("Kindly select a customer");
-      return;
-    }
-    if (isHoldingOrder) return;
-
-    setIsHoldingOrder(true);
-    try {
-      const originalHeldOrderId = getOriginalHeldOrderId();
-      const result = await createHeldOrder({
-        items: cartItems.map((item) => ({
-          ...item,
-          price: getDiscountedPrice(item),
-        })),
-        customer: { id: selectedCustomer.id },
-        customerData: selectedCustomer,
-        subtotal,
-        total,
-        appliedCoupons: [],
-        itemDiscounts,
-        totalItemDiscount,
-        totalSavings: totalItemDiscount + couponDiscount,
-        status: "held",
-        salesperson: activeSalesperson?.name || null,
-        held_order_id: originalHeldOrderId,
-        // The buyer, the till's extra fields and what checkout last held (delivery, discount,
-        // tax template) live in the cart store; without them a cart hold lost all of it.
-        ...heldOrderPayloadExtras({
-          walkin: walkinDetails,
-          extraFields,
-          shippingRule,
-          extras: checkoutExtras,
-          flags: tillFlags(posDetails as Record<string, unknown>),
-        }),
-      });
-      if (result?.success) {
-        handleClearCart();
-        toast.success(originalHeldOrderId ? "Order updated and held successfully!" : "Order held successfully!");
-      }
-    } catch (error) {
-      if (error instanceof HeldOrderGoneError) {
-        forgetOriginalHeldOrder();
-        toast.warning(heldOrderGoneMessage(error.message, "hold"), { toastId: `held-gone-${error.orderId}` });
-        return;
-      }
-      toast.error(extractErrorFromException(error, "Failed to hold order"));
-    } finally {
-      setIsHoldingOrder(false);
-    }
-  };
-
-  const requireSalespersonAndRun = async (action: "checkout" | "hold") => {
+  const requireSalespersonAndRun = async (action: "checkout") => {
     const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
     if (!requiresSalespersonPin || activeSalesperson) {
-      if (action === "checkout") {
-        await startCheckoutFlow();
-      } else {
-        await holdCurrentOrder();
-      }
+      await startCheckoutFlow();
       return;
     }
 
@@ -570,30 +504,19 @@ export default function OrderSummary({
     if (nextAction === "checkout") {
       void startCheckoutFlow();
     }
-
-    if (nextAction === "hold") {
-      void holdCurrentOrder();
-    }
   };
 
-  const holdFromFooter = () => {
-    if (!validateCustomer()) return;
-    void requireSalespersonAndRun("hold");
+  // F10 and Shift+F10 both open checkout from the cart; Hold lives in checkout, whose own
+  // layer then takes Shift+F10 (hold) and F10 (submit). Off while this summary's payment
+  // dialog is open: a cart refilled behind it would otherwise push this layer on top.
+  const openCheckoutFromShortcut = () => {
+    if (isValidatingCheckout) return;
+    void handleCheckoutClick();
   };
-
-  // F10 checks out and Shift+F10 holds, exactly as the footer buttons do - and only while
-  // they are there to press. Off while this summary's payment dialog is open: the dialog
-  // owns F10 then, and a cart refilled behind it would otherwise push this layer on top.
   usePosShortcutLayer(
     {
-      f10: () => {
-        if (isValidatingCheckout) return;
-        void handleCheckoutClick();
-      },
-      shiftF10: () => {
-        if (posDetails?.allow_holding_invoices !== 1 || isHoldingOrder) return;
-        holdFromFooter();
-      },
+      f10: openCheckoutFromShortcut,
+      shiftF10: openCheckoutFromShortcut,
     },
     cartItems.length > 0 && !showPaymentDialog,
   );
@@ -718,12 +641,9 @@ export default function OrderSummary({
           couponDiscount={couponDiscount}
           onCheckout={handleCheckoutClick}
           onClearCart={handleClearCart}
-          onHoldOrder={holdFromFooter}
-          isHoldingOrder={isHoldingOrder}
           isValidating={isValidatingCheckout || isRecoveringCheckout}
           isMobile={isMobile}
           currency_symbol={currency_symbol}
-          allow_holding_invoices={posDetails?.allow_holding_invoices === 1}
           taxExclusive={!isTaxIncludedInBasicRate}
           netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
         />

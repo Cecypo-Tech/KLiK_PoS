@@ -9,12 +9,9 @@ interface OrderSummaryFooterProps {
   couponDiscount: number;
   onCheckout: () => void;
   onClearCart: () => void;
-  onHoldOrder: () => void;
-  isHoldingOrder?: boolean;
   isValidating: boolean;
   isMobile?: boolean;
   currency_symbol?: string;
-  allow_holding_invoices?: boolean;
   taxExclusive?: boolean;
   /** Formatted total net weight, e.g. "12.5 Kg"; empty hides the row. */
   netWeightLabel?: string;
@@ -27,12 +24,9 @@ export const OrderSummaryFooter = ({
   couponDiscount,
   onCheckout,
   onClearCart,
-  onHoldOrder,
-  isHoldingOrder = false,
   isValidating,
   isMobile,
   currency_symbol,
-  allow_holding_invoices,
   taxExclusive = false,
   netWeightLabel = "",
 }: OrderSummaryFooterProps) => {
@@ -68,22 +62,8 @@ export const OrderSummaryFooter = ({
         )}
       </div>
 
-      {/* Action Buttons */}
-      <div
-        className={`grid ${
-          allow_holding_invoices ? "grid-cols-2" : "grid-cols-1"
-        } gap-3 ${isMobile ? "mb-3" : ""}`}
-      >
-        {allow_holding_invoices && (
-          <button
-            id="pos-hold-btn"
-            onClick={onHoldOrder}
-            disabled={isHoldingOrder}
-            className={`px-3 py-2 border border-beveren-600 text-beveren-600 dark:text-beveren-400 rounded-lg font-medium hover:bg-beveren-600 hover:text-white transition-colors text-sm disabled:opacity-60 disabled:cursor-not-allowed ${isHoldingOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
-          >
-            {isHoldingOrder ? 'Holding...' : 'Hold'}
-          </button>
-        )}
+      {/* Action Buttons - Hold lives in checkout (Shift+F10 opens it, again holds). */}
+      <div className={`grid grid-cols-1 gap-3 ${isMobile ? "mb-3" : ""}`}>
         <button
           onClick={onClearCart}
           className="px-3 py-2 border border-red-500 text-red-600 dark:text-red-400 rounded-lg font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
