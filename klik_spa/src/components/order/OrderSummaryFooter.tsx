@@ -62,29 +62,31 @@ export const OrderSummaryFooter = ({
         )}
       </div>
 
-      {/* Action Buttons - Hold lives in checkout (Shift+F10 opens it, again holds). */}
-      <div className={`grid grid-cols-1 gap-3 ${isMobile ? "mb-3" : ""}`}>
+      {/* Hold lives in checkout (Shift+F10 opens it, again holds). Clear Cart is desktop only:
+          on a phone it sits too close to Checkout. */}
+      <div className="flex gap-3">
+        {!isMobile && (
+          <button
+            id="pos-clear-cart-btn"
+            onClick={onClearCart}
+            className="shrink-0 px-3 py-2 border border-red-500 text-red-600 dark:text-red-400 rounded-xl font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+          >
+            Clear Cart
+          </button>
+        )}
         <button
-          onClick={onClearCart}
-          className="px-3 py-2 border border-red-500 text-red-600 dark:text-red-400 rounded-lg font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
+          id="pos-checkout-btn"
+          onClick={onCheckout}
+          disabled={isValidating}
+          className={`flex-1 min-w-0 bg-beveren-600 text-white rounded-xl font-semibold hover:bg-beveren-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+            isMobile ? "py-3 text-base" : "py-2 text-sm"
+          }`}
         >
-          Clear Cart
+          {isValidating
+            ? "Checking cart..."
+            : `Checkout ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`}
         </button>
       </div>
-
-      {/* Pay Button */}
-      <button
-        id="pos-checkout-btn"
-        onClick={onCheckout}
-        disabled={isValidating}
-        className={`w-full bg-beveren-600 text-white rounded-xl font-semibold hover:bg-beveren-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-          isMobile ? "py-3 text-base" : "py-2 text-sm"
-        }`}
-      >
-        {isValidating
-          ? "Checking cart..."
-          : `Checkout ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`}
-      </button>
     </div>
   );
 };
