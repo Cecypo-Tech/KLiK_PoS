@@ -111,6 +111,19 @@ def _claim_held_order(order_id):
     _assert_held_order_access(so)
     if so.docstatus != 0:
         frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
+    if so.get("custom_klik_mpesa_order"):
+        from klik_pos.api.mpesa_order import live_push
+
+        live = live_push(order_id)
+        if live:
+            # Finished any other way, the push's payment would land on nothing - or be paid
+            # for again. The M-Pesa checkout picks it up when the order is reopened.
+            frappe.throw(
+                _(
+                    "Order {0} has M-Pesa request {1}, which may still pay it or already has. "
+                    "Finish it by M-Pesa: reopen it and submit the confirmed payment."
+                ).format(order_id, live)
+            )
     return None
 
 

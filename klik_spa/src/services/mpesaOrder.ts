@@ -3,6 +3,7 @@
  * in for the sale until the cashier submits: no invoice exists for a push that is never paid.
  */
 import type { KeptMpesaPush } from '../utils/mpesaDraftLifecycle';
+import { extractErrorMessage } from '../utils/errorExtraction';
 import { HeldOrderGoneError } from './salesOrder';
 
 /** The newest push sent from an M-Pesa order, as get_held_order_details returns it. */
@@ -22,8 +23,9 @@ async function post(method: string, body: object) {
     throw new HeldOrderGoneError(result.message.message, result.message.order_id);
   }
   if (!response.ok || !result.message || result.message.success === false) {
-    const msg = result.message?.message || result.message?.error || result._server_messages || 'Request failed';
-    throw new Error(msg);
+    throw new Error(
+      result.message?.message || result.message?.error || extractErrorMessage(result, 'Request failed'),
+    );
   }
   return result.message;
 }

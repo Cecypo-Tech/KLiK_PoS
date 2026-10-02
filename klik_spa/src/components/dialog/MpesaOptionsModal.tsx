@@ -16,6 +16,8 @@ interface MpesaOptionsModalProps {
   selectedTotal: number;
   isLoadingPayments: boolean;
   isProcessing: boolean;
+  /** A push for this sale is waiting on the customer: another would ring them twice. */
+  stkPending?: boolean;
   onClose: () => void;
   onPhoneNumberChange: (value: string) => void;
   onSearchChange: (value: string) => void;
@@ -39,6 +41,7 @@ export default function MpesaOptionsModal({
   selectedTotal,
   isLoadingPayments,
   isProcessing,
+  stkPending = false,
   onClose,
   onPhoneNumberChange,
   onSearchChange,
@@ -97,11 +100,11 @@ export default function MpesaOptionsModal({
             <button
               type="button"
               onClick={onInitiateStk}
-              disabled={isProcessing}
+              disabled={isProcessing || stkPending}
               className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : null}
-              <span>Send STK Push</span>
+              <span>{stkPending ? "Waiting on the customer…" : "Send STK Push"}</span>
             </button>
           </section>
 

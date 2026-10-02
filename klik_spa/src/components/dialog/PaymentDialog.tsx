@@ -1038,6 +1038,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.info("STK push sent. Awaiting customer confirmation.");
       return true;
     } catch (error) {
+      if (error instanceof HeldOrderGoneError) {
+        // Finished or cleared elsewhere. Not sent again by itself: it may have been paid.
+        if (error.orderId === getOriginalHeldOrderId()) forgetOriginalHeldOrder();
+        unfinishedMpesaOrderRef.current = null;
+        setMpesaOrderName(null);
+        setMpesaFlow(null);
+        toast.warning(error.message, { autoClose: 10000 });
+        return false;
+      }
       toast.error(extractErrorFromException(error, "Failed to initiate M-Pesa STK push"));
       return false;
     } finally {
@@ -1583,12 +1592,19 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (!flow) return;
     setMpesaFlow(flow);
     setMpesaPhoneNumber((current) => current || flow.phoneNumber);
-    if (flow.status === "completed") {
-      // Exactly what the customer paid, on the mode it came through.
-      setLastModifiedMethodId(flow.modeOfPayment);
-      setPaymentAmounts({ [flow.modeOfPayment]: flow.amount });
-    }
   }, [isOpen, modes]);
+
+  // A resumed order's push paid - when it was picked up, or while checkout waited on it: the
+  // sale takes exactly what the customer paid, on the mode it came through. Without it the
+  // till's opening amount (all on cash, say) would stand and the M-Pesa money go unrecorded.
+  useEffect(() => {
+    if (!mpesaFlow || mpesaFlow.source !== "stk" || mpesaFlow.status !== "completed") return;
+    if (!mpesaOrderName || resumedMpesaOrderRef.current !== mpesaOrderName) return;
+    const { modeOfPayment, amount } = mpesaFlow;
+    if (!modeOfPayment || amount <= 0) return;
+    setLastModifiedMethodId(modeOfPayment);
+    setPaymentAmounts((prev) => (Number(prev[modeOfPayment]) > 0 ? prev : { [modeOfPayment]: amount }));
+  }, [mpesaFlow, mpesaOrderName]);
 
   useEffect(() => {
     clearLoyaltyRedemption();
@@ -2260,7 +2276,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       const [method] = Object.keys(opening);
       if (method) {
         setLastModifiedMethodId(method);
-        setPaymentAmounts(opening);
+        // Only if still empty: a resumed M-Pesa payment set in the same commit wins.
+        setPaymentAmounts((prev) => (Object.keys(prev).length ? prev : opening));
       }
     }
   }, [isOpen, modes, checkoutPayableTotal, paymentAmounts, isCreditSale, setGrandTotalToDefaultMop]);
@@ -2915,6 +2932,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onSearchChange={setMpesaSearchTerm}
           onTogglePayment={handleToggleMpesaPayment}
           onInitiateStk={() => void handleInitiateMpesaPayment()}
+          stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
       </div>
@@ -3075,6 +3093,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     onSearchChange={setMpesaSearchTerm}
                     onTogglePayment={handleToggleMpesaPayment}
                     onInitiateStk={() => void handleInitiateMpesaPayment()}
+          stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
                     onAddPayments={() => void handleReconcileMpesaPayments()}
                     variant="panel"
                   />

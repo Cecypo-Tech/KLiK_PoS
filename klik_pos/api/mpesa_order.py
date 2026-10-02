@@ -7,9 +7,10 @@ turns it into the invoice the way a held order checks out: klik's own submit bui
 from the cart, the invoice records the order (`powerpack_source_order`), every push sent from
 the order is pointed at the invoice, and the order is deleted.
 
-While the dialog is open the order is not a hold (`custom_is_klik_held` 0). If the cashier
-leaves with a push that may still pay, or already has, the order is kept and becomes a held
-order, so it can be finished from the Held tab; otherwise it is deleted.
+The order is on the Held tab from the first push (`custom_is_klik_held`), so a push that may
+still pay - or already has - is never left on an order nobody can see, whatever becomes of
+the checkout that sent it. Leaving checkout deletes it unless such a push exists; then it
+stays held, to be finished from the Held tab.
 """
 
 import json
@@ -51,8 +52,11 @@ def live_push(order_name):
 
 
 def last_push(order_name):
-	"""What checkout needs to pick up the order's newest push, or None."""
-	pushes = _pushes(order_name)
+	"""The push checkout picks up for the order, or None: a paid one, else one still
+	waiting on the customer, else the newest."""
+	pushes = (
+		_pushes(order_name, ("Completed",)) or _pushes(order_name, ("In Progress",)) or _pushes(order_name)
+	)
 	if not pushes:
 		return None
 	return frappe.db.get_value(
@@ -142,6 +146,9 @@ def save_mpesa_order(data):
 
 		order_id = data.get("mpesa_order_id")
 		if order_id:
+			gone = sales_order._held_order_gone(order_id)
+			if gone:
+				return sales_order._gone_response(order_id, gone)
 			so = _load(order_id)
 			if so.docstatus != 0:
 				frappe.throw(_("Order {0} is no longer a draft.").format(order_id))
@@ -154,8 +161,9 @@ def save_mpesa_order(data):
 				customer, items, sales_and_tax_charges, cart_meta, order_discount_amount
 			)
 
-		# In checkout, not a hold: off the Held tab until the dialog lets go of it.
-		so.custom_is_klik_held = 0
+		# On the Held tab from the first push: whatever becomes of this checkout, a push that
+		# may pay the order never leaves it where nobody can see it.
+		so.custom_is_klik_held = 1
 		so.custom_klik_mpesa_order = 1
 		if so.is_new():
 			so.insert(ignore_permissions=True)
@@ -216,6 +224,8 @@ def _invoice_already_made(order_id):
 	invoice_doc = frappe.get_doc("Sales Invoice", invoice)
 	if invoice_doc.docstatus == 2:
 		return None
+	if not invoice_doc.has_permission("read"):
+		return None
 	return {
 		"success": True,
 		"replayed": True,
@@ -224,6 +234,24 @@ def _invoice_already_made(order_id):
 		"queue_status": invoice_doc.get("queue_status"),
 		"invoice": invoice_doc,
 	}
+
+
+def _unrecorded_paid_push(order_id, data):
+	"""A Completed push of the order the cart's payments do not carry, or None.
+
+	Its money would go unrecorded: the invoice settled some other way and the till short by
+	what the customer paid. The M-Pesa row names its push in custom_reference_text.
+	"""
+	paid = _pushes(order_id, ("Completed",))
+	if not paid:
+		return None
+	recorded = {
+		row.get("custom_reference_text")
+		for row in (data or {}).get("paymentMethods") or []
+		if isinstance(row, dict) and flt(row.get("amount")) > 0
+	}
+	missing = [name for name in paid if name not in recorded]
+	return missing[0] if missing else None
 
 
 def _hand_over_to_invoice(order_id, invoice):
@@ -286,6 +314,18 @@ def submit_mpesa_order(order_id, data=None, held_order_id=None, remarks=None):
 				),
 			}
 
+		unrecorded = _unrecorded_paid_push(order_id, data)
+		if unrecorded:
+			return {
+				"success": False,
+				"code": "mpesa_payment_missing",
+				"order_id": order_id,
+				"error": _(
+					"M-Pesa request {0} for this sale was paid, but its payment is not in this checkout. "
+					"Reopen the sale from Held orders so the payment is picked up."
+				).format(unrecorded),
+			}
+
 		draft = _create_invoice_draft(order_id, data)
 		other_held_order = held_order_id if held_order_id and held_order_id != order_id else None
 		result = submit_draft_invoice(draft, data, other_held_order, remarks)
@@ -296,7 +336,10 @@ def submit_mpesa_order(order_id, data=None, held_order_id=None, remarks=None):
 		_hand_over_to_invoice(order_id, result.get("invoice_name") or draft)
 		return result
 	except Exception as e:
-		frappe.db.rollback(save_point=SAVEPOINT)
+		# All of it, not just to the savepoint: a queued submit registered its background job
+		# to run after commit, and only a full rollback drops it - a savepoint keeps it, and it
+		# would run for an invoice that no longer exists, or for whatever reuses its number.
+		frappe.db.rollback()
 		frappe.log_error(frappe.get_traceback(), f"Submit M-Pesa Order Error: {order_id}")
 		return {"success": False, "error": str(e)}
 
@@ -311,16 +354,24 @@ def discard_mpesa_order(order_id):
 	state = frappe.db.get_value(
 		"Sales Order",
 		order_id,
-		["docstatus", "owner", "custom_klik_mpesa_order"],
+		["docstatus", "custom_klik_mpesa_order"],
 		as_dict=True,
 		for_update=True,
 	)
 	if not state:
 		return {"success": True, "kept": False, "message": _("Order {0} is already gone.").format(order_id)}
-	if state.docstatus != 0 or not state.custom_klik_mpesa_order or state.owner != frappe.session.user:
+	so = frappe.get_doc("Sales Order", order_id)
+	if (
+		state.docstatus != 0
+		or not state.custom_klik_mpesa_order
+		or not sales_order._may_act_on_held_order(so)
+	):
+		# Left as it is - on the Held tab - for someone who may finish it.
 		return {
 			"success": False,
-			"error": _("Order {0} was kept: it is not this checkout's to discard.").format(order_id),
+			"error": _("Order {0} was kept on the Held tab: it is not this checkout's to discard.").format(
+				order_id
+			),
 		}
 
 	live = live_push(order_id)
@@ -343,5 +394,5 @@ def discard_mpesa_order(order_id):
 			).format(order_id, live),
 		}
 
-	delete_order(frappe.get_doc("Sales Order", order_id))
+	delete_order(so)
 	return {"success": True, "kept": False, "message": _("Order {0} discarded.").format(order_id)}

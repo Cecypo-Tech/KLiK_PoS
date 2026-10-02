@@ -102,7 +102,9 @@ class TestSavingTheMpesaOrder(FrappeTestCase):
 		order = frappe.get_doc("Sales Order", name)
 		self.assertEqual(order.docstatus, 0)
 		self.assertEqual(order.custom_klik_mpesa_order, 1)
-		self.assertEqual(order.custom_is_klik_held, 0, "an order in checkout is not a hold")
+		# On the Held tab from the first push: if checkout never comes back for it (the
+		# browser closed mid-send), a paid push must still be findable.
+		self.assertEqual(order.custom_is_klik_held, 1)
 		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_before)
 
 	def test_sending_again_updates_the_same_order_to_the_cart(self):
@@ -114,14 +116,23 @@ class TestSavingTheMpesaOrder(FrappeTestCase):
 		self.assertEqual(result["order_name"], name)
 		self.assertEqual(frappe.db.get_value("Sales Order Item", {"parent": name}, "rate"), 4)
 
-	def test_a_kept_order_resumed_for_another_push_leaves_the_held_tab(self):
+	def test_a_kept_order_resumed_for_another_push_stays_on_the_held_tab(self):
 		name = _order()
-		frappe.db.set_value("Sales Order", name, "custom_is_klik_held", 1)
 
 		with _at_till():
 			save_mpesa_order({**_cart(), "mpesa_order_id": name})
 
-		self.assertEqual(frappe.db.get_value("Sales Order", name, "custom_is_klik_held"), 0)
+		self.assertEqual(frappe.db.get_value("Sales Order", name, "custom_is_klik_held"), 1)
+
+	def test_an_order_cleared_elsewhere_is_reported_gone(self):
+		name = _order()
+		frappe.delete_doc("Sales Order", name, force=True, ignore_permissions=True)
+
+		with _at_till():
+			result = save_mpesa_order({**_cart(), "mpesa_order_id": name})
+
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "held_order_gone")
 
 	def test_an_ordinary_held_order_is_not_taken_over(self):
 		name = _order()
@@ -138,14 +149,33 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 		self.addCleanup(frappe.db.rollback)
 		self.order = _order()
 
-	def _submit(self, **kwargs):
-		with _at_till(), patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice):
-			return submit_mpesa_order(self.order, **kwargs)
+	def _submit(self, paid=(), **kwargs):
+		"""Submit with a cart whose M-Pesa row names each push in `paid`.
+
+		The placeholder draft has no cart to rebuild from, so the real submit_draft_invoice
+		runs without one; the cart only feeds the order's own checks.
+		"""
+		data = {
+			"paymentMethods": [
+				{"method": "Mpesa-Test", "amount": 10, "custom_reference_text": p} for p in paid
+			]
+		}
+		real_submit = mpesa_order.submit_draft_invoice
+		with (
+			_at_till(),
+			patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice),
+			patch.object(
+				mpesa_order,
+				"submit_draft_invoice",
+				side_effect=lambda draft, _data, held, remarks: real_submit(draft, None, held, remarks),
+			),
+		):
+			return submit_mpesa_order(self.order, data=data, **kwargs)
 
 	def test_submit_turns_the_order_into_the_invoice(self):
 		push = _push(self.order, "Completed")
 
-		result = self._submit()
+		result = self._submit(paid=[push])
 
 		self.assertTrue(result["success"], result)
 		invoice = result["invoice_name"]
@@ -162,9 +192,9 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 
 	def test_failed_pushes_follow_the_order_to_the_invoice(self):
 		failed = _push(self.order, "Failed")
-		_push(self.order, "Completed")
+		paid = _push(self.order, "Completed")
 
-		result = self._submit()
+		result = self._submit(paid=[paid])
 
 		self.assertTrue(result["success"], result)
 		self.assertEqual(frappe.db.get_value(EXPRESS, failed, "reference_name"), result["invoice_name"])
@@ -184,12 +214,21 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 		push = _push(self.order, "Completed")
 		invoices_before = frappe.db.count("Sales Invoice")
 
-		with patch.object(
-			mpesa_order,
-			"submit_draft_invoice",
-			return_value={"success": False, "error": "M-Pesa row not backed"},
+		with (
+			_at_till(),
+			patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice),
+			patch.object(
+				mpesa_order,
+				"submit_draft_invoice",
+				return_value={"success": False, "error": "M-Pesa row not backed"},
+			),
 		):
-			result = self._submit()
+			result = submit_mpesa_order(
+				self.order,
+				data={
+					"paymentMethods": [{"method": "Mpesa-Test", "amount": 10, "custom_reference_text": push}]
+				},
+			)
 
 		self.assertFalse(result["success"])
 		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_before, "a refused submit left a draft")
@@ -198,15 +237,28 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 
 	def test_submitting_again_after_success_answers_with_the_invoice(self):
 		"""A network drop after the server finished: the retry must not ring the sale up twice."""
-		_push(self.order, "Completed")
-		first = self._submit()
+		paid = _push(self.order, "Completed")
+		first = self._submit(paid=[paid])
 		invoices_after_first = frappe.db.count("Sales Invoice")
 
-		again = self._submit()
+		again = self._submit(paid=[paid])
 
 		self.assertTrue(again["success"], again)
 		self.assertEqual(again["invoice_name"], first["invoice_name"])
 		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_after_first)
+
+	def test_a_paid_push_missing_from_the_payments_is_refused(self):
+		"""Its money would go unrecorded: the invoice paid in cash, the till short."""
+		paid = _push(self.order, "Completed")
+		invoices_before = frappe.db.count("Sales Invoice")
+
+		result = self._submit(paid=[])
+
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "mpesa_payment_missing")
+		self.assertIn(paid, result["error"])
+		self.assertTrue(_exists(self.order))
+		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_before)
 
 	def test_an_order_gone_without_an_invoice_is_reported(self):
 		frappe.delete_doc("Sales Order", self.order, force=True, ignore_permissions=True)
@@ -252,6 +304,26 @@ class TestLeavingCheckout(FrappeTestCase):
 				self.assertIn("Held", result["message"])
 				self.assertTrue(_exists(self.order))
 				self.assertEqual(frappe.db.get_value("Sales Order", self.order, "custom_is_klik_held"), 1)
+
+	def test_a_cashier_the_till_allows_may_discard_another_s_order(self):
+		frappe.db.set_value("Sales Order", self.order, "owner", "somebody-else@example.com")
+		_push(self.order, "Failed")
+
+		with _at_till(), patch.object(sales_order, "_may_act_on_held_order", return_value=True):
+			result = discard_mpesa_order(self.order)
+
+		self.assertTrue(result["success"], result)
+		self.assertFalse(_exists(self.order))
+
+	def test_an_order_the_cashier_may_not_act_on_is_left_on_the_held_tab(self):
+		_push(self.order, "Failed")
+
+		with _at_till(), patch.object(sales_order, "_may_act_on_held_order", return_value=False):
+			result = discard_mpesa_order(self.order)
+
+		self.assertFalse(result["success"])
+		self.assertTrue(_exists(self.order))
+		self.assertEqual(frappe.db.get_value("Sales Order", self.order, "custom_is_klik_held"), 1)
 
 	def test_only_an_mpesa_order_is_discarded(self):
 		frappe.db.set_value(
@@ -330,6 +402,16 @@ class TestResumingAKeptOrder(FrappeTestCase):
 		self.assertEqual(details["mpesa_request"]["transaction_id"], "UJ1TEST001")
 		self.assertEqual(details["mpesa_request"]["payment_gateway"], "Mpesa-Test")
 
+	def test_a_paid_push_wins_over_a_newer_failed_one(self):
+		paid = _push(self.order, "Completed")
+		frappe.db.set_value(EXPRESS, paid, "creation", "2020-01-01 00:00:00", update_modified=False)
+		_push(self.order, "Failed")
+
+		with _at_till():
+			details = get_held_order_details(self.order)
+
+		self.assertEqual(details["mpesa_request"]["name"], paid)
+
 	def test_an_ordinary_held_order_has_no_push(self):
 		frappe.db.set_value("Sales Order", self.order, "custom_klik_mpesa_order", 0)
 
@@ -406,3 +488,25 @@ class TestHoldingAnMpesaOrder(FrappeTestCase):
 		# so the reply is all there is to check.
 		self.assertFalse(result["success"])
 		self.assertIn("M-Pesa", result["message"])
+
+
+class TestOtherCheckoutsLeaveAnMpesaOrderAlone(FrappeTestCase):
+	def setUp(self):
+		self.addCleanup(frappe.db.rollback)
+		self.order = _order()
+
+	def test_checkout_held_order_refuses_it_while_its_push_is_live(self):
+		from klik_pos.api.sales_order import _claim_held_order
+
+		_push(self.order, "Completed")
+
+		with _at_till(), self.assertRaisesRegex(frappe.ValidationError, "M-Pesa"):
+			_claim_held_order(self.order)
+
+	def test_once_its_pushes_failed_it_checks_out_like_any_held_order(self):
+		from klik_pos.api.sales_order import _claim_held_order
+
+		_push(self.order, "Failed")
+
+		with _at_till():
+			self.assertIsNone(_claim_held_order(self.order))
