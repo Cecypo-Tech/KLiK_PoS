@@ -506,10 +506,9 @@ def closing_summary():
 	_ensure_may_close(opening_entry, user)
 
 	modes = list(expected_by_mode(opening_entry.name).values())
-	hidden = bool(
-		frappe.db.has_column("POS Profile", "custom_hide_expected_amount")
-		and frappe.db.get_value("POS Profile", opening_entry.pos_profile, "custom_hide_expected_amount")
-	)
+	from klik_pos.api.payment import _hides_expected_amount
+
+	hidden = _hides_expected_amount(opening_entry.pos_profile)
 	if hidden:
 		for entry in modes:
 			entry.update(sales_amount=0.0, expected_amount=0.0, transactions=0)
