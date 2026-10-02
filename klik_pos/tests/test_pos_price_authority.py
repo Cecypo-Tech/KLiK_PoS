@@ -471,5 +471,7 @@ class TestPricingRuleDiscountSurvives(FrappeTestCase):
 		self.assertEqual(flt(row.discount_amount), self.DISCOUNT_PER_UNIT)
 
 	def test_the_totals_match_the_line(self):
+		# `total`, not `net_total`: on a till whose rates include tax, net_total is the
+		# pre-tax share of the 40,000 and would fail for a reason that isn't this bug.
 		doc = self._build()
-		self.assertEqual(flt(doc.net_total), self.CART_RATE * self.QTY)
+		self.assertEqual(flt(doc.total), self.CART_RATE * self.QTY)
