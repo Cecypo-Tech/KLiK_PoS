@@ -60,6 +60,13 @@ describe("paymentBlockReason", () => {
     expect(paymentBlockReason({ ...ready, isCreditSale: true, hasDueDate: true })).toBeNull();
   });
 
+  it("waits for the customer's payment terms on a credit sale, not on a cash sale", () => {
+    expect(
+      paymentBlockReason({ ...ready, isCreditSale: true, hasDueDate: true, creditTermsLoading: true }),
+    ).toMatch(/payment terms/);
+    expect(paymentBlockReason({ ...ready, creditTermsLoading: true })).toBeNull();
+  });
+
   it("names what is still to be paid on a cash sale", () => {
     expect(
       paymentBlockReason({ ...ready, outstandingAmount: 150, outstandingLabel: "KSh 150.00" }),

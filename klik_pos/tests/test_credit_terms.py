@@ -19,6 +19,7 @@ PREFIX = "_Klik Terms "
 ONE_DAY = PREFIX + "1 Day"
 FORTY_FIVE = PREFIX + "45 Days"
 NEXT_MONTH = PREFIX + "End of Next Month"
+NO_TERMS_GROUP = PREFIX + "No Terms Group"
 
 
 def _template(name, based_on, days=0, months=0):
@@ -43,10 +44,7 @@ def _customer(name, payment_terms=None, customer_group=None):
 	doc = frappe.new_doc("Customer")
 	doc.customer_name = name
 	doc.customer_type = "Company"
-	# A group without terms of its own, so only the test's own terms decide.
-	doc.customer_group = customer_group or frappe.db.get_value(
-		"Customer Group", {"is_group": 0, "payment_terms": ["is", "not set"]}, "name"
-	)
+	doc.customer_group = customer_group or NO_TERMS_GROUP
 	doc.territory = frappe.db.get_value("Territory", {"is_group": 0}, "name")
 	doc.payment_terms = payment_terms
 	doc.insert(ignore_permissions=True)
@@ -61,6 +59,15 @@ class CreditTermsCase(FrappeTestCase):
 		_template(ONE_DAY, "Day(s) after invoice date", days=1)
 		_template(FORTY_FIVE, "Day(s) after invoice date", days=45)
 		_template(NEXT_MONTH, "Month(s) after the end of the invoice month", months=1)
+		# The customers' group, without terms of its own: only each test's terms decide.
+		if not frappe.db.exists("Customer Group", NO_TERMS_GROUP):
+			frappe.get_doc(
+				{
+					"doctype": "Customer Group",
+					"customer_group_name": NO_TERMS_GROUP,
+					"parent_customer_group": frappe.db.get_value("Customer Group", {"is_group": 1}, "name"),
+				}
+			).insert(ignore_permissions=True)
 
 	def setUp(self):
 		# The till's company decides the Company-level default; none here unless a test says so.
@@ -82,6 +89,14 @@ class TestTheList(CreditTermsCase):
 		self.assertEqual(given[NEXT_MONTH], str(get_last_day(add_months(today, 1))))
 		dates = [t["due_date"] for t in result["templates"]]
 		self.assertEqual(dates, sorted(dates))
+
+	def test_only_someone_who_may_sell_sees_them(self):
+		frappe.set_user("Guest")
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				credit_terms()
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_no_templates_means_the_date_field(self):
 		with patch.object(payment_terms, "_template_names", return_value=[]):
@@ -107,13 +122,11 @@ class TestTheDefault(CreditTermsCase):
 
 	def test_the_company_s_terms_when_neither_has_any(self):
 		customer = _customer(PREFIX + "Company Terms Co")
-		self.company.stop()
 		with (
 			patch.object(payment_terms, "_till_company", return_value="_Test Company"),
 			patch("frappe.get_cached_value", side_effect=_company_terms),
 		):
 			self.assertEqual(credit_terms(customer)["default"], FORTY_FIVE)
-		self.company.start()
 
 	def test_the_earliest_when_no_terms_apply(self):
 		customer = _customer(PREFIX + "No Terms Co")

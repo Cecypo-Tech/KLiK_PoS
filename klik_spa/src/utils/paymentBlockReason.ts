@@ -5,6 +5,8 @@ export interface PaymentBlockState {
   reconciliationMessage: string | null;
   isCreditSale: boolean;
   hasDueDate: boolean;
+  /** The customer's payment terms are still loading: the due date shown is not theirs yet. */
+  creditTermsLoading?: boolean;
   isB2C: boolean;
   outstandingAmount: number;
   /** outstandingAmount formatted in the sale's currency. */
@@ -31,6 +33,7 @@ export function paymentBlockReason(s: PaymentBlockState): string | null {
   if (s.mpesaUncoveredLabel) return `Pick the M-Pesa receipt or send an STK push for ${s.mpesaUncoveredLabel}`;
   if (!s.reconciliationOk) return s.reconciliationMessage || "This sale is on hold";
   if (s.isCreditSale && !s.hasDueDate) return "Select a due date for this credit sale";
+  if (s.isCreditSale && s.creditTermsLoading) return "Loading the customer's payment terms";
   if (s.isB2C && !s.isCreditSale && s.outstandingAmount > 0) {
     return `${s.outstandingLabel} still to be paid`;
   }

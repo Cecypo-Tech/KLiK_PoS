@@ -19,7 +19,7 @@ describe("chooseTerm", () => {
     expect(chooseTerm(terms, "7 Days")?.name).toBe("7 Days");
   });
 
-  it("falls back to the default when the pick is gone (another customer's list)", () => {
+  it("falls back to the default when the pick is not offered (or is cleared for a new customer)", () => {
     expect(chooseTerm(terms, "60 Days")?.name).toBe("30 Days");
   });
 

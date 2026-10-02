@@ -201,8 +201,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Payment terms in place of a typed due date, where the site has any (utils/creditTerms).
   const [creditTerms, setCreditTerms] = useState<CreditTerms | null>(null);
   const [termsTemplate, setTermsTemplate] = useState("");
-  const termsTemplateRef = useRef("");
-  termsTemplateRef.current = termsTemplate;
+  const [creditTermsLoading, setCreditTermsLoading] = useState(false);
+  // The cashier's own pick survives a refetch (Credit Sale off and on); a new customer gets
+  // their own terms preselected instead.
+  const handPickedTerm = useRef<{ customer: string | undefined; name: string } | null>(null);
   const usingTerms = isCreditSale && (creditTerms?.templates.length ?? 0) > 0;
   const [submittedInvoice, setSubmittedInvoice] = useState<any>(null);
   const [invoiceData, setInvoiceData] = useState<any>(null);
@@ -1405,8 +1407,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     appliedLoyalty,
     isCreditSale,
     dueDate,
-    usingTerms,
-    termsTemplate,
     allowPartialPayments,
     getEffectiveItemRate,
   ]);
@@ -1536,6 +1536,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
     if (isCreditSale && !dueDate) {
       toast.error("Please select a due date for this credit sale");
+      return;
+    }
+    if (isCreditSale && creditTermsLoading) {
+      toast.info("Loading the customer's payment terms");
       return;
     }
     if (isB2C && !isCreditSale) {
@@ -1912,6 +1916,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       reconciliationMessage: reconciliation.message,
       isCreditSale,
       hasDueDate: Boolean(dueDate),
+      creditTermsLoading,
       isB2C,
       outstandingAmount,
       outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
@@ -2079,17 +2084,29 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // when the customer changes. A failed fetch or a site without templates keeps the date field.
   useEffect(() => {
     if (!isOpen || !isCreditSale) return;
+    const customer = selectedCustomer?.id || undefined;
     let cancelled = false;
-    getCreditTerms(selectedCustomer?.id || undefined)
+    // Submit waits for these: until they land, the due date shown is today, not the customer's.
+    setCreditTermsLoading(true);
+    getCreditTerms(customer)
       .then((terms) => {
         if (cancelled) return;
         setCreditTerms(terms);
-        const picked = chooseTerm(terms, termsTemplateRef.current);
+        const handPicked = handPickedTerm.current;
+        const kept = handPicked && handPicked.customer === customer ? handPicked.name : "";
+        const picked = chooseTerm(terms, kept);
         setTermsTemplate(picked?.name ?? "");
         if (picked) setDueDate(picked.due_date);
       })
       .catch(() => {
-        if (!cancelled) setCreditTerms(null);
+        if (cancelled) return;
+        setCreditTerms(null);
+        toast.warning("Could not load the payment terms: check the due date before submitting", {
+          toastId: "pos-credit-terms-failed",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setCreditTermsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -2099,6 +2116,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const selectTerm = (name: string) => {
     const picked = chooseTerm(creditTerms, name);
     if (!picked) return;
+    handPickedTerm.current = { customer: selectedCustomer?.id || undefined, name: picked.name };
     setTermsTemplate(picked.name);
     setDueDate(picked.due_date);
   };

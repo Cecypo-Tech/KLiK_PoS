@@ -17,13 +17,15 @@ def _template_names():
 
 
 def _till_company():
-	from klik_pos.klik_pos.utils import get_current_pos_profile
+	from klik_pos.klik_pos.utils import get_current_pos_profile_lite
 
+	queued = len(frappe.local.message_log)
 	try:
-		profile = get_current_pos_profile()
-	except Exception:
+		return get_current_pos_profile_lite(["company"]).get("company")
+	except frappe.ValidationError:
+		# No till for this user, so no Company-level terms; drop the message the lookup queued.
+		del frappe.local.message_log[queued:]
 		return None
-	return getattr(profile, "company", None)
 
 
 def credit_due_date(template, posting_date=None):
@@ -40,6 +42,7 @@ def credit_terms(customer=None):
 	"""Every template with the due date it gives today, earliest first, and the one to preselect:
 	the customer's own terms (Customer, then Customer Group, then the till's Company - ERPNext's
 	order), else the earliest. No templates: an empty list, and the till keeps its date field."""
+	frappe.has_permission("Sales Invoice", "create", throw=True)
 	today = nowdate()
 	templates = sorted(
 		({"name": name, "due_date": credit_due_date(name, today)} for name in _template_names()),
