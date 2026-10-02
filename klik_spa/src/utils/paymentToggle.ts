@@ -28,3 +28,25 @@ export function toggleOn(
   if (lockedIds.includes(holderId)) return { ...amounts, [methodId]: 0 };
   return { ...amounts, [holderId]: 0, [methodId]: roundCurrency(payable) };
 }
+
+/**
+ * Amounts after the sale's total changed - a discount, a delivery charge, a coupon.
+ *
+ * The one method that paid the whole previous total pays the new total, whichever method it
+ * is: M-Pesa ticked for 560 and then discounted to 4 must ask the customer for 4, not 560. A
+ * split, an amount the cashier set away from the total, or `locked` (a method whose money is
+ * already asked for or paid - an M-Pesa push waiting or completed) is left as it is.
+ */
+export function followTotal(
+  prev: Record<string, number>,
+  previousTotal: number,
+  newTotal: number,
+  locked?: string | null,
+): Record<string, number> {
+  const paying = Object.entries(prev).filter(([, amount]) => Number(amount) > 0);
+  if (paying.length !== 1) return prev;
+  const [method, amount] = paying[0] as [string, number];
+  if (method === locked) return prev;
+  if (Math.abs(roundCurrency(Number(amount)) - roundCurrency(previousTotal)) > 0.01) return prev;
+  return { ...prev, [method]: roundCurrency(newTotal) };
+}

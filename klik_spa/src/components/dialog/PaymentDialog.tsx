@@ -37,7 +37,7 @@ import {
   receiptLeftoverMessage,
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
-import { toggleOn } from "../../utils/paymentToggle";
+import { followTotal, toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import {
@@ -2293,30 +2293,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
 
-    setPaymentAmounts((prev) => {
-      const entries = Object.entries(prev);
-      if (entries.length === 0) {
-        return prev;
-      }
-
-      const currentPaid = roundCurrency(calculateTotalPayments(Object.values(prev)));
-      const previousRounded = roundCurrency(previousTotal);
-
-      // If cashier already edited amounts away from previous total, do not override.
-      if (Math.abs(currentPaid - previousRounded) > 0.01) {
-        return prev;
-      }
-
-      const defaultMode = modes.find((mode) => mode.default === 1)?.mode_of_payment;
-      if (entries.length === 1 && defaultMode && entries[0]?.[0] === defaultMode) {
-        return { [defaultMode]: roundCurrency(checkoutPayableTotal) };
-      }
-
-      return prev;
-    });
+    // A push waiting on or paid by the customer fixes its method's amount; receipts likewise.
+    const lockedMethod =
+      mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed")
+        ? mpesaFlow.modeOfPayment
+        : null;
+    setPaymentAmounts((prev) => followTotal(prev, previousTotal, checkoutPayableTotal, lockedMethod));
 
     previousCheckoutGrandTotalRef.current = checkoutPayableTotal;
-  }, [checkoutPayableTotal, isOpen, invoiceSubmitted, isProcessingPayment, isCreditSale, modes]);
+  }, [checkoutPayableTotal, isOpen, invoiceSubmitted, isProcessingPayment, isCreditSale, mpesaFlow]);
 
   useEffect(() => {
     if (invoiceSubmitted && invoiceData && print_receipt_on_order_complete) {
