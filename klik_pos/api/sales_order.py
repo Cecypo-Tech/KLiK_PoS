@@ -111,7 +111,37 @@ def _claim_held_order(order_id):
     _assert_held_order_access(so)
     if so.docstatus != 0:
         frappe.throw(_("Sales Order {0} is not a draft.").format(order_id))
+    if so.get("custom_klik_mpesa_order"):
+        from klik_pos.api.mpesa_order import live_push
+
+        live = live_push(order_id)
+        if live:
+            # Finished any other way, the push's payment would land on nothing - or be paid
+            # for again. The M-Pesa checkout picks it up when the order is reopened.
+            frappe.throw(
+                _(
+                    "Order {0} has M-Pesa request {1}, which may still pay it or already has. "
+                    "Finish it by M-Pesa: reopen it and submit the confirmed payment."
+                ).format(order_id, live)
+            )
     return None
+
+
+def _hold_mpesa_order(so):
+    """Holding the sale an M-Pesa order stands for makes it an ordinary held order - but not
+    while a push sent from it may still pay it, or already has."""
+    from klik_pos.api.mpesa_order import live_push
+
+    live = live_push(so.name)
+    if live:
+        frappe.throw(
+            _(
+                "Order {0} can't be held: M-Pesa request {1} sent from it may still pay it, "
+                "or already has. Finish the sale instead."
+            ).format(so.name, live)
+        )
+    so.custom_klik_mpesa_order = 0
+    so.custom_is_klik_held = 1
 
 
 def _remove_checked_out_order(order_id):
@@ -472,6 +502,8 @@ def create_held_order(data):
             if gone:
                 return _gone_response(target_order_id, gone)
             so = frappe.get_doc("Sales Order", target_order_id)
+            if so.get("custom_klik_mpesa_order"):
+                _hold_mpesa_order(so)
             # The id comes from the client and the save below ignores permissions, so without
             # this any Sales Order - held or not, any till - could be rewritten by id.
             _assert_held_order_access(so)
@@ -509,6 +541,15 @@ def create_held_order(data):
         frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), "Create Held Order Error")
         return {"success": False, "message": str(e)}
+
+
+def _mpesa_fields(so):
+    """An M-Pesa order resumed from the Held tab carries its push, so checkout picks it up
+    instead of charging the customer again."""
+    from klik_pos.api.mpesa_order import last_push
+
+    is_mpesa = cint(so.get("custom_klik_mpesa_order"))
+    return {"mpesa_order": is_mpesa, "mpesa_request": last_push(so.name) if is_mpesa else None}
 
 
 @frappe.whitelist()
@@ -574,6 +615,7 @@ def get_held_order_details(order_id):
             "discount_amount": flt(so.discount_amount or 0),
             "apply_discount_on": so.apply_discount_on or "",
             **_approval_fields(so),
+            **_mpesa_fields(so),
         }
 
     except Exception as e:
@@ -617,8 +659,19 @@ def delete_held_order(order_id):
         _assert_held_order_access(so)
         if so.docstatus != 0:
             return {"success": False, "error": f"Cannot delete {order_id}: not a draft."}
-        with _keeping_naming_series():
-            so.delete(ignore_permissions=True)
+
+        from klik_pos.api.mpesa_order import delete_order, live_push
+
+        live = live_push(order_id)
+        if live:
+            return {
+                "success": False,
+                "error": _(
+                    "Held order {0} can't be deleted: M-Pesa request {1} sent from it may still pay "
+                    "it, or already has. Finish the sale instead."
+                ).format(order_id, live),
+            }
+        delete_order(so)
         return {"success": True, "message": f"Held order {order_id} deleted."}
     except frappe.DoesNotExistError:
         return {"success": False, "error": f"Order {order_id} not found."}
@@ -726,6 +779,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
         # Held orders for walk-ins all sit under one customer; the buyer's name tells them apart.
         if frappe.db.has_column("Sales Order", "custom_walkin_customer_name"):
             so_fields.append("custom_walkin_customer_name")
+        # An M-Pesa order kept for its push: the Held tab says so.
+        if frappe.db.has_column("Sales Order", "custom_klik_mpesa_order"):
+            so_fields.append("custom_klik_mpesa_order")
 
         orders = frappe.get_all(
             "Sales Order",
@@ -780,6 +836,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             order["cashier"] = cashier_map.get(order.owner) or order.owner
             order["approval_state"] = order.pop(APPROVAL_STATE_FIELD, None) or None
             order["price_breach"] = cint(order.pop(PRICE_BREACH_FIELD, 0))
+            order["mpesa_order"] = cint(order.pop("custom_klik_mpesa_order", 0))
 
         return {"success": True, "data": orders, "total_count": len(orders)}
 
@@ -908,14 +965,33 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
         for name in _orphaned_held_orders(opening_entry_name):
             if name not in names:
                 names.append(name)
+        # M-Pesa orders this shift's checkouts never let go of (the browser closed mid-sale).
+        if frappe.db.has_column("Sales Order", "custom_klik_mpesa_order"):
+            for name in frappe.get_all(
+                "Sales Order",
+                filters={
+                    "custom_klik_mpesa_order": 1,
+                    "docstatus": 0,
+                    "custom_pos_opening_entry": opening_entry_name,
+                },
+                pluck="name",
+            ):
+                if name not in names:
+                    names.append(name)
+        from klik_pos.api.mpesa_order import delete_order, live_push
+
         deleted = 0
-        with _keeping_naming_series():
-            for name in names:
-                try:
-                    frappe.delete_doc("Sales Order", name, ignore_permissions=True)
-                    deleted += 1
-                except Exception as e:
-                    frappe.logger().error("Error deleting held order %s: %s", name, e)
+        for name in names:
+            # Kept for its push: the payment may still come, or came, for this order. One a
+            # checkout never handed over goes on the Held tab, where it can be finished.
+            if live_push(name):
+                frappe.db.set_value("Sales Order", name, "custom_is_klik_held", 1)
+                continue
+            try:
+                delete_order(frappe.get_doc("Sales Order", name))
+                deleted += 1
+            except Exception as e:
+                frappe.logger().error("Error deleting held order %s: %s", name, e)
         if deleted:
             frappe.logger().info(
                 "Cleared %d held order(s) for opening entry %s", deleted, opening_entry_name

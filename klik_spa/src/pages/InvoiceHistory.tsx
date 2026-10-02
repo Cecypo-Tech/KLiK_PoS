@@ -71,6 +71,8 @@ interface HeldOrderExtras {
   isHeldOrder?: boolean;
   approvalState?: string | null;
   priceBreach?: number;
+  /** Kept for an M-Pesa push sent from it: finishing it picks the payment up. */
+  mpesaOrder?: boolean;
 }
 
 const INVOICE_HISTORY_VIEW_MODE_KEY = "invoice-history-view-mode";
@@ -234,6 +236,7 @@ export default function InvoiceHistoryPage() {
         isHeldOrder: true,
         approvalState: o.approval_state ?? null,
         priceBreach: Number(o.price_breach) || 0,
+        mpesaOrder: Boolean(o.mpesa_order),
       })) as unknown as (SalesInvoice & HeldOrderExtras)[];
       setHeldOrders(mapped);
     } catch {
@@ -508,13 +511,25 @@ const APPROVAL_BADGE_TONE_CLASSES: Record<string, string> = {
 const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
   if (!invoice.isHeldOrder) return null;
   const badge = approvalBadge(invoice.approvalState, invoice.priceBreach);
-  if (!badge) return null;
+  if (!badge && !invoice.mpesaOrder) return null;
   return (
-    <span
-      className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${APPROVAL_BADGE_TONE_CLASSES[badge.tone]}`}
-    >
-      {badge.label}
-    </span>
+    <>
+      {badge && (
+        <span
+          className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${APPROVAL_BADGE_TONE_CLASSES[badge.tone]}`}
+        >
+          {badge.label}
+        </span>
+      )}
+      {invoice.mpesaOrder && (
+        <span
+          className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${APPROVAL_BADGE_TONE_CLASSES.green}`}
+          title="An M-Pesa request was sent for this order. Open it to finish the sale - don't charge the customer again."
+        >
+          M-Pesa
+        </span>
+      )}
+    </>
   );
 };
 

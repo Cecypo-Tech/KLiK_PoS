@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toggleOn } from "./paymentToggle";
+import { followTotal, toggleOn, withPaidMpesa } from "./paymentToggle";
 
 describe("toggleOn", () => {
   it("fills what is still owed, leaving the other rows alone", () => {
@@ -28,5 +28,54 @@ describe("toggleOn", () => {
     // M-Pesa holds the sale from a picked receipt; ticking Cash must not quietly move it,
     // or the receipt is consumed for a sale that took nothing from it.
     expect(toggleOn({ Cash: 0, "Mpesa-1": 4002 }, "Cash", 4002, ["Mpesa-1"])).toEqual({ Cash: 0, "Mpesa-1": 4002 });
+  });
+});
+
+describe("followTotal", () => {
+  it("moves the one method that paid the whole sale to the new total - M-Pesa as much as Cash", () => {
+    // M-Pesa ticked for 560, then a 556 discount: the push must ask for 4, not 560.
+    expect(followTotal({ Cash: 0, "Mpesa-1": 560 }, 560, 4)).toEqual({ Cash: 0, "Mpesa-1": 4 });
+    expect(followTotal({ Cash: 560 }, 560, 4)).toEqual({ Cash: 4 });
+  });
+
+  it("follows a rise too, as with a delivery charge added", () => {
+    expect(followTotal({ "Mpesa-1": 560 }, 560, 760)).toEqual({ "Mpesa-1": 760 });
+  });
+
+  it("leaves a split alone", () => {
+    expect(followTotal({ Cash: 300, "Mpesa-1": 260 }, 560, 4)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+
+  it("leaves an amount the cashier set away from the total alone", () => {
+    expect(followTotal({ Cash: 1000 }, 560, 4)).toEqual({ Cash: 1000 });
+  });
+
+  it("leaves a method whose money is already asked for or paid alone", () => {
+    // A push for 560 is waiting on, or was paid by, the customer: the amount is that push's.
+    expect(followTotal({ "Mpesa-1": 560 }, 560, 4, "Mpesa-1")).toEqual({ "Mpesa-1": 560 });
+  });
+
+  it("has nothing to move when nothing is paid", () => {
+    expect(followTotal({}, 560, 4)).toEqual({});
+  });
+});
+
+describe("withPaidMpesa", () => {
+  it("puts the paid amount on its method and takes it off the opening cash", () => {
+    // Resumed: the till pre-filled Cash with the whole 560; M-Pesa paid all of it.
+    expect(withPaidMpesa({ Cash: 560 }, "Mpesa-1", 560, 560)).toEqual({ Cash: 0, "Mpesa-1": 560 });
+  });
+
+  it("keeps the rest of a split", () => {
+    // M-Pesa paid 260 of a 560 sale; the 300 cash stays.
+    expect(withPaidMpesa({ Cash: 300 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+
+  it("trims what the other rows hold beyond the sale", () => {
+    expect(withPaidMpesa({ Cash: 560 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+
+  it("leaves a method already holding an amount alone", () => {
+    expect(withPaidMpesa({ Cash: 300, "Mpesa-1": 260 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
   });
 });

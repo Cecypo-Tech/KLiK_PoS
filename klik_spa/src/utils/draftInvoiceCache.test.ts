@@ -8,6 +8,7 @@ import { EMPTY_CHECKOUT_EXTRAS } from "./heldOrderPayload";
 import {
   cacheDraftInvoiceItems,
   cacheHeldOrder,
+  getOriginalHeldOrderMpesa,
   clearDraftInvoiceCache,
   forgetOriginalDraftInvoice,
   forgetOriginalHeldOrder,
@@ -136,5 +137,20 @@ describe("loadCachedItemsToCart and checkout's own state", () => {
     cacheHeldOrder("SAL-ORD-1", [item], null, 10);
 
     expect((await stateAfterLoad()).checkoutExtras).toEqual(leftover);
+  });
+});
+
+describe("a held order kept for its M-Pesa push", () => {
+  it("remembers the push it was kept for, so checkout picks it up instead of charging again", () => {
+    const request = { name: "MEXP-1", status: "Completed", amount: 4, phone_number: "254700000123", transaction_id: "UJ1" };
+    cacheHeldOrder("SAL-ORD-9", [], null, 0, {}, { isMpesaOrder: true, request });
+
+    expect(getOriginalHeldOrderMpesa()).toEqual({ isMpesaOrder: true, request });
+  });
+
+  it("is not an M-Pesa order unless the held order said so", () => {
+    cacheHeldOrder("SAL-ORD-1", [], null, 0);
+
+    expect(getOriginalHeldOrderMpesa()).toEqual({ isMpesaOrder: false, request: null });
   });
 });
