@@ -17,11 +17,10 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import add_to_date, flt
 
 from klik_pos.api import sales_order
 from klik_pos.api.sales_invoice import (
-	_check_discardable_links,
 	_keeping_naming_series,
 	_parse_extra_fields,
 	create_draft_invoice,
@@ -31,8 +30,11 @@ from klik_pos.api.sales_invoice import (
 
 EXPRESS = "Mpesa Express Request"
 # A push in either state may pay the order, or has: the order must not be lost.
-LIVE_PUSH_STATUSES = ("In Progress", "Completed")
 SAVEPOINT = "klik_submit_mpesa_order"
+# Safaricom drops an unanswered prompt after about a minute. A push still In Progress well
+# after that lost its callback, and nothing will pay it now (frappe_mpsa_payments' own
+# duplicate check uses the same lifetime).
+PROMPT_LIFETIME_MINUTES = 5
 
 
 def _pushes(order_name, statuses=None):
@@ -45,9 +47,26 @@ def _pushes(order_name, statuses=None):
 	return frappe.get_all(EXPRESS, filters=filters, pluck="name", order_by="creation desc")
 
 
+def _waiting(order_name):
+	"""Pushes of the order still waiting on the customer - not ones whose callback was lost."""
+	if not frappe.db.exists("DocType", EXPRESS):
+		return []
+	return frappe.get_all(
+		EXPRESS,
+		filters={
+			"reference_doctype": "Sales Order",
+			"reference_name": order_name,
+			"status": "In Progress",
+			"creation": [">", add_to_date(None, minutes=-PROMPT_LIFETIME_MINUTES)],
+		},
+		pluck="name",
+		order_by="creation desc",
+	)
+
+
 def live_push(order_name):
 	"""A push sent from the order that may still pay it, or already did; else None."""
-	pushes = _pushes(order_name, LIVE_PUSH_STATUSES)
+	pushes = _pushes(order_name, ("Completed",)) or _waiting(order_name)
 	return pushes[0] if pushes else None
 
 
@@ -79,10 +98,24 @@ def last_push(order_name):
 def delete_order(so):
 	"""Delete a draft order nothing live depends on.
 
-	A Failed push still names the order, and Frappe refuses to delete a document a submitted
-	one links to; it paid nothing, so it does not stand in the way. Any other link still does.
+	A failed push - or one whose callback was lost - still names the order, and Frappe refuses
+	to delete a document a submitted one links to. Neither will pay it, so neither stands in
+	the way. A live push, or any other link, still does.
 	"""
-	_check_discardable_links(so)
+	from frappe.model.delete_doc import (
+		check_if_doc_is_linked,
+		get_dynamic_linked_docs,
+		raise_link_exists_exception,
+	)
+
+	check_if_doc_is_linked(so)
+	live = set(_pushes(so.name, ("Completed",))) | set(_waiting(so.name))
+	for link in get_dynamic_linked_docs(so, "Delete"):
+		if link["reference_doctype"] == EXPRESS and link["reference_docname"] not in live:
+			continue
+		raise_link_exists_exception(
+			so, link["reference_doctype"], link["reference_docname"], link["at_position"]
+		)
 	with _keeping_naming_series():
 		frappe.delete_doc("Sales Order", so.name, ignore_permissions=True, force=True)
 
@@ -236,22 +269,40 @@ def _invoice_already_made(order_id):
 	}
 
 
-def _unrecorded_paid_push(order_id, data):
-	"""A Completed push of the order the cart's payments do not carry, or None.
+def _paid_push_refusal(order_id, data):
+	"""Why the cart cannot be submitted against the order's paid pushes, or None.
 
-	Its money would go unrecorded: the invoice settled some other way and the till short by
-	what the customer paid. The M-Pesa row names its push in custom_reference_text.
+	A paid push's money must be on the invoice in full - recorded for less (cash typed after it
+	paid shrank the M-Pesa row) the till is short what the customer paid. A sale paid by two
+	pushes was paid twice: that is for the desk to settle and refund, not the till.
 	"""
 	paid = _pushes(order_id, ("Completed",))
 	if not paid:
 		return None
-	recorded = {
-		row.get("custom_reference_text")
+	if len(paid) > 1:
+		return (
+			"mpesa_paid_twice",
+			_(
+				"This sale was paid more than once by M-Pesa ({0}). Finish it from the desk and "
+				"refund the extra payment."
+			).format(", ".join(reversed(paid))),
+		)
+	push = paid[0]
+	recorded = sum(
+		flt(row.get("amount"))
 		for row in (data or {}).get("paymentMethods") or []
-		if isinstance(row, dict) and flt(row.get("amount")) > 0
-	}
-	missing = [name for name in paid if name not in recorded]
-	return missing[0] if missing else None
+		if isinstance(row, dict) and row.get("custom_reference_text") == push
+	)
+	collected = flt(frappe.db.get_value(EXPRESS, push, "amount"))
+	if flt(recorded, 2) < flt(collected, 2):
+		return (
+			"mpesa_payment_missing",
+			_(
+				"M-Pesa request {0} for this sale paid {1}, but this checkout records {2} of it. "
+				"Reopen the sale from Held orders so the payment is picked up in full."
+			).format(push, collected, recorded),
+		)
+	return None
 
 
 def _hand_over_to_invoice(order_id, invoice):
@@ -302,7 +353,7 @@ def submit_mpesa_order(order_id, data=None, held_order_id=None, remarks=None):
 		if so.docstatus != 0:
 			return sales_order._gone_response(order_id, sales_order._held_order_gone(order_id))
 
-		waiting = _pushes(order_id, ("In Progress",))
+		waiting = _waiting(order_id)
 		if waiting:
 			# Its payment would land on a sale already finished with other money.
 			return {
@@ -314,17 +365,10 @@ def submit_mpesa_order(order_id, data=None, held_order_id=None, remarks=None):
 				),
 			}
 
-		unrecorded = _unrecorded_paid_push(order_id, data)
-		if unrecorded:
-			return {
-				"success": False,
-				"code": "mpesa_payment_missing",
-				"order_id": order_id,
-				"error": _(
-					"M-Pesa request {0} for this sale was paid, but its payment is not in this checkout. "
-					"Reopen the sale from Held orders so the payment is picked up."
-				).format(unrecorded),
-			}
+		refusal = _paid_push_refusal(order_id, data)
+		if refusal:
+			code, error = refusal
+			return {"success": False, "code": code, "order_id": order_id, "error": error}
 
 		draft = _create_invoice_draft(order_id, data)
 		other_held_order = held_order_id if held_order_id and held_order_id != order_id else None

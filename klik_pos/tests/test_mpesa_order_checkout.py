@@ -260,6 +260,30 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 		self.assertTrue(_exists(self.order))
 		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_before)
 
+	def test_a_paid_push_recorded_for_less_than_it_paid_is_refused(self):
+		"""Cash typed after the push was paid shrank the M-Pesa row: the invoice would record
+		less M-Pesa than came in, and cash nobody took."""
+		paid = _push(self.order, "Completed")  # paid 10
+		data = {"paymentMethods": [{"method": "Mpesa-Test", "amount": 6, "custom_reference_text": paid}]}
+
+		with _at_till(), patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice):
+			result = submit_mpesa_order(self.order, data=data)
+
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "mpesa_payment_missing")
+		self.assertTrue(_exists(self.order))
+
+	def test_a_sale_paid_twice_is_sent_to_the_desk(self):
+		first, second = _push(self.order, "Completed"), _push(self.order, "Completed")
+
+		result = self._submit(paid=[first])
+
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "mpesa_paid_twice")
+		self.assertIn(first, result["error"])
+		self.assertIn(second, result["error"])
+		self.assertTrue(_exists(self.order))
+
 	def test_an_order_gone_without_an_invoice_is_reported(self):
 		frappe.delete_doc("Sales Order", self.order, force=True, ignore_permissions=True)
 
@@ -324,6 +348,18 @@ class TestLeavingCheckout(FrappeTestCase):
 		self.assertFalse(result["success"])
 		self.assertTrue(_exists(self.order))
 		self.assertEqual(frappe.db.get_value("Sales Order", self.order, "custom_is_klik_held"), 1)
+
+	def test_a_push_whose_callback_was_lost_does_not_pin_the_order(self):
+		"""Still In Progress long after the prompt expired: nothing will pay it now."""
+		stale = _push(self.order, "In Progress")
+		frappe.db.set_value(
+			EXPRESS, stale, "creation", frappe.utils.add_to_date(None, minutes=-10), update_modified=False
+		)
+
+		result = self._discard()
+
+		self.assertFalse(result.get("kept"), result)
+		self.assertFalse(_exists(self.order))
 
 	def test_only_an_mpesa_order_is_discarded(self):
 		frappe.db.set_value(

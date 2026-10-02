@@ -37,7 +37,7 @@ import {
   receiptLeftoverMessage,
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
-import { followTotal, toggleOn } from "../../utils/paymentToggle";
+import { followTotal, toggleOn, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import {
@@ -1603,8 +1603,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const { modeOfPayment, amount } = mpesaFlow;
     if (!modeOfPayment || amount <= 0) return;
     setLastModifiedMethodId(modeOfPayment);
-    setPaymentAmounts((prev) => (Number(prev[modeOfPayment]) > 0 ? prev : { [modeOfPayment]: amount }));
-  }, [mpesaFlow, mpesaOrderName]);
+    setPaymentAmounts((prev) => withPaidMpesa(prev, modeOfPayment, amount, checkoutPayableTotal));
+  }, [mpesaFlow, mpesaOrderName, checkoutPayableTotal]);
 
   useEffect(() => {
     clearLoyaltyRedemption();

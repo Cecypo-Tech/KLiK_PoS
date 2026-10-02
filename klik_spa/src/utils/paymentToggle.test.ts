@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { followTotal, toggleOn } from "./paymentToggle";
+import { followTotal, toggleOn, withPaidMpesa } from "./paymentToggle";
 
 describe("toggleOn", () => {
   it("fills what is still owed, leaving the other rows alone", () => {
@@ -57,5 +57,25 @@ describe("followTotal", () => {
 
   it("has nothing to move when nothing is paid", () => {
     expect(followTotal({}, 560, 4)).toEqual({});
+  });
+});
+
+describe("withPaidMpesa", () => {
+  it("puts the paid amount on its method and takes it off the opening cash", () => {
+    // Resumed: the till pre-filled Cash with the whole 560; M-Pesa paid all of it.
+    expect(withPaidMpesa({ Cash: 560 }, "Mpesa-1", 560, 560)).toEqual({ Cash: 0, "Mpesa-1": 560 });
+  });
+
+  it("keeps the rest of a split", () => {
+    // M-Pesa paid 260 of a 560 sale; the 300 cash stays.
+    expect(withPaidMpesa({ Cash: 300 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+
+  it("trims what the other rows hold beyond the sale", () => {
+    expect(withPaidMpesa({ Cash: 560 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+
+  it("leaves a method already holding an amount alone", () => {
+    expect(withPaidMpesa({ Cash: 300, "Mpesa-1": 260 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
   });
 });
