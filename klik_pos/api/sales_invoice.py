@@ -4666,6 +4666,19 @@ class CustomSalesInvoice(SalesInvoice):
 				).format(self.pos_profile),
 			)
 
+	def set_pos_fields(self, for_validate=False):
+		# A return carries the taxes it was built with. It takes the refunding till (see
+		# _stamp_return_with_refunding_shift), and ERPNext fills an empty taxes_and_charges
+		# from the till and then pulls that template's rows into an empty taxes table - so
+		# an untaxed sale returned at a taxed till was credited tax it never charged.
+		if not (self.is_return and self.return_against):
+			return super().set_pos_fields(for_validate)
+		template, taxes = self.taxes_and_charges, list(self.get("taxes") or [])
+		pos = super().set_pos_fields(for_validate)
+		self.taxes_and_charges = template
+		self.set("taxes", taxes)
+		return pos
+
 	def calculate_taxes_and_totals(self):
 		super().calculate_taxes_and_totals()
 		# A return applied to its original books its Debtors legs - credit and refund alike -
