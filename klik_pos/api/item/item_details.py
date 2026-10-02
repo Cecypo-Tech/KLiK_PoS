@@ -1,9 +1,9 @@
 import frappe
 from frappe import _
-from frappe.utils import flt, get_datetime, getdate, today
+from frappe.utils import cint, flt, get_datetime, getdate, today
 
 from erpnext.stock.doctype.batch.batch import get_batch_qty
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_current_pos_profile, get_current_pos_profile_lite
 
 from ..sql_builder import apply_sql_permissions
 from .item_price import ENABLED_PRICE_LIST, fetch_item_price, get_price_list_with_customer_priority
@@ -523,7 +523,7 @@ def get_full_pricing_and_batch_details(
                 }
                 serials_list.append(serial_entry)
 
-    return {
+    details = {
         "item_name": item_info.item_name,
         "item_code": item_info.item_code,
         "standard_rate": item_info.standard_rate or 0,
@@ -551,6 +551,43 @@ def get_full_pricing_and_batch_details(
             if v["bal_qty"] != 0
         ],
     }
+    # 'Hide Cost Price' on the till: hidden on screen is not enough when the response
+    # carries it.
+    return _without_cost(details) if _till_hides_cost() else details
+
+
+COST_HIDDEN_FIELD = "restrict_cost_visibility_in_tooltip"
+
+
+def _till_hides_cost():
+    """Whether the caller's till has 'Hide Cost Price' on. No till (a desk user, who sees
+    valuation in ERPNext anyway): nothing is hidden."""
+    queued = len(frappe.local.message_log)
+    try:
+        profile = get_current_pos_profile_lite([COST_HIDDEN_FIELD])
+    except frappe.ValidationError:
+        del frappe.local.message_log[queued:]
+        return False
+    return cint(profile.get(COST_HIDDEN_FIELD)) == 1
+
+
+def _without_cost(details):
+    """get_full_pricing_and_batch_details' answer with every valuation, stock value, cost and
+    margin set to 0; selling prices and quantities stay."""
+    details["valuation_rate"] = 0
+    details["total_bal_val"] = 0
+    details["global_stock_total"].update(total_value=0, avg_valuation_rate=0)
+    for price in details.get("price_lists") or []:
+        price.update(cost=0, margin=0, margin_pct=0)
+    for batch in details.get("batches") or []:
+        batch.update(val=0, val_rate=0)
+        for serial in batch.get("serials") or []:
+            serial["val_rate"] = 0
+    for serial in details.get("serials") or []:
+        serial["val_rate"] = 0
+    for row in details.get("warehouse_stock") or []:
+        row.update(bal_val=0, val_rate=0)
+    return details
 
 
 @frappe.whitelist()

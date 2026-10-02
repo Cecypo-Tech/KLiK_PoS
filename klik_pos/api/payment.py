@@ -665,6 +665,15 @@ def get_opening_entry_payment_summary():
 			response["figures_hidden"] = True
 			return response
 
+		if _hides_expected_amount(opening_doc.pos_profile):
+			# A blind count: the takings stay off the screen and out of the response. The
+			# float the cashier entered stays.
+			for row in payment_summary:
+				row.update(amount=0.0, transactions=0)
+			response = _success_response(opening_info, payment_summary)
+			response["figures_hidden"] = True
+			return response
+
 		return _success_response(opening_info, payment_summary)
 
 	except Exception as e:
@@ -673,6 +682,14 @@ def get_opening_entry_payment_summary():
 			message=frappe.get_traceback(),
 		)
 		return _error_response(str(e))
+
+
+def _hides_expected_amount(pos_profile):
+	"""The till's 'Hide Expected Amount' (a blind count at close)."""
+	return bool(
+		frappe.db.has_column("POS Profile", "custom_hide_expected_amount")
+		and frappe.db.get_value("POS Profile", pos_profile, "custom_hide_expected_amount")
+	)
 
 
 def _get_opening_document():
