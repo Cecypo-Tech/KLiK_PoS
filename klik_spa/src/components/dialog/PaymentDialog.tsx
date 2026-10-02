@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { paymentBlockReason } from "../../utils/paymentBlockReason";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
+import { getCreditTerms } from "../../services/paymentTerms";
+import { chooseTerm, termLabel, type CreditTerms } from "../../utils/creditTerms";
 import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
@@ -196,6 +198,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [submissionQueued, setSubmissionQueued] = useState(false);
   const [isCreditSale, setIsCreditSale] = useState(false);
   const [dueDate, setDueDate] = useState("");
+  // Payment terms in place of a typed due date, where the site has any (utils/creditTerms).
+  const [creditTerms, setCreditTerms] = useState<CreditTerms | null>(null);
+  const [termsTemplate, setTermsTemplate] = useState("");
+  const [creditTermsLoading, setCreditTermsLoading] = useState(false);
+  // The cashier's own pick survives a refetch (Credit Sale off and on); a new customer gets
+  // their own terms preselected instead.
+  const handPickedTerm = useRef<{ customer: string | undefined; name: string } | null>(null);
+  const usingTerms = isCreditSale && (creditTerms?.templates.length ?? 0) > 0;
   const [submittedInvoice, setSubmittedInvoice] = useState<any>(null);
   const [invoiceData, setInvoiceData] = useState<any>(null);
   const [isAutoPrinting, setIsAutoPrinting] = useState(false);
@@ -887,6 +897,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       dueDate: isCreditSale ? dueDate : null,
       is_credit_sale: isCreditSale,
       due_date: isCreditSale ? dueDate : null,
+      // The server works the due date out from the terms; dueDate above is what was shown.
+      paymentTermsTemplate: usingTerms ? termsTemplate : null,
       allowPartialPayment: allowPartialPayments,
       allow_partial_payment: allowPartialPayments,
       salesperson: currentSalesperson?.name || null,
@@ -1526,6 +1538,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.error("Please select a due date for this credit sale");
       return;
     }
+    if (isCreditSale && creditTermsLoading) {
+      toast.info("Loading the customer's payment terms");
+      return;
+    }
     if (isB2C && !isCreditSale) {
       const activePaymentMethods = Object.entries(paymentAmounts).filter(([, amount]) => amount > 0);
       if (activePaymentMethods.length === 0) {
@@ -1900,6 +1916,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       reconciliationMessage: reconciliation.message,
       isCreditSale,
       hasDueDate: Boolean(dueDate),
+      creditTermsLoading,
       isB2C,
       outstandingAmount,
       outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
@@ -2062,6 +2079,47 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setDueDate(today);
     }
   }, [isOpen, dueDate]);
+
+  // On a credit sale, the customer's payment terms (else the shortest) preselected; refetched
+  // when the customer changes. A failed fetch or a site without templates keeps the date field.
+  useEffect(() => {
+    if (!isOpen || !isCreditSale) return;
+    const customer = selectedCustomer?.id || undefined;
+    let cancelled = false;
+    // Submit waits for these: until they land, the due date shown is today, not the customer's.
+    setCreditTermsLoading(true);
+    getCreditTerms(customer)
+      .then((terms) => {
+        if (cancelled) return;
+        setCreditTerms(terms);
+        const handPicked = handPickedTerm.current;
+        const kept = handPicked && handPicked.customer === customer ? handPicked.name : "";
+        const picked = chooseTerm(terms, kept);
+        setTermsTemplate(picked?.name ?? "");
+        if (picked) setDueDate(picked.due_date);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCreditTerms(null);
+        toast.warning("Could not load the payment terms: check the due date before submitting", {
+          toastId: "pos-credit-terms-failed",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setCreditTermsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isCreditSale, selectedCustomer?.id]);
+
+  const selectTerm = (name: string) => {
+    const picked = chooseTerm(creditTerms, name);
+    if (!picked) return;
+    handPickedTerm.current = { customer: selectedCustomer?.id || undefined, name: picked.name };
+    setTermsTemplate(picked.name);
+    setDueDate(picked.due_date);
+  };
 
   useEffect(() => {
     if (!isOpen) {
@@ -2559,7 +2617,27 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
                         </button>
-                        {isCreditSale && (
+                        {isCreditSale && usingTerms && (
+                          <div className="flex items-center gap-1.5">
+                            <label htmlFor="pos-credit-terms-mobile" className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                              Terms:
+                            </label>
+                            <select
+                              id="pos-credit-terms-mobile"
+                              value={termsTemplate}
+                              onChange={(e) => selectTerm(e.target.value)}
+                              disabled={invoiceSubmitted || isProcessingPayment}
+                              className={`max-w-[11rem] px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
+                            >
+                              {creditTerms?.templates.map((term) => (
+                                <option key={term.name} value={term.name}>
+                                  {termLabel(term)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {isCreditSale && !usingTerms && (
                           <div className="flex items-center gap-1.5">
                             <label htmlFor="pos-credit-due-date-mobile" className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
                               Due:
@@ -2807,7 +2885,27 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
                         </button>
-                        {isCreditSale && (
+                        {isCreditSale && usingTerms && (
+                          <div className="flex items-center gap-2">
+                            <label htmlFor="pos-credit-terms" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                              Terms
+                            </label>
+                            <select
+                              id="pos-credit-terms"
+                              value={termsTemplate}
+                              onChange={(e) => selectTerm(e.target.value)}
+                              disabled={invoiceSubmitted || isProcessingPayment}
+                              className={`max-w-[16rem] px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
+                            >
+                              {creditTerms?.templates.map((term) => (
+                                <option key={term.name} value={term.name}>
+                                  {termLabel(term)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {isCreditSale && !usingTerms && (
                           <div className="flex items-center gap-2">
                             <label htmlFor="pos-credit-due-date" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                               Due Date
