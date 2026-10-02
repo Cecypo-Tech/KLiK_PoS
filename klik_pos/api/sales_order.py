@@ -511,6 +511,15 @@ def create_held_order(data):
         return {"success": False, "message": str(e)}
 
 
+def _mpesa_fields(so):
+    """An M-Pesa order resumed from the Held tab carries its push, so checkout picks it up
+    instead of charging the customer again."""
+    from klik_pos.api.mpesa_order import last_push
+
+    is_mpesa = cint(so.get("custom_klik_mpesa_order"))
+    return {"mpesa_order": is_mpesa, "mpesa_request": last_push(so.name) if is_mpesa else None}
+
+
 @frappe.whitelist()
 def get_held_order_details(order_id):
     """Return items, customer and cart metadata for resuming a held order."""
@@ -574,6 +583,7 @@ def get_held_order_details(order_id):
             "discount_amount": flt(so.discount_amount or 0),
             "apply_discount_on": so.apply_discount_on or "",
             **_approval_fields(so),
+            **_mpesa_fields(so),
         }
 
     except Exception as e:
@@ -737,6 +747,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
         # Held orders for walk-ins all sit under one customer; the buyer's name tells them apart.
         if frappe.db.has_column("Sales Order", "custom_walkin_customer_name"):
             so_fields.append("custom_walkin_customer_name")
+        # An M-Pesa order kept for its push: the Held tab says so.
+        if frappe.db.has_column("Sales Order", "custom_klik_mpesa_order"):
+            so_fields.append("custom_klik_mpesa_order")
 
         orders = frappe.get_all(
             "Sales Order",
@@ -791,6 +804,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             order["cashier"] = cashier_map.get(order.owner) or order.owner
             order["approval_state"] = order.pop(APPROVAL_STATE_FIELD, None) or None
             order["price_breach"] = cint(order.pop(PRICE_BREACH_FIELD, 0))
+            order["mpesa_order"] = cint(order.pop("custom_klik_mpesa_order", 0))
 
         return {"success": True, "data": orders, "total_count": len(orders)}
 

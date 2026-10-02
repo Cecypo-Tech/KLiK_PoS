@@ -15,7 +15,12 @@ from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import mpesa_order, sales_order
 from klik_pos.api.mpesa_order import discard_mpesa_order, save_mpesa_order, submit_mpesa_order
-from klik_pos.api.sales_order import delete_held_order, delete_held_orders_for_opening_entry
+from klik_pos.api.sales_order import (
+	delete_held_order,
+	delete_held_orders_for_opening_entry,
+	get_held_order_details,
+	get_held_orders,
+)
 from klik_pos.tests.test_held_order_orphans import COMPANY, CUSTOMER, ITEM, PROFILE
 
 EXPRESS = "Mpesa Express Request"
@@ -300,3 +305,43 @@ class TestKeptOrdersAreNotLost(FrappeTestCase):
 		delete_held_orders_for_opening_entry("POS-OPE-MPESA")
 
 		self.assertFalse(_exists(self.order))
+
+
+class TestResumingAKeptOrder(FrappeTestCase):
+	"""Resumed from the Held tab, checkout must see the push already sent, not charge again."""
+
+	def setUp(self):
+		self.addCleanup(frappe.db.rollback)
+		self.order = _order()
+		frappe.db.set_value("Sales Order", self.order, "custom_is_klik_held", 1)
+
+	def test_the_details_carry_the_last_push(self):
+		_push(self.order, "Failed")
+		paid = _push(self.order, "Completed")
+		frappe.db.set_value(EXPRESS, paid, {"transaction_id": "UJ1TEST001", "payment_gateway": "Mpesa-Test"})
+
+		with _at_till():
+			details = get_held_order_details(self.order)
+
+		self.assertTrue(details["mpesa_order"])
+		self.assertEqual(details["mpesa_request"]["name"], paid)
+		self.assertEqual(details["mpesa_request"]["status"], "Completed")
+		self.assertEqual(details["mpesa_request"]["transaction_id"], "UJ1TEST001")
+		self.assertEqual(details["mpesa_request"]["payment_gateway"], "Mpesa-Test")
+
+	def test_an_ordinary_held_order_has_no_push(self):
+		frappe.db.set_value("Sales Order", self.order, "custom_klik_mpesa_order", 0)
+
+		with _at_till():
+			details = get_held_order_details(self.order)
+
+		self.assertFalse(details["mpesa_order"])
+		self.assertIsNone(details["mpesa_request"])
+
+	def test_the_held_tab_marks_it_as_an_mpesa_order(self):
+		with _at_till():
+			listed = get_held_orders(limit=200, skip_opening_entry_filter=True)
+
+		row = next((o for o in listed["data"] if o["name"] == self.order), None)
+		self.assertIsNotNone(row, "kept order not on the Held tab")
+		self.assertTrue(row["mpesa_order"])

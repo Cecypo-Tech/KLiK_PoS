@@ -50,6 +50,28 @@ def live_push(order_name):
 	return pushes[0] if pushes else None
 
 
+def last_push(order_name):
+	"""What checkout needs to pick up the order's newest push, or None."""
+	pushes = _pushes(order_name)
+	if not pushes:
+		return None
+	return frappe.db.get_value(
+		EXPRESS,
+		pushes[0],
+		[
+			"name",
+			"status",
+			"amount",
+			"phone_number",
+			"transaction_id",
+			"checkout_request_id",
+			"payment_gateway",
+			"result_desc",
+		],
+		as_dict=True,
+	)
+
+
 def delete_order(so):
 	"""Delete a draft order nothing live depends on.
 
