@@ -62,18 +62,17 @@ export const OrderSummaryFooter = ({
         )}
       </div>
 
-      {/* Hold lives in checkout (Shift+F10 opens it, again holds). Clear Cart is desktop only:
-          on a phone it sits too close to Checkout. */}
+      {/* Hold lives in checkout (Shift+F10 opens it, again holds). */}
       <div className="flex gap-3">
-        {!isMobile && (
-          <button
-            id="pos-clear-cart-btn"
-            onClick={onClearCart}
-            className="shrink-0 px-3 py-2 border border-red-500 text-red-600 dark:text-red-400 rounded-xl font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm"
-          >
-            Clear Cart
-          </button>
-        )}
+        <button
+          id="pos-clear-cart-btn"
+          onClick={onClearCart}
+          className={`shrink-0 px-3 border border-red-500 text-red-600 dark:text-red-400 rounded-xl font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm ${
+            isMobile ? "py-3" : "py-2"
+          }`}
+        >
+          Clear Cart
+        </button>
         <button
           id="pos-checkout-btn"
           onClick={onCheckout}
