@@ -2752,6 +2752,7 @@ def parse_invoice_data(data):
 	)
 	loyalty_redemption = normalize_loyalty_redemption(data)
 	due_date = data.get("dueDate") or data.get("due_date")
+	payment_terms_template = data.get("paymentTermsTemplate") or data.get("payment_terms_template")
 	mode_of_payment = None
 	default_payment_mode = None
 	checkout_status = str(data.get("status") or "").strip().lower()
@@ -2925,6 +2926,11 @@ def parse_invoice_data(data):
 					frappe.throw(_("Payment amounts cannot be negative."))
 
 	if is_credit_sale and has_payment_submission_context:
+		if payment_terms_template:
+			# The till picked terms, not a date: the due date is worked out here, not trusted.
+			from klik_pos.api.payment_terms import credit_due_date
+
+			due_date = credit_due_date(payment_terms_template)
 		if not due_date:
 			frappe.throw(_("Please select a due date for this credit sale"))
 
