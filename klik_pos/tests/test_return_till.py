@@ -121,6 +121,9 @@ class TestTheRefundingTillDoesNotRetaxTheReturn(RefundingTillCase):
 		self.assertFalse(credit.taxes_and_charges, "the refunding till's template was stamped on")
 		self.assertEqual([t.account_head for t in credit.taxes], [], "tax the sale never charged")
 		self.assertEqual(frappe.utils.flt(credit.grand_total), -frappe.utils.flt(invoice.grand_total))
+		self.assertEqual(
+			self._refund_rows(credit), [("Cash", -frappe.utils.flt(invoice.grand_total))], "refunded more than was paid"
+		)
 
 	def test_a_full_return_of_an_untaxed_sale_stays_untaxed(self):
 		frappe.db.set_value("POS Profile", self.refunded_at, "taxes_and_charges", TAX_TEMPLATE)
