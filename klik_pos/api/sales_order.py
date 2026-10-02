@@ -617,8 +617,19 @@ def delete_held_order(order_id):
         _assert_held_order_access(so)
         if so.docstatus != 0:
             return {"success": False, "error": f"Cannot delete {order_id}: not a draft."}
-        with _keeping_naming_series():
-            so.delete(ignore_permissions=True)
+
+        from klik_pos.api.mpesa_order import delete_order, live_push
+
+        live = live_push(order_id)
+        if live:
+            return {
+                "success": False,
+                "error": _(
+                    "Held order {0} can't be deleted: M-Pesa request {1} sent from it may still pay "
+                    "it, or already has. Finish the sale instead."
+                ).format(order_id, live),
+            }
+        delete_order(so)
         return {"success": True, "message": f"Held order {order_id} deleted."}
     except frappe.DoesNotExistError:
         return {"success": False, "error": f"Order {order_id} not found."}
@@ -908,14 +919,18 @@ def delete_held_orders_for_opening_entry(opening_entry_name):
         for name in _orphaned_held_orders(opening_entry_name):
             if name not in names:
                 names.append(name)
+        from klik_pos.api.mpesa_order import delete_order, live_push
+
         deleted = 0
-        with _keeping_naming_series():
-            for name in names:
-                try:
-                    frappe.delete_doc("Sales Order", name, ignore_permissions=True)
-                    deleted += 1
-                except Exception as e:
-                    frappe.logger().error("Error deleting held order %s: %s", name, e)
+        for name in names:
+            # An M-Pesa order kept for its push: the payment may still come, or came, for it.
+            if live_push(name):
+                continue
+            try:
+                delete_order(frappe.get_doc("Sales Order", name))
+                deleted += 1
+            except Exception as e:
+                frappe.logger().error("Error deleting held order %s: %s", name, e)
         if deleted:
             frappe.logger().info(
                 "Cleared %d held order(s) for opening entry %s", deleted, opening_entry_name

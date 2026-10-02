@@ -57,6 +57,18 @@
    "insert_after": "custom_is_klik_held",
    "hidden": 1,
    "module": "KLiK PoS"
+  },
+  {
+   "doctype": "Custom Field",
+   "name": "Sales Order-custom_klik_mpesa_order",
+   "dt": "Sales Order",
+   "fieldname": "custom_klik_mpesa_order",
+   "fieldtype": "Check",
+   "label": "KLiK M-Pesa Checkout Order",
+   "description": "Made by the POS for an M-Pesa STK push; becomes the Sales Invoice when the sale is submitted.",
+   "insert_after": "custom_klik_cart_meta",
+   "hidden": 1,
+   "module": "KLiK PoS"
   }
  ],
  "custom_perms": [],
