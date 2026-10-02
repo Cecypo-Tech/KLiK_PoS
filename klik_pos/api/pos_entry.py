@@ -420,22 +420,47 @@ def _ensure_may_close(opening_entry, user):
 		)
 
 
-def _calculate_payment_reconciliation(opening_entry, data):
-	"""
-	Calculate payment reconciliation data including opening balances,
-	sales amounts, and expected vs closing amounts.
-	"""
-	opening_entry_name = opening_entry.name
+def _opening_floats(opening_entry_name):
+	return {
+		row.mode_of_payment: flt(row.opening_amount)
+		for row in frappe.get_all(
+			"POS Opening Entry Detail",
+			filters={"parent": opening_entry_name},
+			fields=["mode_of_payment", "opening_amount"],
+		)
+	}
 
-	# Fetch opening balances
-	opening_modes = frappe.get_all(
-		"POS Opening Entry Detail",
-		filters={"parent": opening_entry_name},
-		fields=["mode_of_payment", "opening_amount"],
-	)
-	opening_balance_map = {row.mode_of_payment: row.opening_amount for row in opening_modes}
 
-	# Aggregate sales by payment mode
+def expected_by_mode(opening_entry_name):
+	"""What each mode should hold when the shift closes: its opening float plus the shift's
+	takings. The closing entry is filed from this and the Closing Shift screen shows it, so the
+	cashier counts against the figure that gets filed.
+
+	Takings are the shift's payment rows less the change handed back, plus Payment Entries
+	stamped with the shift (every M-Pesa receipt taken at the till). Money that settled a sale
+	from outside the POS - a customer advance an accountant recorded, with no shift - is shown
+	on the invoice but never counted: it was never in the cashier's hands. A mode that took
+	money but is not on the till is included, so its money cannot leave the count silently.
+
+	Returns {mode: {mode_of_payment, opening_amount, sales_amount, expected_amount,
+	transactions}}, opening modes first.
+	"""
+	from klik_pos.api.payment import _change_given_by_mode, _fetch_opening_payment_entry_data
+
+	modes = {}
+
+	def row(mode):
+		if not mode:
+			return None
+		return modes.setdefault(
+			mode,
+			{"mode_of_payment": mode, "opening_amount": 0.0, "sales_amount": 0.0, "transactions": 0},
+		)
+
+	for mode, amount in _opening_floats(opening_entry_name).items():
+		if entry := row(mode):
+			entry["opening_amount"] = amount
+
 	sales_data = frappe.db.sql(
 		"""
 		SELECT sip.mode_of_payment,
@@ -450,65 +475,78 @@ def _calculate_payment_reconciliation(opening_entry, data):
 		(opening_entry_name,),
 		as_dict=True,
 	)
-	from klik_pos.api.payment import _change_given_by_mode
-
 	# The rows hold what was tendered; the change handed back left the drawer.
 	change = _change_given_by_mode("si.custom_pos_opening_entry = %s", (opening_entry_name,))
-	sales_map = {
-		row.mode_of_payment: flt(row.total_amount) - flt(change.get(row.mode_of_payment, 0)) for row in sales_data
-	}
+	for sale in sales_data:
+		if entry := row(sale.mode_of_payment):
+			entry["sales_amount"] += flt(sale.total_amount) - flt(change.get(sale.mode_of_payment, 0))
+			entry["transactions"] += int(sale.transactions or 0)
 
-	# Money that reached the till as a Payment Entry stamped with this shift - every M-Pesa
-	# receipt now - belongs in the expected amount exactly as a payment row would.
-	from klik_pos.api.payment import _fetch_opening_payment_entry_data
+	for receipt in _fetch_opening_payment_entry_data(opening_entry_name):
+		if entry := row(receipt.mode_of_payment):
+			entry["sales_amount"] += flt(receipt.total_amount)
+			entry["transactions"] += int(receipt.transactions or 0)
 
-	for row in _fetch_opening_payment_entry_data(opening_entry_name):
-		sales_map[row.mode_of_payment] = flt(sales_map.get(row.mode_of_payment, 0)) + flt(row.total_amount)
-	# Money that settled a sale from outside the POS - a customer advance an accountant
-	# recorded, stamped with no shift - is shown on the invoice but deliberately not
-	# counted: it was never in the cashier's hands.
+	for entry in modes.values():
+		entry["expected_amount"] = entry["opening_amount"] + entry["sales_amount"]
+	return modes
 
-	# Build reconciliation entries
+
+@frappe.whitelist()
+def closing_summary():
+	"""The Closing Shift screen's figures for the caller's shift, from expected_by_mode.
+
+	Guarded like the close itself. Where the till has 'Hide Expected Amount' on, the takings
+	and expected amounts are left out (the float the cashier entered stays): hidden on the
+	screen is not enough when the response carries them.
+	"""
+	user = frappe.session.user
+	opening_entry = _get_open_pos_entry(user)
+	ensure_may_close_on_till(opening_entry.pos_profile, user)
+
+	modes = list(expected_by_mode(opening_entry.name).values())
+	hidden = bool(
+		frappe.db.has_column("POS Profile", "custom_hide_expected_amount")
+		and frappe.db.get_value("POS Profile", opening_entry.pos_profile, "custom_hide_expected_amount")
+	)
+	if hidden:
+		for entry in modes:
+			entry.update(sales_amount=0.0, expected_amount=0.0, transactions=0)
+	return {"opening_entry": opening_entry.name, "modes": modes, "figures_hidden": hidden}
+
+
+def _calculate_payment_reconciliation(opening_entry, data):
+	"""The closing entry's rows: each mode's expected amount (expected_by_mode) against the
+	cashier's count. A mode the cashier sent no count for is filed with a count of 0."""
+	expected = expected_by_mode(opening_entry.name)
 	closing_balance = data.get("closing_balance", {})
 	reconciliation = []
 
-	# Process modes with closing amounts
 	for mode, closing_amount in closing_balance.items():
-		opening_amount = opening_balance_map.get(mode, 0)
-		sales_amount = sales_map.get(mode, 0)
-		expected_amount = float(opening_amount) + float(sales_amount)
-		difference = float(closing_amount) - float(expected_amount)
-
+		row = expected.get(mode) or {}
+		expected_amount = flt(row.get("expected_amount"))
 		reconciliation.append(
 			{
 				"mode_of_payment": mode,
-				"opening_amount": opening_amount,
+				"opening_amount": flt(row.get("opening_amount")),
 				"expected_amount": expected_amount,
 				"closing_amount": closing_amount,
-				"difference": difference,
+				"difference": flt(closing_amount) - expected_amount,
 			}
 		)
 
-	# Modes the cashier sent no count for: every opening mode, and every mode money is
-	# expected under even if the till does not list it (a receipt taken at the till in a
-	# mode the profile omits). Without the latter that money left the closing entry silently.
-	uncounted = list(opening_balance_map) + [m for m in sales_map if m and m not in opening_balance_map]
-	for mode in uncounted:
-		opening_amount = opening_balance_map.get(mode, 0)
-		if mode not in closing_balance:
-			sales_amount = sales_map.get(mode, 0)
-			expected_amount = float(opening_amount) + float(sales_amount)
-			difference = 0 - float(expected_amount)
-
-			reconciliation.append(
-				{
-					"mode_of_payment": mode,
-					"opening_amount": opening_amount,
-					"expected_amount": expected_amount,
-					"closing_amount": 0,
-					"difference": difference,
-				}
-			)
+	for mode, row in expected.items():
+		if mode in closing_balance:
+			continue
+		reconciliation.append(
+			{
+				"mode_of_payment": mode,
+				"opening_amount": row["opening_amount"],
+				"expected_amount": row["expected_amount"],
+				"closing_amount": 0,
+				"difference": 0 - row["expected_amount"],
+			}
+		)
 
 	return reconciliation
 

@@ -28,7 +28,8 @@ import { getHeldOrders, deleteHeldOrder } from "../services/salesOrder";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatCurrencyWithSymbol } from "../utils/currency";
-import { computePaymentStats } from "../utils/paymentStats";
+import { closingStats } from "../utils/closingSummary";
+import { useClosingSummary } from "../hooks/useClosingSummary";
 import { bankingError, closingBalancePayload, floatModeNames } from "../utils/closingBanking";
 import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
 import { clearAllCache } from "../utils/clearCache";
@@ -204,10 +205,15 @@ export default function ClosingShiftPage() {
     }
   );
 
-  // Payment Stats Calculation - Calculate from filtered invoices
+  // Expected per mode from the server: the figures the closing entry is filed with. Not from
+  // the invoice table, which stops loading on a long shift and follows the page's filters.
+  const { summary: closingSummary, isLoading: summaryLoading, refresh: refreshSummary } = useClosingSummary();
+  useEffect(() => {
+    void refreshSummary();
+  }, [invoices, refreshSummary]);
   const paymentStats = useMemo(
-    () => computePaymentStats(modes, filteredInvoices, posDetails?.current_opening_entry as string | undefined),
-    [modes, filteredInvoices, posDetails?.current_opening_entry]
+    () => closingStats(closingSummary, (modes || []).map((mode) => mode.name || mode.mode_of_payment)),
+    [closingSummary, modes]
   );
   const total = Object.values(paymentStats).reduce((sum, stat) => sum + stat.amount, 0);
   // Modes that keep cash in the drawer: the only ones asked how much is banked at close.
@@ -719,7 +725,10 @@ export default function ClosingShiftPage() {
               </div>
 
               <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-                {!hasPaymentStats && (
+                {summaryLoading && !hasPaymentStats && (
+                  <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading the shift's totals...</div>
+                )}
+                {!summaryLoading && !hasPaymentStats && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
                     No payment modes were found for this session. Check that the POS Opening Entry has opening balance rows and that the POS Profile has payment methods configured.
                   </div>
@@ -1111,7 +1120,10 @@ export default function ClosingShiftPage() {
               </div>
 
               <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-                {!hasPaymentStats && (
+                {summaryLoading && !hasPaymentStats && (
+                  <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading the shift's totals...</div>
+                )}
+                {!summaryLoading && !hasPaymentStats && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
                     No payment modes were found for this session. Check that the POS Opening Entry has opening balance rows and that the POS Profile has payment methods configured.
                   </div>
