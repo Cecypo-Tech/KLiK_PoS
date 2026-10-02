@@ -207,10 +207,20 @@ export default function ClosingShiftPage() {
 
   // Expected per mode from the server: the figures the closing entry is filed with. Not from
   // the invoice table, which stops loading on a long shift and follows the page's filters.
-  const { summary: closingSummary, isLoading: summaryLoading, refresh: refreshSummary } = useClosingSummary();
+  const {
+    summary: closingSummary,
+    isLoading: summaryLoading,
+    error: summaryError,
+    refresh: refreshSummary,
+  } = useClosingSummary();
+  // On load, and again as the Close Shift dialog opens: a joined cashier's sale or an M-Pesa
+  // receipt may have landed since, and the count is checked against what will be filed.
   useEffect(() => {
     void refreshSummary();
-  }, [invoices, refreshSummary]);
+  }, [refreshSummary]);
+  useEffect(() => {
+    if (showCloseModal) void refreshSummary();
+  }, [showCloseModal, refreshSummary]);
   const paymentStats = useMemo(
     () => closingStats(closingSummary, (modes || []).map((mode) => mode.name || mode.mode_of_payment)),
     [closingSummary, modes]
@@ -728,7 +738,15 @@ export default function ClosingShiftPage() {
                 {summaryLoading && !hasPaymentStats && (
                   <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading the shift's totals...</div>
                 )}
-                {!summaryLoading && !hasPaymentStats && (
+                {!summaryLoading && !hasPaymentStats && summaryError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                    Could not load the shift's totals: {summaryError}{" "}
+                    <button type="button" onClick={() => void refreshSummary()} className="ml-1 font-semibold underline">
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {!summaryLoading && !hasPaymentStats && !summaryError && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
                     No payment modes were found for this session. Check that the POS Opening Entry has opening balance rows and that the POS Profile has payment methods configured.
                   </div>
@@ -1123,7 +1141,15 @@ export default function ClosingShiftPage() {
                 {summaryLoading && !hasPaymentStats && (
                   <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading the shift's totals...</div>
                 )}
-                {!summaryLoading && !hasPaymentStats && (
+                {!summaryLoading && !hasPaymentStats && summaryError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                    Could not load the shift's totals: {summaryError}{" "}
+                    <button type="button" onClick={() => void refreshSummary()} className="ml-1 font-semibold underline">
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {!summaryLoading && !hasPaymentStats && !summaryError && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
                     No payment modes were found for this session. Check that the POS Opening Entry has opening balance rows and that the POS Profile has payment methods configured.
                   </div>

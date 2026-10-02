@@ -496,13 +496,14 @@ def expected_by_mode(opening_entry_name):
 def closing_summary():
 	"""The Closing Shift screen's figures for the caller's shift, from expected_by_mode.
 
-	Guarded like the close itself. Where the till has 'Hide Expected Amount' on, the takings
-	and expected amounts are left out (the float the cashier entered stays): hidden on the
-	screen is not enough when the response carries them.
+	Guarded like the close itself, so a cashier who may not close is told before counting.
+	Where the till has 'Hide Expected Amount' on, this response leaves the takings and expected
+	amounts out (the float the cashier entered stays).
 	"""
 	user = frappe.session.user
 	opening_entry = _get_open_pos_entry(user)
 	ensure_may_close_on_till(opening_entry.pos_profile, user)
+	_ensure_may_close(opening_entry, user)
 
 	modes = list(expected_by_mode(opening_entry.name).values())
 	hidden = bool(

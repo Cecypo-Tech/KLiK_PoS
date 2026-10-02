@@ -13,7 +13,7 @@ from frappe.utils import flt
 
 from klik_pos.api import pos_entry
 from klik_pos.api.pos_entry import _calculate_payment_reconciliation, closing_summary, expected_by_mode
-from klik_pos.tests.test_allow_closing_shift import CASHIER_ROLES, FIELD as ALLOW_CLOSING, ClosingCase
+from klik_pos.tests.test_allow_closing_shift import CASHIER_ROLES, MANAGER_ROLES, FIELD as ALLOW_CLOSING, ClosingCase
 from klik_pos.tests.test_mpesa_payment_entry_first import MpesaFirstCase
 from klik_pos.tests.test_shared_shift import OPENER
 
@@ -60,7 +60,27 @@ class TestExpectedByMode(MpesaFirstCase):
 		)
 		self.assertEqual(flt(next(r for r in filed if r["mode_of_payment"] == "Cash")["difference"]), 0)
 
-	def test_an_empty_shift_expects_only_its_float(self):
+	def test_the_filed_rows_counted_first_then_the_uncounted(self):
+		"""Every mode the cashier counted, in their order (one with nothing expected files its
+		count as the difference), then each mode expected but not counted, filed at 0."""
+		self._sale({"Cash": 300})
+		with patch.object(pos_entry, "_opening_floats", return_value={"Cash": 1000.0, "Credit Card": 200.0}):
+			filed = _calculate_payment_reconciliation(
+				frappe._dict(name=self.shift), {"closing_balance": {"Cash": 1290, "Gift Voucher": 5}}
+			)
+		self.assertEqual(
+			[
+				(r["mode_of_payment"], flt(r["opening_amount"]), flt(r["expected_amount"]), flt(r["closing_amount"]), flt(r["difference"]))
+				for r in filed
+			],
+			[
+				("Cash", 1000, 1300, 1290, -10),
+				("Gift Voucher", 0, 0, 5, 5),
+				("Credit Card", 200, 200, 0, -200),
+			],
+		)
+
+	def test_a_shift_with_no_float_and_no_sales_expects_nothing(self):
 		self.assertEqual(expected_by_mode(self.shift), {})
 
 
@@ -112,6 +132,9 @@ class TestClosingSummary(ClosingCase):
 		self.assertEqual(cash["mode_of_payment"], "Cash")
 		self.assertEqual(cash["opening_amount"], 1000.0, "the float the cashier entered stays")
 		self.assertEqual((cash["sales_amount"], cash["expected_amount"], cash["transactions"]), (0.0, 0.0, 0))
+
+	def test_a_manager_sees_them_where_closing_is_turned_off(self):
+		self.assertEqual(self._summary(roles=MANAGER_ROLES)["modes"][0]["expected_amount"], 1500.0)
 
 	def test_refused_where_closing_is_turned_off(self):
 		# ClosingCase turns 'Allow Closing Shift' off on the till.
