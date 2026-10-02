@@ -40,7 +40,7 @@ import {
 import { toggleOn } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
-import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard } from "../../utils/mpesaDraftLifecycle";
+import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard, stkRetryAction } from "../../utils/mpesaDraftLifecycle";
 import { checkoutWasQueued } from "../../utils/checkoutOutcome";
 import { openingPaymentAmounts } from "../../utils/paymentDefaults";
 import { exclusiveSubtotal } from "../../utils/taxLabel";
@@ -938,18 +938,19 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return draftName;
   };
 
-  const initiateMpesaFlow = async (method: string, amount: number, phoneNumber: string) => {
+  /** Send an STK push; true once Safaricom accepted it. */
+  const initiateMpesaFlow = async (method: string, amount: number, phoneNumber: string): Promise<boolean> => {
     if (!selectedCustomer || !selectedCustomer.name) {
       toast.error("Kindly select a customer");
-      return;
+      return false;
     }
     if (!phoneNumber.trim()) {
       toast.error("Phone number is required for M-Pesa STK push");
-      return;
+      return false;
     }
     if (!posCompanyName) {
       toast.error("POS company is missing. Unable to initiate M-Pesa STK push.");
-      return;
+      return false;
     }
 
     mpesaWorkInFlightRef.current += 1;
@@ -988,8 +989,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           : "STK push sent. Awaiting customer confirmation.",
       });
       toast.info("STK push sent. Awaiting customer confirmation.");
+      return true;
     } catch (error) {
       toast.error(extractErrorFromException(error, "Failed to initiate M-Pesa STK push"));
+      return false;
     } finally {
       mpesaWorkInFlightRef.current -= 1;
       setIsProcessingPayment(false);
@@ -2293,13 +2296,20 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   };
 
   const retryMpesaRequest = async () => {
-    const activeMpesaPayment = getActiveMpesaPayment();
-    if (!activeMpesaPayment) {
-      toast.error("No active M-Pesa amount found to retry.");
+    if (salespersonBlocksMpesa()) return;
+    const action = stkRetryAction(getActiveMpesaPayment(), mpesaPhoneNumber, mpesaFlow?.phoneNumber);
+    if (!action.send) {
+      toast.error(action.reason);
+      handleOpenMpesaOptions();
       return;
     }
-    setMpesaFlow((prev) => (prev ? { ...prev, status: "idle", message: undefined } : prev));
-    handleOpenMpesaOptions();
+    // Let go of the failed request first: while the flow still names it, the status poll
+    // fetches it again and puts its failure back on screen.
+    setMpesaFlow((prev) =>
+      prev ? { ...prev, status: "idle", requestName: undefined, transactionId: undefined, message: undefined } : prev,
+    );
+    const sent = await initiateMpesaFlow(action.method, action.amount, action.phone);
+    if (!sent) handleOpenMpesaOptions();
   };
 
   const renderLoyaltyRedemption = () => {
@@ -2506,7 +2516,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 onClick={() => void retryMpesaRequest()}
                 disabled={isProcessingPayment}
               >
-                Retry STK
+                Send again
               </button>
             )}
           </div>

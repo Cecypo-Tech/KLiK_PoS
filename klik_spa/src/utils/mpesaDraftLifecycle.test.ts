@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard } from "./mpesaDraftLifecycle";
+import { holdBlockedByMpesa, mpesaDraftKeptForStk, mpesaDraftToDiscard, stkRetryAction } from "./mpesaDraftLifecycle";
 
 const none = new Set<string>();
 
@@ -56,5 +56,39 @@ describe("mpesaDraftKeptForStk", () => {
   it("says nothing for a draft that is discarded, or kept only while work is running", () => {
     expect(mpesaDraftKeptForStk({ draftName: "POS-1", workInFlight: 0, stkSentFrom: none })).toBeNull();
     expect(mpesaDraftKeptForStk({ draftName: null, workInFlight: 0, stkSentFrom: new Set(["POS-1"]) })).toBeNull();
+  });
+});
+
+describe("stkRetryAction", () => {
+  const active = { method: "Mpesa-Sandbox-174379", amount: 4 };
+
+  it("sends a new push for the current M-Pesa amount, so a discount since is respected", () => {
+    expect(stkRetryAction(active, "0712345678", "254700000001")).toEqual({
+      send: true,
+      method: "Mpesa-Sandbox-174379",
+      amount: 4,
+      phone: "0712345678",
+    });
+  });
+
+  it("falls back to the phone the failed push went to", () => {
+    expect(stkRetryAction(active, "  ", "254700000001")).toMatchObject({ send: true, phone: "254700000001" });
+  });
+
+  it("asks for a phone when there is none to send to", () => {
+    expect(stkRetryAction(active, "", undefined)).toEqual({
+      send: false,
+      reason: "Enter the customer's phone number to send the M-Pesa request again.",
+    });
+  });
+
+  it("asks for an amount when no M-Pesa method has one", () => {
+    expect(stkRetryAction(null, "0712345678", undefined)).toEqual({
+      send: false,
+      reason: "Enter an amount on an M-Pesa payment method before sending the request again.",
+    });
+    expect(stkRetryAction({ method: "Mpesa-Sandbox-174379", amount: 0 }, "0712345678", undefined)).toMatchObject({
+      send: false,
+    });
   });
 });

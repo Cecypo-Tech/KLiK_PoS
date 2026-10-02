@@ -45,3 +45,27 @@ export function mpesaDraftKeptForStk({ draftName, stkSentFrom }: MpesaDraftCheck
   if (!draftName || !stkSentFrom.has(draftName)) return null;
   return `Draft ${draftName} was kept: an M-Pesa request was sent from it, and its payment needs this invoice. Finish or cancel it from Invoice History before charging this customer again.`;
 }
+
+export type StkRetryAction =
+  | { send: true; method: string; amount: number; phone: string }
+  | { send: false; reason: string };
+
+/**
+ * What "Send again" does after a failed STK push: a new push for the M-Pesa amount as it
+ * stands now (a discount since the failed push is respected), to the phone typed in the
+ * panel or else the one the failed push went to.
+ */
+export function stkRetryAction(
+  active: { method: string; amount: number } | null,
+  phoneTyped: string,
+  failedPushPhone: string | undefined,
+): StkRetryAction {
+  if (!active || active.amount <= 0) {
+    return { send: false, reason: "Enter an amount on an M-Pesa payment method before sending the request again." };
+  }
+  const phone = phoneTyped.trim() || (failedPushPhone || "").trim();
+  if (!phone) {
+    return { send: false, reason: "Enter the customer's phone number to send the M-Pesa request again." };
+  }
+  return { send: true, method: active.method, amount: active.amount, phone };
+}
