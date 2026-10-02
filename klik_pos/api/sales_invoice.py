@@ -2695,6 +2695,9 @@ def create_draft_invoice(data):
 			# M-Pesa's draft, made before the money moves: a payment in progress, not a hold.
 			# Held orders are Sales Orders.
 			_apply_klik_invoice_flags(doc, is_held=False, is_submitted=False)
+			# Money is being collected, so it is a cash sale - even with Credit Sale left ticked,
+			# which the submit refuses once the payment lands.
+			_set_site_sale_type(doc, is_credit_sale=False)
 			_apply_remarks(doc, data)
 			doc.insert(ignore_permissions=True)
 
@@ -3104,9 +3107,38 @@ def build_sales_invoice_doc(
 		if due_date:
 			doc.due_date = due_date
 
+	_set_site_sale_type(doc, is_credit_sale)
+
 	_assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=delivery_item_code)
 
 	return doc
+
+
+SITE_SALE_TYPE_FIELD = "custom_sale_type"
+
+
+def _site_sale_types():
+	"""The options of the site's own Sales Invoice sale-type Select, if it has one."""
+	field = frappe.get_meta("Sales Invoice").get_field(SITE_SALE_TYPE_FIELD)
+	if not field or field.fieldtype != "Select":
+		return set()
+	return {option.strip() for option in (field.options or "").split("\n") if option.strip()}
+
+
+def _set_site_sale_type(doc, is_credit_sale):
+	"""Fill a site's own Cash/Credit field, where it has one; klik adds no such field.
+
+	Sites name invoices from it (Allparts: Cash -> CS-, Credit -> INV-), and the name is
+	fixed at insert, before any payment reaches the invoice - a credit sale then looks
+	like an M-Pesa draft, nothing paid on either. Only the cashier's Credit Sale choice
+	tells them apart. Set on the new document only: a re-saved draft keeps the type its
+	name was given (_update_existing_draft_invoice and submit_draft_invoice do not copy it,
+	even when a till lists it as an extra field). create_draft_invoice's M-Pesa draft is
+	always Cash.
+	"""
+	if not {"Cash", "Credit"} <= _site_sale_types():
+		return
+	doc.set(SITE_SALE_TYPE_FIELD, "Credit" if is_credit_sale else "Cash")
 
 
 def _update_existing_draft_invoice(
@@ -3172,6 +3204,8 @@ def _update_existing_draft_invoice(
 	)
 	from klik_pos.api.pos_profile import get_configured_extra_fieldnames
 	for _fn in get_configured_extra_fieldnames():
+		if _fn == SITE_SALE_TYPE_FIELD:
+			continue  # fixed with the draft's name; see _set_site_sale_type
 		if invoice_doc.meta.has_field(_fn) and rebuilt_doc.meta.has_field(_fn):
 			invoice_doc.set(_fn, rebuilt_doc.get(_fn))
 	invoice_doc.pos_profile = rebuilt_doc.pos_profile
@@ -5658,6 +5692,8 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 			)
 			from klik_pos.api.pos_profile import get_configured_extra_fieldnames
 			for _fn in get_configured_extra_fieldnames():
+				if _fn == SITE_SALE_TYPE_FIELD:
+					continue  # fixed with the draft's name; see _set_site_sale_type
 				if invoice_doc.meta.has_field(_fn) and rebuilt_doc.meta.has_field(_fn):
 					invoice_doc.set(_fn, rebuilt_doc.get(_fn))
 			invoice_doc.pos_profile = rebuilt_doc.pos_profile
