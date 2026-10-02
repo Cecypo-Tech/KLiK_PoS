@@ -125,10 +125,12 @@ class TestCashierChoosesTheFixedCharge(FrappeTestCase):
 	def test_the_picker_lists_the_fee_and_who_reversed_it(self):
 		invoice = self._sale(qty=2)
 		item = invoice.items[0].item_code
-		# The picker only offers invoices rung up on a till.
-		frappe.db.set_value(
-			"Sales Invoice", invoice.name, "custom_pos_opening_entry", "POS-OPE-TEST-FEE", update_modified=False
-		)
+		# The picker only offers invoices rung up on a till. A real shift: with none open, the
+		# note keeps the sale's, and a made-up name fails its link check.
+		from klik_pos.tests.test_opening_conflict import _profile, _shift
+
+		shift = _shift(_profile(), "Administrator", status="Closed")
+		frappe.db.set_value("Sales Invoice", invoice.name, "custom_pos_opening_entry", shift, update_modified=False)
 
 		def picked():
 			result = get_customer_invoices_for_return(CUSTOMER)
