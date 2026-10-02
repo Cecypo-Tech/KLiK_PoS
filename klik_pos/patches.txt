@@ -10,3 +10,4 @@ klik_pos.patches.v16_0.add_allow_zero_rate_sales_to_pos_profile
 klik_pos.patches.v16_0.add_price_list_switching_to_pos_profile
 klik_pos.patches.v16_0.clear_default_queue_status
 klik_pos.patches.v16_0.one_credit_checkbox
+klik_pos.patches.v16_0.zero_pos_return_own_outstanding
