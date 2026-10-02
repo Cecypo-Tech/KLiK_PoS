@@ -43,7 +43,7 @@ def get_item_uoms_and_prices(item_code, customer=None):
         item_list = frappe.get_list(
             "Item",
             filters={"name": item_code},
-            fields=["stock_uom", "valuation_rate", "item_name"],
+            fields=["stock_uom", "item_name"],
             limit=1,
         )
 
@@ -117,14 +117,10 @@ def get_item_uoms_and_prices(item_code, customer=None):
                     uom=stock_uom,
                 )
 
+                # No selling price stays 0: never the valuation rate (cost, which a till may hide).
                 if base_price_info and flt(base_price_info.get("price", 0)) > 0:
                     uom_info["price"] = (
                         flt(base_price_info["price"])
-                        * uom_info["conversion_factor"]
-                    )
-                else:
-                    uom_info["price"] = (
-                        flt(item_data.valuation_rate)
                         * uom_info["conversion_factor"]
                     )
 

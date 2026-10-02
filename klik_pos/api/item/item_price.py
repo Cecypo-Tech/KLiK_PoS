@@ -114,22 +114,6 @@ def fetch_item_price(
                 if calc:
                     return calc
 
-            item_sql = """
-                SELECT valuation_rate, stock_uom
-                FROM `tabItem`
-                WHERE name = %s
-                LIMIT 1
-            """
-            item_sql = apply_sql_permissions(item_sql)
-
-            item_res = frappe.db.sql(
-                item_sql,
-                (item_code,),
-                as_dict=True,
-            )
-
-            item_data = item_res[0] if item_res else None
-
             default_company = frappe.defaults.get_user_default("Company")
             if not default_company:
                 company_sql = """
@@ -173,15 +157,10 @@ def fetch_item_price(
                 else default_currency
             )
 
-            valuation_price = flt(item_data["valuation_rate"]) if item_data else 0
-
-            if uom and item_data and uom != item_data["stock_uom"]:
-                factor = _get_uom_conversion_factor(item_code, uom)
-                if factor:
-                    valuation_price = valuation_price * factor
-
+            # No selling price: 0, never the valuation rate - that is cost, which a till may
+            # hide. 0 is stopped at checkout (no zero-rate sales unless the till allows them).
             return {
-                "price": valuation_price,
+                "price": 0,
                 "currency": default_currency,
                 "currency_symbol": default_symbol,
             }
@@ -241,22 +220,6 @@ def fetch_item_price(
             if calc:
                 return calc
 
-        item_sql = """
-            SELECT valuation_rate, stock_uom
-            FROM `tabItem`
-            WHERE name = %s
-            LIMIT 1
-        """
-        item_sql = apply_sql_permissions(item_sql)
-
-        item_res = frappe.db.sql(
-            item_sql,
-            (item_code,),
-            as_dict=True,
-        )
-
-        item_data = item_res[0] if item_res else None
-
         default_company = frappe.defaults.get_user_default("Company")
         if not default_company:
             company_sql = """
@@ -300,15 +263,10 @@ def fetch_item_price(
             else default_currency
         )
 
-        valuation_price = flt(item_data["valuation_rate"]) if item_data else 0
-
-        if uom and item_data and uom != item_data["stock_uom"]:
-            factor = _get_uom_conversion_factor(item_code, uom)
-            if factor:
-                valuation_price = valuation_price * factor
-
+        # No selling price: 0, never the valuation rate - that is cost, which a till may
+        # hide. 0 is stopped at checkout (no zero-rate sales unless the till allows them).
         return {
-            "price": valuation_price,
+            "price": 0,
             "currency": default_currency,
             "currency_symbol": default_symbol,
         }
