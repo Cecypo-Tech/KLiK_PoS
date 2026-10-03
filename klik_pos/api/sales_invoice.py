@@ -3027,7 +3027,7 @@ def build_sales_invoice_doc(
 	doc.ignore_pricing_rule = 1
 	doc.customer = customer
 	doc.due_date = due_date or frappe.utils.nowdate()
-	doc.custom_delivery_date = frappe.utils.nowdate()
+	_stamp_delivery_date(doc)
 	doc.enable_background_invoice_submission = 1 if enable_background_submission else 0
 
 	# Set delivery personnel if provided
@@ -3199,7 +3199,7 @@ def _update_existing_draft_invoice(
 
 	_set_customer(invoice_doc, rebuilt_doc.customer)
 	invoice_doc.due_date = rebuilt_doc.due_date
-	invoice_doc.custom_delivery_date = rebuilt_doc.custom_delivery_date
+	_stamp_delivery_date(invoice_doc, rebuilt_doc.get("custom_delivery_date"))
 	invoice_doc.enable_background_invoice_submission = rebuilt_doc.enable_background_invoice_submission
 	invoice_doc.custom_delivery_personnel = rebuilt_doc.custom_delivery_personnel
 	invoice_doc.tax_id = rebuilt_doc.tax_id
@@ -3727,6 +3727,17 @@ def _set_pos_opening_entry(doc):
 def _set_roundoff_fields(doc, roundoff_amount):
 	"""Legacy no-op: ERPNext handles invoice rounding natively."""
 	return
+
+
+def _stamp_delivery_date(doc, value=None):
+	"""A site's own delivery-date field: stamped only where the site has it.
+
+	klik ships no custom_delivery_date and never reads it back - it exists for site-side
+	reporting. Without the field the write silently vanished on save; skipping it keeps
+	the document honest. Rebuild paths pass the rebuilt document's value through.
+	"""
+	if doc.meta.has_field("custom_delivery_date"):
+		doc.custom_delivery_date = value or frappe.utils.nowdate()
 
 
 def _set_taxes_and_charges(doc, sales_and_tax_charges, pos_profile):
@@ -5247,7 +5258,7 @@ def create_partial_return(
 		return_doc.is_return = 1
 		_negate_actual_charges(return_doc)
 		return_doc.posting_date = frappe.utils.nowdate()
-		return_doc.custom_delivery_date = frappe.utils.nowdate()
+		_stamp_delivery_date(return_doc)
 		_apply_klik_invoice_flags(return_doc, is_held=False, is_submitted=True)
 
 		# The mapper copies the advances table row for row, but Sales Invoice Advance marks
@@ -5708,7 +5719,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 			_set_customer(invoice_doc, rebuilt_doc.customer)
 			_apply_remarks(invoice_doc, data)
 			invoice_doc.due_date = rebuilt_doc.due_date
-			invoice_doc.custom_delivery_date = rebuilt_doc.custom_delivery_date
+			_stamp_delivery_date(invoice_doc, rebuilt_doc.get("custom_delivery_date"))
 			invoice_doc.enable_background_invoice_submission = rebuilt_doc.enable_background_invoice_submission
 			invoice_doc.custom_delivery_personnel = rebuilt_doc.custom_delivery_personnel
 			invoice_doc.tax_id = rebuilt_doc.tax_id
