@@ -43,7 +43,20 @@ export interface ReturnData {
     return_amount?: number;
     /** 1 reverses the sale's fixed charges on the credit note, 0 leaves them off. */
     return_fixed_charges?: 0 | 1;
+    /** What happens to this return's non-cash value (the credit router). */
+    credit_action?: "keep" | "exchange";
   }[];
+  /** Default credit action for every row that names none. */
+  credit_action?: "keep" | "exchange";
+  /** Manager override: lets Walk In keep credit. */
+  allow_walkin_credit?: 0 | 1;
+}
+
+/** The note a return left behind and what the cashier chose to do with it. */
+export interface ReturnCredit {
+  note: string;
+  available: number;
+  action: "keep" | "exchange";
 }
 
 export async function getReturnedQty(customer: string, salesInvoice: string, item: string) {
@@ -123,8 +136,9 @@ export async function createPartialReturn(
   returnItems: ReturnItem[],
   paymentMethod?: string,
   returnAmount?: number,
-  returnFixedCharges?: 0 | 1
-): Promise<{success: boolean; returnInvoice?: string; message?: string; error?: string}> {
+  returnFixedCharges?: 0 | 1,
+  creditOptions?: { creditAction?: "keep" | "exchange"; allowWalkinCredit?: 0 | 1 }
+): Promise<{success: boolean; returnInvoice?: string; credit?: ReturnCredit | null; message?: string; error?: string}> {
 
   const csrfToken = window.csrf_token;
   try {
@@ -140,7 +154,9 @@ export async function createPartialReturn(
         payment_method: paymentMethod || 'Cash',
         return_amount: returnAmount || 0,
         // The courier fee is the cashier's call, like an item: 1 reverses it, 0 leaves it off.
-        ...(returnFixedCharges === undefined ? {} : { return_fixed_charges: returnFixedCharges })
+        ...(returnFixedCharges === undefined ? {} : { return_fixed_charges: returnFixedCharges }),
+        ...(creditOptions?.creditAction ? { credit_action: creditOptions.creditAction } : {}),
+        ...(creditOptions?.allowWalkinCredit ? { allow_walkin_credit: creditOptions.allowWalkinCredit } : {})
       }),
        credentials: 'include'
     });
@@ -161,6 +177,7 @@ export async function createPartialReturn(
     return {
       success: true,
       returnInvoice: result.return_invoice,
+      credit: result.credit || null,
       message: result.message
     };
         //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -178,6 +195,8 @@ export async function createMultiInvoiceReturn(
 ): Promise<{
   success: boolean;
   createdReturns?: string[];
+  /** Per-note outcomes keyed by return invoice (the credit router). */
+  credits?: Record<string, ReturnCredit>;
   /** Returns that did not go through, each with the server's reason. */
   failed?: Array<{ invoice_name: string; message: string }>;
   message?: string;
@@ -216,6 +235,7 @@ export async function createMultiInvoiceReturn(
     return {
       success: Boolean(result.success),
       createdReturns: result.created_returns,
+      credits: result.credits || {},
       failed: result.failed || [],
       message: result.message
     };

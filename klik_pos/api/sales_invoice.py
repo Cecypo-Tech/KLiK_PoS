@@ -9,6 +9,7 @@ from frappe import _
 from frappe.exceptions import ValidationError
 from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 
+from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
@@ -2287,6 +2288,15 @@ def _queue_sales_invoice(data, source_order=None):
 
 		_validate_reserved_stock_for_items(doc)
 
+		# Customer credit: every row checked before anything persists; applied after
+		# submit. The in-memory marker exempts the sale-type cash gate only when the
+		# credit (plus any tender) fully covers the sale.
+		credit_rows = validate_allocations(doc, data.get("customerCredit") or [])
+		if credit_rows:
+			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
+			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.grand_total, 2):
+				doc._klik_customer_credit = credit_sum
+
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
 			doc.save(ignore_permissions=True)
@@ -2327,6 +2337,7 @@ def _queue_sales_invoice(data, source_order=None):
 				enqueue_after_commit=True,
 				invoice_name=doc.name,
 				requested_by=frappe.session.user,
+				customer_credit=credit_rows,
 			)
 
 			doc.save(ignore_permissions=True)
@@ -2345,6 +2356,7 @@ def _queue_sales_invoice(data, source_order=None):
 				"invoice_id": doc.name,
 				"invoice": _get_invoice_response_summary(doc),
 				"payment_entry": None,
+				"customer_credit": {"applied": 0.0, "warning": None},
 				"processing_time": round(processing_time, 2),
 			}
 		else:
@@ -2376,6 +2388,8 @@ def _queue_sales_invoice(data, source_order=None):
 				doc.customer,
 			)
 
+			credit_result = _apply_checkout_credit(doc, credit_rows)
+
 			processing_time = time.time() - start_time
 			frappe.logger().info(f"Invoice {doc.name} submitted directly in {processing_time:.2f} seconds")
 
@@ -2386,6 +2400,7 @@ def _queue_sales_invoice(data, source_order=None):
 				"invoice_id": doc.name,
 				"invoice": _get_invoice_response_summary(doc),
 				"payment_entry": None,
+				"customer_credit": credit_result,
 				"processing_time": round(processing_time, 2),
 			}
 
@@ -2417,8 +2432,36 @@ def get_checkout_request_status(checkout_request_id):
 	return response
 
 
+def _apply_checkout_credit(doc, credit_rows):
+	"""Settle validated credit-note allocations right after submit; never undo the sale.
+
+	A stale allocation (the note was spent between validation and here) must not lose
+	the submitted sale: log it and tell the cashier to apply the credit from desk. A
+	partial application (a note drained concurrently) is reported as partial.
+	"""
+	result = {"applied": 0.0, "warning": None}
+	if not credit_rows:
+		return result
+	requested = flt(sum(r["amount"] for r in credit_rows), 2)
+	try:
+		applied = apply_customer_credit(doc.name, credit_rows)
+		result["applied"] = applied["applied"]
+		if flt(applied["applied"], 2) < requested:
+			result["warning"] = (
+				"Only part of the customer credit could be applied - settle the rest "
+				"from desk Payment Reconciliation."
+			)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Customer credit not applied")
+		result["warning"] = (
+			"Sale submitted, but the customer credit could not be applied - "
+			"apply it from desk Payment Reconciliation."
+		)
+	return result
+
+
 @frappe.whitelist()
-def process_queued_sales_invoice(invoice_name, requested_by=None):
+def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
 	"""Background worker that submits a queued draft sales invoice."""
 	try:
 		doc = frappe.get_doc("Sales Invoice", invoice_name)
@@ -2480,6 +2523,10 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 			getattr(doc, "business_type", None),
 			doc.customer,
 		)
+
+		credit_result = _apply_checkout_credit(doc, customer_credit or [])
+		if credit_result["warning"]:
+			frappe.logger().warning(f"{invoice_name}: {credit_result['warning']}")
 
 		return {"success": True, "message": f"Invoice {invoice_name} submitted successfully"}
 
@@ -2866,6 +2913,15 @@ def parse_invoice_data(data):
 	sales_and_tax_charges = pos_profile.taxes_and_charges
 	business_type = data.get("businessType")
 
+	# Customer credit tendered at checkout (open credit notes); validated against the
+	# built document later - here it only counts as money for the tender checks, at the
+	# same 2dp the validator uses, so a sub-cent row cannot sneak past this gate.
+	credit_total = sum(
+		flt(row.get("amount"), 2)
+		for row in (data.get("customerCredit") or [])
+		if isinstance(row, dict) and flt(row.get("amount"), 2) > 0
+	)
+
 	# ERPNext owns invoice rounding through rounding_adjustment/rounded_total.
 	# Ignore legacy Klik roundOffAmount payloads to avoid duplicate write-off entries.
 	roundoff_amount = 0.0
@@ -2952,7 +3008,9 @@ def parse_invoice_data(data):
 		and has_positive_priced_item
 		and not loyalty_redemption
 	):
-		if flt(amount_paid or 0) <= 0 or not _has_positive_payment_amount(mode_of_payment):
+		if (
+			flt(amount_paid or 0) <= 0 or not _has_positive_payment_amount(mode_of_payment)
+		) and flt(credit_total) <= 0:
 			frappe.throw(
 				_("Cash sale requires at least one payment method with a positive amount.")
 			)
@@ -4557,7 +4615,7 @@ def _stamp_return_with_refunding_shift(return_doc):
 
 
 @frappe.whitelist()
-def return_sales_invoice(invoice_name):
+def return_sales_invoice(invoice_name, credit_action=None, allow_walkin_credit=0):
 	try:
 		_ensure_return_allowed()
 
@@ -4624,6 +4682,16 @@ def return_sales_invoice(invoice_name):
 
 		return_doc.calculate_taxes_and_totals()
 
+		# The cashier's choice for value that cannot go back as cash is validated BEFORE
+		# anything persists: a throw here leaves no return behind.
+		precision = return_doc.precision("grand_total") or 2
+		prospective_credit = flt(
+			abs(flt(return_doc.rounded_total or return_doc.grand_total)) - flt(refunded_cash), precision
+		)
+		final_credit_action = _validated_credit_action(
+			return_doc.customer, credit_action, allow_walkin_credit, prospective_credit
+		)
+
 		# Whatever was not refunded in cash is credit; allocate it against the original invoice.
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
@@ -4632,7 +4700,16 @@ def return_sales_invoice(invoice_name):
 		_enforce_submit_permission(return_doc)
 		return_doc.submit()
 
-		return {"success": True, "return_invoice": return_doc.name}
+		available_credit = flt(-return_doc.outstanding_amount, precision)
+		return {
+			"success": True,
+			"return_invoice": return_doc.name,
+			"credit": (
+				{"note": return_doc.name, "available": available_credit, "action": final_credit_action}
+				if available_credit > 0
+				else None
+			),
+		}
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Return Invoice Error")
@@ -5215,6 +5292,8 @@ def create_partial_return(
 	return_amount=None,
 	expected_return_amount=None,
 	return_fixed_charges=None,
+	credit_action=None,
+	allow_walkin_credit=0,
 ):
 	"""Create a partial return for selected items from an invoice with custom payment method.
 
@@ -5351,6 +5430,17 @@ def create_partial_return(
 		except Exception:
 			pass
 
+		# The cashier's choice for value that cannot go back as cash is validated BEFORE
+		# anything persists: a throw here leaves no return behind.
+		prospective_precision = return_doc.precision("grand_total") or 2
+		prospective_credit = flt(
+			abs(flt(return_doc.rounded_total or return_doc.grand_total)) - flt(refunded_cash),
+			prospective_precision,
+		)
+		final_credit_action = _validated_credit_action(
+			return_doc.customer, credit_action, allow_walkin_credit, prospective_credit
+		)
+
 		# Whatever was not refunded in cash is credit; allocate it against the original invoice.
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
@@ -5377,18 +5467,51 @@ def create_partial_return(
 				return_doc.name, credited_amount
 			)
 
+		available_credit = flt(-return_doc.outstanding_amount, precision)
 		return {
 			"success": True,
 			"return_invoice": return_doc.name,
 			"refunded_amount": flt(refunded_cash, precision),
 			"credited_amount": credited_amount,
 			"payment_method": final_payment_method if refunded_cash > 0 else None,
+			"credit": (
+				{
+					"note": return_doc.name,
+					"available": available_credit,
+					"action": final_credit_action,
+				}
+				if available_credit > 0
+				else None
+			),
 			"message": message,
 		}
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Partial Return Error")
 		return {"success": False, "message": str(e)}
+
+
+def _validated_credit_action(customer, credit_action, allow_walkin_credit, prospective_credit):
+	"""The cashier's choice for return value that cannot go back as cash.
+
+	Named customers keep the credit (default) or exchange now. Walk In may not keep -
+	nobody can prove the credit is theirs later - unless a manager overrides.
+	"""
+	action = credit_action or "keep"
+	if action not in ("keep", "exchange"):
+		frappe.throw(_("Unknown credit action: {0}").format(action))
+	if prospective_credit <= 0:
+		return action
+	# Until the till can hand a specific note straight to the next sale, Walk In credit
+	# has no claimable home either way - keep AND exchange both need the override.
+	if _is_walkin_customer(customer) and not cint(allow_walkin_credit):
+		frappe.throw(
+			_(
+				"Walk In credit cannot be kept or exchanged at the till yet - refund it, "
+				"or have a manager handle it from desk."
+			)
+		)
+	return action
 
 
 @frappe.whitelist()
@@ -5404,6 +5527,7 @@ def create_multi_invoice_return(return_data):
 
 		created_returns = []
 		failed = []
+		credits = {}
 
 		for _i, invoice_return in enumerate(invoice_returns):
 			invoice_name = invoice_return.get("invoice_name")
@@ -5419,9 +5543,13 @@ def create_multi_invoice_return(return_data):
 					payment_method=payment_method,
 					return_amount=return_amount,
 					return_fixed_charges=invoice_return.get("return_fixed_charges"),
+					credit_action=invoice_return.get("credit_action") or return_data.get("credit_action"),
+					allow_walkin_credit=return_data.get("allow_walkin_credit") or 0,
 				)
 				if result.get("success"):
 					created_returns.append(result.get("return_invoice"))
+					if result.get("credit"):
+						credits[result["return_invoice"]] = result["credit"]
 				else:
 					failed.append({"invoice_name": invoice_name, "message": result.get("message")})
 
@@ -5439,6 +5567,7 @@ def create_multi_invoice_return(return_data):
 			"success": not failed,
 			"created_returns": created_returns,
 			"failed": failed,
+			"credits": credits,
 			"message": message,
 		}
 
@@ -5623,6 +5752,18 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 	remarks: the checkout's note, applied whether or not `data` comes - an M-Pesa sale paid
 	wholly from receipts sends no cart data, and a note typed after picking them must land.
 	"""
+	# This path has no customer-credit wiring (no validate, no apply). Refusing the
+	# payload outright beats silently dropping a tender the cashier watched being taken.
+	if data:
+		_payload = json.loads(data) if isinstance(data, str) else data
+		if isinstance(_payload, dict) and _payload.get("customerCredit"):
+			frappe.throw(
+				_(
+					"Customer credit cannot be used on this checkout path yet - remove the "
+					"credit tender, or ring the sale as a normal checkout."
+				)
+			)
+
 	draft_touched = False
 	try:
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)

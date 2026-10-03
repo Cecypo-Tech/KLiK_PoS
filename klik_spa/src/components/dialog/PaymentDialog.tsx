@@ -40,6 +40,7 @@ import {
 import { followTotal, toggleOn, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
+import { allocateCredit, fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
 import {
   holdBlockedByMpesa,
   mpesaDraftKeptForStk,
@@ -190,6 +191,11 @@ async function discardAbandonedMpesaOrder(orderName: string) {
   }
 }
 
+/** The pseudo-tender that spends a customer's open credit notes (the credit router).
+It never becomes a payment row: buildPaymentData turns it into customerCredit
+allocations the server settles after submit. */
+const CUSTOMER_CREDIT_METHOD = "Customer Credit";
+
 export default function PaymentDialog(props: PaymentDialogProps) {
   const {
     isOpen,
@@ -208,6 +214,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const [selectedSalesTaxCharges, setSelectedSalesTaxCharges] = useState("");
   const [paymentAmounts, setPaymentAmounts] = useState<PaymentAmount>({});
+  const [customerCredit, setCustomerCredit] = useState<CustomerCredit | null>(null);
   const [activeMethodId, setActiveMethodId] = useState<string | null>(null);
   const [lastModifiedMethodId, setLastModifiedMethodId] = useState<string | null>(null);
   const [paymentReferences, setPaymentReferences] = useState<Record<string, string>>({});
@@ -344,6 +351,37 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       : typeof posDetails?.company?.name === "string"
         ? posDetails.company.name
         : "";
+
+  // Open credit notes this customer can spend as a tender (the credit router).
+  // Walk In never sees it - nobody can prove that credit is theirs later.
+  useEffect(() => {
+    let cancelled = false;
+    const customerId = selectedCustomer?.id || selectedCustomer?.name;
+    if (!isOpen || !customerId || !posCompanyName || selectedCustomer?.isWalkin) {
+      setCustomerCredit(null);
+      return;
+    }
+    const tillCurrency = typeof posDetails?.currency === "string" ? posDetails.currency : undefined;
+    fetchCustomerCredit(String(customerId), posCompanyName, tillCurrency)
+      .then((credit) => {
+        if (!cancelled) setCustomerCredit(credit);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerCredit(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, selectedCustomer, posCompanyName, posDetails?.currency]);
+
+  // A draft/M-Pesa-order flow starting mid-dialog clears any credit already entered:
+  // those submit paths refuse the tender, so the figures must stop counting it.
+  useEffect(() => {
+    if (!(mpesaOrderName || mpesaDraftInvoiceName)) return;
+    setPaymentAmounts((prev) =>
+      (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
+    );
+  }, [mpesaOrderName, mpesaDraftInvoiceName]);
 
   const isB2B = posDetails?.business_type === "B2B";
   const isB2C = posDetails?.business_type === "B2C";
@@ -669,7 +707,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       if (a.default !== 1 && b.default === 1) return 1;
       return 0;
     });
-    return sortedModes.map((mode) => {
+    const rows = sortedModes.map((mode) => {
       const { icon, color } = getIconAndColor(mode.type || "Default");
       return {
         id: mode.mode_of_payment,
@@ -683,7 +721,28 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         idx: mode.idx,
       };
     });
-  }, [modes, paymentAmounts]);
+    // The credit router's pseudo-tender: offered only when the customer holds credit,
+    // this is not a credit sale (paying a credit sale with credit is a contradiction),
+    // no draft/M-Pesa-order flow is active (those submit paths have no credit wiring),
+    // and no REAL mode of payment shares the name (legacy store-credit setups).
+    const creditFlowActive = Boolean(mpesaOrderName || mpesaDraftInvoiceName);
+    const realModeCollision = modes.some((mode) => mode.mode_of_payment === CUSTOMER_CREDIT_METHOD);
+    if (customerCredit && customerCredit.total > 0 && !isCreditSale && !creditFlowActive && !realModeCollision) {
+      const creditLook = getIconAndColor("Default");
+      rows.push({
+        id: CUSTOMER_CREDIT_METHOD,
+        name: CUSTOMER_CREDIT_METHOD,
+        icon: creditLook.icon,
+        color: creditLook.color,
+        enabled: true,
+        amount: paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0,
+        type: "CustomerCredit",
+        isDefault: false,
+        idx: 9999,
+      });
+    }
+    return rows;
+  }, [modes, paymentAmounts, customerCredit, isCreditSale, mpesaOrderName, mpesaDraftInvoiceName]);
 
   const orderedPaymentMethodIds = useMemo(() => {
     const sortedModes = [...modes].sort((a, b) => {
@@ -860,6 +919,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   ) => {
     const activeMpesaPayment = options?.excludeActiveMpesa ? getActiveMpesaPayment() : null;
     const adjustedPaymentMethods = Object.entries(paymentAmounts).filter(([, amount]) => amount > 0);
+    // Customer credit is not a payment row: it leaves this list, leaves amountPaid,
+    // and reaches the server as customerCredit allocations settled after submit.
+    // Draft and M-Pesa-order submits have no credit wiring server-side, so those
+    // flows carry no credit at all - the tender is hidden and zeroed for them too.
+    const creditFlowBlocked = Boolean(
+      mpesaOrderName || mpesaDraftInvoiceName || getOriginalDraftInvoiceId()
+    );
+    const creditAmount = creditFlowBlocked
+      ? 0
+      : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
 
     return {
       items: cartItems.map((item) => {
@@ -878,6 +947,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       }),
       customer: selectedCustomer,
       paymentMethods: (adjustedPaymentMethods ?? []).filter(([method]) => {
+        if (method === CUSTOMER_CREDIT_METHOD) return false;
         if (!activeMpesaPayment) return true;
         return method !== activeMpesaPayment.method;
       }).map(([method, amount]) => {
@@ -917,7 +987,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       remarks: remarks.trim(),
       shipping_rule: activeShippingRule || null,
       grandTotal: checkoutGrandTotal,
-      amountPaid: totalPaidAmount,
+      amountPaid: roundCurrency(Math.max(0, totalPaidAmount - creditAmount)),
+      customerCredit:
+        creditAmount > 0 && customerCredit ? allocateCredit(customerCredit.notes, creditAmount) : [],
       outstandingAmount: outstandingAmount,
       appliedCoupons,
       businessType: posDetails?.business_type,
@@ -1223,7 +1295,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       // turn on: fill what is owed, or take over from a single row holding the whole sale
       const backedByMpesa =
         mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "completed") ? [mpesaFlow.modeOfPayment] : [];
-      setPaymentAmounts((amts) => toggleOn(amts, methodId, checkoutPayableTotal, backedByMpesa));
+      setPaymentAmounts((amts) => {
+        const next = toggleOn(amts, methodId, checkoutPayableTotal, backedByMpesa);
+        if (methodId === CUSTOMER_CREDIT_METHOD) {
+          // The tender can never exceed what the customer's notes actually hold.
+          next[CUSTOMER_CREDIT_METHOD] = Math.min(
+            next[CUSTOMER_CREDIT_METHOD] || 0,
+            roundCurrency(customerCredit?.total ?? 0)
+          );
+        }
+        return next;
+      });
       setLastModifiedMethodId(methodId);
       setActiveMethodId(methodId);
     }
@@ -1235,7 +1317,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleManualAmountChange = (methodId: string, amount: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
-    const numericAmount = roundCurrency(parseFloat(amount) || 0);
+    let numericAmount = roundCurrency(parseFloat(amount) || 0);
+    if (methodId === CUSTOMER_CREDIT_METHOD) {
+      // The tender can never exceed what the notes hold, nor what the sale asks for.
+      numericAmount = Math.min(
+        numericAmount,
+        roundCurrency(customerCredit?.total ?? 0),
+        roundCurrency(Math.max(0, checkoutPayableTotal))
+      );
+    }
     setLastModifiedMethodId(methodId);
     setPaymentAmounts((prev) => {
       const baseAmounts = { ...prev, [methodId]: numericAmount };
@@ -1739,6 +1829,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaDraftInvoiceName(null);
       setMpesaOrderName(null);
       toast.success(queued ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
+
+      // A stale credit allocation never undoes the sale; the server says so here.
+      const creditWarning = response?.customer_credit?.warning;
+      if (creditWarning) {
+        toast.warning(String(creditWarning), { autoClose: 10000 });
+      }
 
       // What the receipts held beyond this sale stays on them for the customer's next
       // sale - never handed back as cash change. Surface it explicitly.
