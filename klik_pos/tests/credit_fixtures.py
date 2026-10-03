@@ -11,7 +11,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_retu
 COMPANY = "_Test Company"
 
 
-def make_simple_invoice(customer, company, amount, posting_date=None, paid=False):
+def make_simple_invoice(customer, company, amount, posting_date=None, paid=False, item="_Test Item"):
 	doc = frappe.get_doc(
 		{
 			"doctype": "Sales Invoice",
@@ -19,7 +19,7 @@ def make_simple_invoice(customer, company, amount, posting_date=None, paid=False
 			"company": company,
 			"set_posting_time": 1 if posting_date else 0,
 			"posting_date": posting_date or frappe.utils.nowdate(),
-			"items": [{"item_code": "_Test Item", "qty": 1, "rate": amount}],
+			"items": [{"item_code": item, "qty": 1, "rate": amount}],
 		}
 	)
 	doc.insert()
@@ -33,10 +33,10 @@ def make_simple_invoice(customer, company, amount, posting_date=None, paid=False
 	return doc
 
 
-def make_credit_note(customer, company, amount, posting_date=None):
+def make_credit_note(customer, company, amount, posting_date=None, item="_Test Item"):
 	# The original is paid first: only then does the return keep its value as the
 	# customer's credit instead of offsetting the original's open balance.
-	invoice = make_simple_invoice(customer, company, amount, posting_date, paid=True)
+	invoice = make_simple_invoice(customer, company, amount, posting_date, paid=True, item=item)
 	note = make_sales_return(invoice.name)
 	# ERPNext copies dead Advances rows (no_copy references) - same clearing klik does.
 	note.set("advances", [])

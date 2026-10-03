@@ -9,6 +9,7 @@ from frappe import _
 from frappe.exceptions import ValidationError
 from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 
+from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
@@ -2287,6 +2288,15 @@ def _queue_sales_invoice(data, source_order=None):
 
 		_validate_reserved_stock_for_items(doc)
 
+		# Customer credit: every row checked before anything persists; applied after
+		# submit. The in-memory marker exempts the sale-type cash gate only when the
+		# credit (plus any tender) fully covers the sale.
+		credit_rows = validate_allocations(doc, data.get("customerCredit") or [])
+		if credit_rows:
+			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
+			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.grand_total, 2):
+				doc._klik_customer_credit = credit_sum
+
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
 			doc.save(ignore_permissions=True)
@@ -2327,6 +2337,7 @@ def _queue_sales_invoice(data, source_order=None):
 				enqueue_after_commit=True,
 				invoice_name=doc.name,
 				requested_by=frappe.session.user,
+				customer_credit=credit_rows,
 			)
 
 			doc.save(ignore_permissions=True)
@@ -2345,6 +2356,7 @@ def _queue_sales_invoice(data, source_order=None):
 				"invoice_id": doc.name,
 				"invoice": _get_invoice_response_summary(doc),
 				"payment_entry": None,
+				"customer_credit": {"applied": 0.0, "warning": None},
 				"processing_time": round(processing_time, 2),
 			}
 		else:
@@ -2376,6 +2388,8 @@ def _queue_sales_invoice(data, source_order=None):
 				doc.customer,
 			)
 
+			credit_result = _apply_checkout_credit(doc, credit_rows)
+
 			processing_time = time.time() - start_time
 			frappe.logger().info(f"Invoice {doc.name} submitted directly in {processing_time:.2f} seconds")
 
@@ -2386,6 +2400,7 @@ def _queue_sales_invoice(data, source_order=None):
 				"invoice_id": doc.name,
 				"invoice": _get_invoice_response_summary(doc),
 				"payment_entry": None,
+				"customer_credit": credit_result,
 				"processing_time": round(processing_time, 2),
 			}
 
@@ -2418,7 +2433,28 @@ def get_checkout_request_status(checkout_request_id):
 
 
 @frappe.whitelist()
-def process_queued_sales_invoice(invoice_name, requested_by=None):
+def _apply_checkout_credit(doc, credit_rows):
+	"""Settle validated credit-note allocations right after submit; never undo the sale.
+
+	A stale allocation (the note was spent between validation and here) must not lose
+	the submitted sale: log it and tell the cashier to apply the credit from desk.
+	"""
+	result = {"applied": 0.0, "warning": None}
+	if not credit_rows:
+		return result
+	try:
+		applied = apply_customer_credit(doc.name, credit_rows)
+		result["applied"] = applied["applied"]
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Customer credit not applied")
+		result["warning"] = (
+			"Sale submitted, but the customer credit could not be applied - "
+			"apply it from desk Payment Reconciliation."
+		)
+	return result
+
+
+def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
 	"""Background worker that submits a queued draft sales invoice."""
 	try:
 		doc = frappe.get_doc("Sales Invoice", invoice_name)
@@ -2480,6 +2516,10 @@ def process_queued_sales_invoice(invoice_name, requested_by=None):
 			getattr(doc, "business_type", None),
 			doc.customer,
 		)
+
+		credit_result = _apply_checkout_credit(doc, customer_credit or [])
+		if credit_result["warning"]:
+			frappe.logger().warning(f"{invoice_name}: {credit_result['warning']}")
 
 		return {"success": True, "message": f"Invoice {invoice_name} submitted successfully"}
 
@@ -2866,6 +2906,14 @@ def parse_invoice_data(data):
 	sales_and_tax_charges = pos_profile.taxes_and_charges
 	business_type = data.get("businessType")
 
+	# Customer credit tendered at checkout (open credit notes); validated against the
+	# built document later - here it only counts as money for the tender checks.
+	credit_total = sum(
+		flt(row.get("amount"))
+		for row in (data.get("customerCredit") or [])
+		if isinstance(row, dict)
+	)
+
 	# ERPNext owns invoice rounding through rounding_adjustment/rounded_total.
 	# Ignore legacy Klik roundOffAmount payloads to avoid duplicate write-off entries.
 	roundoff_amount = 0.0
@@ -2952,7 +3000,9 @@ def parse_invoice_data(data):
 		and has_positive_priced_item
 		and not loyalty_redemption
 	):
-		if flt(amount_paid or 0) <= 0 or not _has_positive_payment_amount(mode_of_payment):
+		if (
+			flt(amount_paid or 0) <= 0 or not _has_positive_payment_amount(mode_of_payment)
+		) and flt(credit_total) <= 0:
 			frappe.throw(
 				_("Cash sale requires at least one payment method with a positive amount.")
 			)

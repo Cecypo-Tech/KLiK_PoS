@@ -8,7 +8,12 @@ Payment Reconciliation books - ERPNext's own mechanism, nothing parallel to main
 import frappe
 from frappe.utils import flt
 
-from klik_pos.api.sales_invoice import _is_walkin_customer
+
+def _is_walkin_customer(customer):
+	"""Lazy proxy to the sales_invoice helper - sales_invoice imports this module."""
+	from klik_pos.api import sales_invoice
+
+	return sales_invoice._is_walkin_customer(customer)
 
 
 @frappe.whitelist()
