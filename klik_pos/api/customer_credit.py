@@ -87,6 +87,8 @@ def lookup_credit_voucher(credit_note, original_invoice):
 			"is_return",
 			"return_against",
 			"grand_total",
+			"rounded_total",
+			"paid_amount",
 			"outstanding_amount",
 			*walkin_fields,
 		],
@@ -97,8 +99,11 @@ def lookup_credit_voucher(credit_note, original_invoice):
 	if not _same_number(original_invoice, note.return_against):
 		return no_match
 
-	total = flt(abs(note.grand_total), 2)
 	available = max(flt(-note.outstanding_amount, 2), 0.0) if note.docstatus == 1 else 0.0
+	# What the voucher held when issued: the return's rounded total less the cash handed back
+	# with it - the figure the return announced. It never reads below the balance left.
+	issued = flt(abs(flt(note.rounded_total) or flt(note.grand_total)) - abs(flt(note.paid_amount)), 2)
+	total = max(issued, available)
 	if note.docstatus == 2:
 		status = "cancelled"
 	elif available <= 0:
