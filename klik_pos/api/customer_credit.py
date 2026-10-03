@@ -6,6 +6,7 @@ Payment Reconciliation books - ERPNext's own mechanism, nothing parallel to main
 """
 
 import frappe
+from frappe.rate_limiter import rate_limit
 from frappe.utils import flt
 
 
@@ -49,6 +50,77 @@ def get_customer_credit(customer, company, currency=None):
 		for r in rows
 	]
 	return {"total": flt(sum(n["available"] for n in notes), 2), "notes": notes}
+
+
+def _same_number(typed, actual):
+	"""A voucher number as a cashier types it: spaces and letter case do not matter."""
+	return bool(actual) and (typed or "").strip().upper() == actual.strip().upper()
+
+
+@frappe.whitelist()
+@rate_limit(limit=30, seconds=60)
+def lookup_credit_voucher(credit_note, original_invoice):
+	"""What a store-credit voucher holds: its credit note number plus the original sale's.
+
+	A credit note is the voucher and its outstanding is the balance (negative = usable).
+	Both numbers must match, and every failed lookup answers the same "no_match", so the
+	lookup cannot be used to find out which credit notes exist.
+	"""
+	frappe.has_permission("Sales Invoice", "read", throw=True)
+	no_match = {"status": "no_match"}
+	credit_note = (credit_note or "").strip()
+	if not credit_note or not (original_invoice or "").strip():
+		return no_match
+
+	meta = frappe.get_meta("Sales Invoice")
+	walkin_fields = [f for f in ("custom_walkin_customer_name", "custom_walkin_phone") if meta.has_field(f)]
+	note = frappe.db.get_value(
+		"Sales Invoice",
+		credit_note,
+		[
+			"name",
+			"customer",
+			"customer_name",
+			"company",
+			"currency",
+			"docstatus",
+			"is_return",
+			"return_against",
+			"grand_total",
+			"outstanding_amount",
+			*walkin_fields,
+		],
+		as_dict=True,
+	)
+	if not note or not note.is_return or note.docstatus == 0:
+		return no_match
+	if not _same_number(original_invoice, note.return_against):
+		return no_match
+
+	total = flt(abs(note.grand_total), 2)
+	available = max(flt(-note.outstanding_amount, 2), 0.0) if note.docstatus == 1 else 0.0
+	if note.docstatus == 2:
+		status = "cancelled"
+	elif available <= 0:
+		status = "used"
+	elif available < total:
+		status = "partly_used"
+	else:
+		status = "open"
+	return {
+		"status": status,
+		"note": note.name,
+		"original": note.return_against,
+		"customer": note.customer,
+		"customer_name": note.customer_name,
+		"is_walkin": bool(_is_walkin_customer(note.customer)),
+		"company": note.company,
+		"currency": note.currency,
+		"total": total,
+		"available": available,
+		"walkin_name": note.get("custom_walkin_customer_name"),
+		"walkin_phone": note.get("custom_walkin_phone"),
+	}
 
 
 def validate_allocations(invoice_doc, allocations):
