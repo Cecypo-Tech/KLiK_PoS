@@ -195,10 +195,7 @@ export async function retryQueuedInvoice(invoiceId: string) {
   return result.message;
 }
 
-export async function createSalesReturn(
-  invoiceName: string,
-  creditOptions?: { creditAction?: "keep" | "exchange"; allowWalkinCredit?: 0 | 1 }
-) {
+export async function createSalesReturn(invoiceName: string) {
   const csrfToken = window.csrf_token;
 
   const response = await fetch('/api/method/klik_pos.api.sales_invoice.return_sales_invoice', {
@@ -207,11 +204,7 @@ export async function createSalesReturn(
       'Content-Type': 'application/json',
       'X-Frappe-CSRF-Token': csrfToken
     },
-    body: JSON.stringify({
-      invoice_name: invoiceName,
-      ...(creditOptions?.creditAction ? { credit_action: creditOptions.creditAction } : {}),
-      ...(creditOptions?.allowWalkinCredit ? { allow_walkin_credit: creditOptions.allowWalkinCredit } : {})
-    }),
+    body: JSON.stringify({ invoice_name: invoiceName }),
     credentials: 'include'
   });
 

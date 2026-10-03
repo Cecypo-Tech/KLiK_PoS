@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import {
   X,
   RotateCcw,
@@ -19,10 +18,6 @@ import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem 
 import { fixedChargeReturned, returnedValue, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
 import { returnNotice } from "../utils/returnNotice";
-import { creditChoices, fetchReturnCustomer, type CreditAction } from "../utils/creditAction";
-import { useProductStore } from "../stores/productStore";
-import type { Customer } from "../types/customer";
-import type { Customer as CartCustomer } from "../../types";
 import StepperInput, { NO_NATIVE_SPINNER } from "./common/StepperInput";
 
 interface SingleInvoiceReturnProps {
@@ -31,18 +26,14 @@ interface SingleInvoiceReturnProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (returnInvoice: string) => void;
-  /** The Closing Shift page turns this off: a cashier mid-close must not open new sales. */
-  allowExchange?: boolean;
 }
 
 export default function SingleInvoiceReturn({
   invoice,
   isOpen,
   onClose,
-  onSuccess,
-  allowExchange = true
+  onSuccess
 }: SingleInvoiceReturnProps) {
-  const navigate = useNavigate();
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [fixedCharges, setFixedCharges] = useState<FixedCharge[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -66,33 +57,6 @@ export default function SingleInvoiceReturn({
   // Cash ceiling from the backend: how much the customer actually handed over and we still hold.
   // 0 for a credit sale, in which case the whole return becomes a credit note.
   const [refundableCash, setRefundableCash] = useState<number>(0);
-
-  // The credit router: who the non-cash value belongs to, and what the cashier chose.
-  const [returnCustomer, setReturnCustomer] = useState<Customer | null>(null);
-  const [creditAction, setCreditAction] = useState<CreditAction | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!isOpen || !invoice?.customer) {
-      setReturnCustomer(null);
-      return;
-    }
-    fetchReturnCustomer(String(invoice.customer)).then((found) => {
-      if (!cancelled) setReturnCustomer(found);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, invoice?.customer]);
-
-  const actionChoices = useMemo(
-    () => creditChoices(Boolean(returnCustomer?.isWalkin), false).filter((c) => allowExchange || c !== "exchange"),
-    [returnCustomer, allowExchange]
-  );
-
-  useEffect(() => {
-    setCreditAction(actionChoices[0] ?? null);
-  }, [actionChoices]);
 
   useEffect(() => {
     if (isOpen && invoice) {
@@ -289,27 +253,22 @@ export default function SingleInvoiceReturn({
 
       const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
       const result = await createPartialReturn(
-        invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount, returnsAnyFixedCharge(returnBasis) ? 1 : 0,
-        creditAction ? { creditAction } : undefined
+        invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount, returnsAnyFixedCharge(returnBasis) ? 1 : 0
       );
 
       if (result.success) {
         // Report what the backend actually did, not what was requested: a credit sale refunds
         // nothing regardless of the payment method that was picked.
         toast.success(result.message || 'Return created successfully');
+        if (result.credit) {
+          // The credit note is the customer's voucher: both numbers on the receipt pay with it.
+          toast.info(
+            `Store credit voucher ${result.credit.note} (sale ${result.credit.original}): ${formatCurrencyWithSymbol(result.credit.available, currency)}`,
+            { autoClose: 15000 }
+          );
+        }
         onSuccess(result.returnInvoice!);
         onClose();
-        if (result.credit?.action === "exchange" && returnCustomer) {
-          // Exchange now: hand the till a new sale for this customer. The payment
-          // dialog's credit fetch offers the fresh note by itself. The two Customer
-          // shapes are bridged the way heldOrderToCart already does it.
-          useProductStore.getState().setSelectedCustomer(returnCustomer as unknown as CartCustomer);
-          toast.info(
-            `Credit of ${formatCurrencyWithSymbol(result.credit.available, currency)} is ready in the payment dialog.`,
-            { autoClose: 8000 }
-          );
-          navigate('/pos');
-        }
       } else {
         toast.error(result.error || 'Failed to create return');
       }
@@ -700,33 +659,6 @@ export default function SingleInvoiceReturn({
                 </div>
               </div>
             </div>
-            )}
-
-            {/* The credit router: what happens to value that cannot go back as cash */}
-            {creditNoteAmount > 0 && (
-              <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-700 dark:text-gray-300">
-                <span className="font-medium">
-                  {formatCurrencyWithSymbol(creditNoteAmount, currency)} not refunded in cash:
-                </span>
-                {actionChoices.map((choice) => (
-                  <label key={choice} className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="credit-action"
-                      checked={creditAction === choice}
-                      onChange={() => setCreditAction(choice)}
-                      className="accent-beveren-600"
-                    />
-                    <span>{choice === "keep" ? "Keep as customer credit" : "Exchange now"}</span>
-                  </label>
-                ))}
-                {!actionChoices.length && (
-                  <span className="text-amber-700 dark:text-amber-400">
-                    Walk In credit cannot be kept or exchanged at the till yet - refund it via
-                    accounts, or have a manager handle it from desk.
-                  </span>
-                )}
-              </div>
             )}
 
             {/* Action Buttons */}

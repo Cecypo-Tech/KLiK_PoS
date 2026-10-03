@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   X,
   RotateCcw,
@@ -27,8 +27,6 @@ import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
-import { creditChoices, fetchReturnCustomer, type CreditAction } from "../utils/creditAction";
-import type { Customer } from "../types/customer";
 import StepperInput, { NO_NATIVE_SPINNER } from "./common/StepperInput";
 
 interface MultiInvoiceReturnProps {
@@ -58,38 +56,6 @@ export default function MultiInvoiceReturn({
   const [workflowStep, setWorkflowStep] = useState<'select-customer' | 'select-items' | 'filter-invoices' | 'select-invoices'>('select-customer');
   const [selectedCustomer, setSelectedCustomer] = useState<string>(customer || '');
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
-
-  // The credit router: who the non-cash value belongs to, and what the cashier chose.
-  // A multi-invoice exchange ends in the page reload below, so the choice is recorded
-  // on the notes; a NAMED customer's fresh credit is then offered by the payment
-  // dialog's own fetch on their next sale (Walk In gets no till choice - see
-  // creditChoices - and needs a manager either way).
-  const [returnCustomer, setReturnCustomer] = useState<Customer | null>(null);
-  const [creditAction, setCreditAction] = useState<CreditAction | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const name = selectedCustomer || customer;
-    if (!isOpen || !name) {
-      setReturnCustomer(null);
-      return;
-    }
-    fetchReturnCustomer(String(name)).then((found) => {
-      if (!cancelled) setReturnCustomer(found);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, selectedCustomer, customer]);
-
-  const actionChoices = useMemo(
-    () => creditChoices(Boolean(returnCustomer?.isWalkin), false),
-    [returnCustomer]
-  );
-
-  useEffect(() => {
-    setCreditAction(actionChoices[0] ?? null);
-  }, [actionChoices]);
   const [selectedItems, setSelectedItems] = useState<{item_code: string, item_name: string}[]>([]);
   const [availableItems, setAvailableItems] = useState<{item_code: string, item_name: string}[]>([]);
   const [filteredAvailableItems, setFilteredAvailableItems] = useState<{item_code: string, item_name: string}[]>([]);
@@ -496,8 +462,7 @@ export default function MultiInvoiceReturn({
 
     const returnData: ReturnData = {
       customer: customer || '',
-      invoice_returns: invoiceReturns,
-      ...(creditAction ? { credit_action: creditAction } : {})
+      invoice_returns: invoiceReturns
     };
 
     setIsLoading(true);
@@ -1310,30 +1275,6 @@ export default function MultiInvoiceReturn({
         {/* Footer */}
         {workflowStep === 'select-invoices' && (
           <div className="flex-shrink-0 px-4 sm:px-6 py-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600">
-            {/* The credit router: what happens to value that cannot go back as cash */}
-            {hasItemsToReturn && (
-              <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-700 dark:text-gray-300">
-                <span className="font-medium">Value not refunded in cash:</span>
-                {actionChoices.map((choice) => (
-                  <label key={choice} className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="multi-credit-action"
-                      checked={creditAction === choice}
-                      onChange={() => setCreditAction(choice)}
-                      className="accent-beveren-600"
-                    />
-                    <span>{choice === "keep" ? "Keep as customer credit" : "Exchange now"}</span>
-                  </label>
-                ))}
-                {!actionChoices.length && (
-                  <span className="text-amber-700 dark:text-amber-400">
-                    Walk In credit cannot be kept or exchanged at the till yet - refund it via
-                    accounts, or have a manager handle it from desk.
-                  </span>
-                )}
-              </div>
-            )}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="text-sm text-gray-600 dark:text-gray-400">
                 {hasItemsToReturn && (
