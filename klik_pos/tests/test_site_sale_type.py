@@ -50,16 +50,21 @@ class TestSetSiteSaleType(FrappeTestCase):
 
 	def test_a_field_with_other_options_is_left_alone(self):
 		doc = frappe.new_doc("Sales Invoice")
+		before = doc.get(FIELD)  # the site field's default, or None where there is no field
 		with _with_options("Retail", "Wholesale"):
 			_set_site_sale_type(doc, is_credit_sale=True)
-		self.assertIsNone(doc.get(FIELD))
+		self.assertEqual(doc.get(FIELD), before)
 
 	def test_a_site_without_the_field_is_left_alone(self):
-		self.assertFalse(frappe.get_meta("Sales Invoice").has_field(FIELD), "dev should not have the field")
-		self.assertEqual(sales_invoice._site_sale_types(), set())
-		doc = frappe.new_doc("Sales Invoice")
-		_set_site_sale_type(doc, is_credit_sale=True)
-		self.assertIsNone(doc.get(FIELD))
+		# The site this runs on may well have the field (dev does); hide it from the meta.
+		meta = frappe.get_meta("Sales Invoice")
+		get_field = meta.get_field
+		with patch.object(meta, "get_field", side_effect=lambda f: None if f == FIELD else get_field(f)):
+			self.assertEqual(sales_invoice._site_sale_types(), set())
+			doc = frappe.new_doc("Sales Invoice")
+			before = doc.get(FIELD)
+			_set_site_sale_type(doc, is_credit_sale=True)
+		self.assertEqual(doc.get(FIELD), before)
 
 
 class TestNewInvoices(FrappeTestCase):
@@ -75,8 +80,10 @@ class TestNewInvoices(FrappeTestCase):
 		with _with_options("Cash", "Credit"):
 			self.assertEqual(_build(is_credit_sale=False).get(FIELD), "Cash")
 
-	def test_without_the_field_the_invoice_carries_none(self):
-		self.assertIsNone(_build(is_credit_sale=True).get(FIELD))
+	def test_without_the_field_klik_sets_nothing(self):
+		# Not marked Credit: klik left the field alone (the site's own default may still fill it).
+		with _with_options():
+			self.assertNotEqual(_build(is_credit_sale=True).get(FIELD), "Credit")
 
 
 class TestAResavedDraftKeepsItsType(FrappeTestCase):
