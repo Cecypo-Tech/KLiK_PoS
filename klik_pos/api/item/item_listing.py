@@ -26,9 +26,13 @@ def get_items(
     price_list: str | None = None,
     warehouse: str | None = None,
     item_codes=None,
+    include_groups: int = 1,
 ):
     """`item_codes` (a list, or its JSON) limits the list to exactly those items - quick
-    entry's way to fetch the items it matched as the product list would offer them."""
+    entry's way to fetch the items it matched as the product list would offer them.
+
+    `include_groups=0` skips the category bar's groups: the till loads those once from
+    get_item_groups and only asks the listing for them while a search is narrowing them."""
     if isinstance(item_codes, str):
         item_codes = frappe.parse_json(item_codes)
     item_codes = [str(code) for code in (item_codes or []) if code]
@@ -226,14 +230,18 @@ def get_items(
         # every item is dropped would otherwise leave the cursor parked forever.
         sql_row_count = len(items)
 
-        item_groups_data = _get_item_groups_with_counts(
-            pos_doc,
-            warehouse,
-            effective_hide_unavailable,
-            search_term,
-            category,
-            enhanced_search,
-            include_service_items,
+        item_groups_data = (
+            _get_item_groups_with_counts(
+                pos_doc,
+                warehouse,
+                effective_hide_unavailable,
+                search_term,
+                category,
+                enhanced_search,
+                include_service_items,
+            )
+            if cint(include_groups)
+            else []
         )
 
         if not items:
@@ -783,6 +791,24 @@ def _fetch_conversion_factor_map(item_codes):
         cf_map[(row["parent"], row["uom"])] = flt(row.get("conversion_factor", 1))
 
     return cf_map
+
+
+@frappe.whitelist()
+def get_item_groups(warehouse: str | None = None):
+    """The till's category bar on its own: groups with item counts, no items.
+
+    The same context as get_items (POS Profile, its warehouse unless one is asked for,
+    hide-unavailable stood down when stock cannot be read), so the counts match the list.
+    """
+    reset_denied_doctypes()
+    pos_doc, pos_warehouse, _pos_price_list, hide_unavailable = _get_pos_context()
+    stock_unavailable = not frappe.has_permission("Bin", "read")
+    return _get_item_groups_with_counts(
+        pos_doc,
+        warehouse or pos_warehouse,
+        bool(hide_unavailable) and not stock_unavailable,
+        include_service_items=_include_service_items(pos_doc),
+    )
 
 
 def _get_item_groups_with_counts(
