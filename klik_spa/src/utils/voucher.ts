@@ -92,6 +92,49 @@ export function capVouchers(applied: AppliedVoucher[], payable: number): Applied
   return capped.filter((voucher) => voucher.amount > 0);
 }
 
+export interface TenderRow {
+  method: string;
+  amount: number;
+}
+
+/** With vouchers applied, the payment rows as the drawer keeps them: cash net of the change
+handed back. ERPNext books change only when the paid amount exceeds the total, which a
+voucher sale never does (the vouchers are no payment row), so the change comes off the cash
+here - the cash row last edited first, then the other cash rows from the last. What no cash
+row can absorb (an overpaid card, say) is `unabsorbed`. Without vouchers nothing changes. */
+export function netOfChange(
+  rows: TenderRow[],
+  vouchersTotal: number,
+  payable: number,
+  isCash: (method: string) => boolean,
+  lastEdited: string | null = null,
+): { rows: TenderRow[]; unabsorbed: number } {
+  if (vouchersTotal <= 0) return { rows, unabsorbed: 0 };
+  let excess = round2(rows.reduce((sum, row) => sum + row.amount, 0) + vouchersTotal - payable);
+  if (excess <= 0) return { rows, unabsorbed: 0 };
+  const netted = rows.map((row) => ({ ...row }));
+  const cashOrder = netted
+    .filter((row) => isCash(row.method))
+    .reverse()
+    .sort((a, b) => Number(b.method === lastEdited) - Number(a.method === lastEdited));
+  for (const row of cashOrder) {
+    if (excess <= 0) break;
+    const take = Math.min(Math.max(0, row.amount), excess);
+    row.amount = round2(row.amount - take);
+    excess = round2(excess - take);
+  }
+  return { rows: netted, unabsorbed: excess };
+}
+
+/** The payment amounts as a person reads them: the vouchers' internal key shown as
+"Vouchers" - or "Vouchers (store credit)" beside a real mode of payment of that name. */
+export function labelVoucherAmounts(amounts: Record<string, number>, key: string): Record<string, number> {
+  if (!(key in amounts)) return amounts;
+  const { [key]: vouchers, ...rows } = amounts;
+  const label = "Vouchers" in rows ? "Vouchers (store credit)" : "Vouchers";
+  return { ...rows, [label]: vouchers ?? 0 };
+}
+
 /** Why this sale cannot carry vouchers right now, or null when it can - a bare phrase the
 dialog puts after "Vouchers removed:" or "Vouchers unavailable:". */
 export function vouchersBlockedReason(state: {

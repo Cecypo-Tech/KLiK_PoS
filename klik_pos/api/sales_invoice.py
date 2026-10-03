@@ -2290,11 +2290,12 @@ def _queue_sales_invoice(data, source_order=None):
 
 		# Customer credit: every row checked before anything persists; applied after
 		# submit. The in-memory marker exempts the sale-type cash gate only when the
-		# credit (plus any tender) fully covers the sale.
+		# credit (plus any tender) fully covers the sale - at its rounded total, which is
+		# what the invoice's outstanding is built from.
 		credit_rows = validate_allocations(doc, data.get("customerCredit") or [])
 		if credit_rows:
 			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
-			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.grand_total, 2):
+			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
 				doc._klik_customer_credit = credit_sum
 
 		if enable_background_submission:

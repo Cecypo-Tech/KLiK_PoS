@@ -166,7 +166,9 @@ def validate_allocations(invoice_doc, allocations):
 			frappe.throw(f"{name} holds {available}, not {amount}.")
 		normalized.append({"invoice": note.name, "amount": amount})
 		total += amount
-	if total > flt(invoice_doc.grand_total, 2):
+	# The rounded total: the invoice's outstanding is built from it, and the till caps a
+	# voucher at it - a total that rounds up would refuse a voucher paying exactly that.
+	if total > flt(invoice_doc.rounded_total or invoice_doc.grand_total, 2):
 		frappe.throw("Credit exceeds the invoice total.")
 	return normalized
 

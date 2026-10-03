@@ -21,6 +21,12 @@ describe("paymentBlockReason", () => {
     expect(paymentBlockReason(ready)).toBeNull();
   });
 
+  it("blocks an overpay no cash row can hand back as change", () => {
+    expect(paymentBlockReason({ ...ready, overpaidNonCashLabel: "KSh 50.00" })).toBe(
+      "Overpaid by KSh 50.00 on a non-cash method - reduce it",
+    );
+  });
+
   it("says a submitted invoice is already done", () => {
     expect(paymentBlockReason({ ...ready, invoiceSubmitted: true })).toMatch(/already submitted/);
   });

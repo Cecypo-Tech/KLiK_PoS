@@ -4,6 +4,8 @@ import {
   appliedTotal,
   capVouchers,
   isUsable,
+  labelVoucherAmounts,
+  netOfChange,
   voucherApplyAmount,
   voucherCustomerRule,
   voucherStatusLabel,
@@ -144,5 +146,92 @@ describe("vouchersBlockedReason", () => {
     expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toBe(
       "this sale is finishing an older draft",
     );
+  });
+});
+
+describe("netOfChange", () => {
+  const isCash = (method: string) => method === "Cash" || method === "Cash 2";
+
+  it("leaves exact cash alone", () => {
+    expect(netOfChange([{ method: "Cash", amount: 150 }], 300, 450, isCash)).toEqual({
+      rows: [{ method: "Cash", amount: 150 }],
+      unabsorbed: 0,
+    });
+  });
+
+  it("sends cash net of the change handed back", () => {
+    expect(netOfChange([{ method: "Cash", amount: 200 }], 300, 450, isCash)).toEqual({
+      rows: [{ method: "Cash", amount: 150 }],
+      unabsorbed: 0,
+    });
+    expect(netOfChange([{ method: "Cash", amount: 0.3 }], 0.1, 0.35, isCash).rows).toEqual([
+      { method: "Cash", amount: 0.25 },
+    ]);
+  });
+
+  it("takes change off the cash row last edited, else the last cash row, then the others", () => {
+    const rows = [
+      { method: "Cash", amount: 100 },
+      { method: "Cash 2", amount: 40 },
+    ];
+    expect(netOfChange(rows, 350, 450, isCash, "Cash").rows).toEqual([
+      { method: "Cash", amount: 60 },
+      { method: "Cash 2", amount: 40 },
+    ]);
+    expect(netOfChange(rows, 350, 450, isCash).rows).toEqual([
+      { method: "Cash", amount: 100 },
+      { method: "Cash 2", amount: 0 },
+    ]);
+    expect(netOfChange(rows, 370, 450, isCash).rows).toEqual([
+      { method: "Cash", amount: 80 },
+      { method: "Cash 2", amount: 0 },
+    ]);
+  });
+
+  it("reports an overpay no cash row can absorb", () => {
+    expect(netOfChange([{ method: "Card", amount: 200 }], 300, 450, isCash)).toEqual({
+      rows: [{ method: "Card", amount: 200 }],
+      unabsorbed: 50,
+    });
+    expect(
+      netOfChange(
+        [
+          { method: "Cash", amount: 20 },
+          { method: "Card", amount: 200 },
+        ],
+        300,
+        450,
+        isCash,
+      ),
+    ).toEqual({
+      rows: [
+        { method: "Cash", amount: 0 },
+        { method: "Card", amount: 200 },
+      ],
+      unabsorbed: 50,
+    });
+  });
+
+  it("changes nothing without vouchers - ERPNext books that change itself", () => {
+    const rows = [{ method: "Cash", amount: 500 }];
+    expect(netOfChange(rows, 0, 450, isCash)).toEqual({ rows, unabsorbed: 0 });
+  });
+});
+
+describe("labelVoucherAmounts", () => {
+  it("shows the vouchers' total as Vouchers", () => {
+    expect(labelVoucherAmounts({ Cash: 150, __v__: 300 }, "__v__")).toEqual({ Cash: 150, Vouchers: 300 });
+  });
+
+  it("leaves amounts without vouchers alone", () => {
+    const amounts = { Cash: 450 };
+    expect(labelVoucherAmounts(amounts, "__v__")).toBe(amounts);
+  });
+
+  it("never hides a real mode named Vouchers", () => {
+    expect(labelVoucherAmounts({ Vouchers: 50, __v__: 300 }, "__v__")).toEqual({
+      Vouchers: 50,
+      "Vouchers (store credit)": 300,
+    });
   });
 });

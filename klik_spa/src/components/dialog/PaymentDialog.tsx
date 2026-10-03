@@ -45,10 +45,13 @@ import {
   addVoucher,
   appliedTotal,
   capVouchers,
+  labelVoucherAmounts,
+  netOfChange,
   voucherApplyAmount,
   vouchersBlockedReason,
   type AppliedVoucher,
 } from "../../utils/voucher";
+import { cashRefundModes } from "../../utils/returnModes";
 import { fetchCustomerRecord, lookupCreditVoucher } from "../../services/voucher";
 import { useProductStore } from "../../stores/productStore";
 import type { Customer as CartCustomer } from "../../../types";
@@ -933,12 +936,30 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     [selectedMpesaPayments]
   );
 
+  // Cash the way ERPNext tells it when it books change: the Mode of Payment's type (the
+  // rule utils/returnModes applies to refunds).
+  const cashMethodIds = useMemo(
+    () => new Set(cashRefundModes(modes).map((mode) => mode.mode_of_payment)),
+    [modes]
+  );
+  // The real payment rows with vouchers applied: cash net of the change handed back, and
+  // any overpay no cash row can absorb (utils/voucher netOfChange).
+  const tenderNetOfChange = (vouchersTotal: number) =>
+    netOfChange(
+      Object.entries(paymentAmounts)
+        .filter(([method, amount]) => method !== CUSTOMER_CREDIT_METHOD && amount > 0)
+        .map(([method, amount]) => ({ method, amount })),
+      vouchersTotal,
+      checkoutPayableTotal,
+      (method) => cashMethodIds.has(method),
+      lastModifiedMethodId
+    );
+
   const buildPaymentData = (
     deliveryPersonnel: string | null = null,
     options?: { excludeActiveMpesa?: boolean }
   ) => {
     const activeMpesaPayment = options?.excludeActiveMpesa ? getActiveMpesaPayment() : null;
-    const adjustedPaymentMethods = Object.entries(paymentAmounts).filter(([, amount]) => amount > 0);
     // Customer credit is not a payment row: it leaves this list, leaves amountPaid,
     // and reaches the server as customerCredit allocations settled after submit.
     // Draft and M-Pesa-order submits have no credit wiring server-side, so those
@@ -949,6 +970,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const creditAmount = creditFlowBlocked
       ? 0
       : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
+    // With vouchers going to the server, cash goes net of the change handed back: ERPNext
+    // books change only when paid exceeds the total, which a voucher sale never does.
+    const tenderRows = tenderNetOfChange(creditAmount).rows.filter((row) => row.amount > 0);
 
     return {
       items: cartItems.map((item) => {
@@ -966,11 +990,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         };
       }),
       customer: selectedCustomer,
-      paymentMethods: (adjustedPaymentMethods ?? []).filter(([method]) => {
-        if (method === CUSTOMER_CREDIT_METHOD) return false;
+      paymentMethods: tenderRows.filter(({ method }) => {
         if (!activeMpesaPayment) return true;
         return method !== activeMpesaPayment.method;
-      }).map(([method, amount]) => {
+      }).map(({ method, amount }) => {
         const paymentLine: Record<string, unknown> = {
           method,
           amount: parseFloat((Number(amount) || 0).toFixed(2)),
@@ -1007,7 +1030,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       remarks: remarks.trim(),
       shipping_rule: activeShippingRule || null,
       grandTotal: checkoutGrandTotal,
-      amountPaid: roundCurrency(Math.max(0, totalPaidAmount - creditAmount)),
+      amountPaid:
+        creditAmount > 0
+          ? calculateTotalPayments(tenderRows.map((row) => row.amount))
+          : roundCurrency(Math.max(0, totalPaidAmount - creditAmount)),
       customerCredit: creditFlowBlocked
         ? []
         : appliedVouchers.map((voucher) => ({
@@ -2147,6 +2173,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const submitBlockReason = () => {
     const originalHeldOrderId = getOriginalHeldOrderId();
     const heldOrderApproval = originalHeldOrderId ? getOriginalHeldOrderApproval() : null;
+    // An overpay with vouchers applied that no cash row can take as change would be booked
+    // as paid: the cashier reduces the non-cash row instead.
+    const voucherOverpay = tenderNetOfChange(
+      vouchersBlocked ? 0 : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0)
+    ).unabsorbed;
     return paymentBlockReason({
       invoiceSubmitted,
       isProcessingPayment,
@@ -2163,6 +2194,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
         : null,
       mpesaUncoveredLabel: mpesaUncovered > 0 ? formatCurrencyWithSymbol(mpesaUncovered, displayCurrencySymbol) : null,
+      overpaidNonCashLabel: voucherOverpay > 0 ? formatCurrencyWithSymbol(voucherOverpay, displayCurrencySymbol) : null,
     });
   };
 
@@ -3467,7 +3499,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               displayDiscount={displayDiscount}
               displayTaxTotal={displayTaxTotal}
               checkoutGrandTotal={checkoutGrandTotal}
-              paymentAmounts={paymentAmounts}
+              paymentAmounts={labelVoucherAmounts(paymentAmounts, CUSTOMER_CREDIT_METHOD)}
               displayCurrencySymbol={displayCurrencySymbol}
               isB2B={isB2B}
               isB2C={isB2C}
