@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import type { MpesaRegisterPayment } from "../../services/mpesa";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
@@ -27,6 +28,8 @@ interface MpesaOptionsModalProps {
   onTogglePayment: (paymentName: string) => void;
   onInitiateStk: () => void;
   onAddPayments: () => void;
+  /** The push / receipts status, shown on the right of the panel's header. */
+  status?: ReactNode;
   /** "modal" keeps the overlay (mobile). "panel" renders inline for the full-screen desktop checkout. */
   variant?: "modal" | "panel";
 }
@@ -53,6 +56,7 @@ export default function MpesaOptionsModal({
   onInitiateStk,
   onAddPayments,
   variant = "modal",
+  status,
 }: MpesaOptionsModalProps) {
   if (!isOpen) return null;
 
@@ -66,22 +70,25 @@ export default function MpesaOptionsModal({
         ? "w-full rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 overflow-hidden"
         : "w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"}>
 
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <div>
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">M-Pesa Payment Options</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               {modeOfPayment} • Expected amount {formatCurrencyWithSymbol(amount, currencySymbol)}
             </p>
           </div>
-          {variant !== "panel" && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            Close
-          </button>
-          )}
+          <div className="flex items-center gap-2 min-w-0">
+            {status}
+            {variant !== "panel" && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Close
+            </button>
+            )}
+          </div>
         </div>
 
         <div className={`grid md:grid-cols-5 ${variant === "panel" ? "gap-4 p-4" : "gap-6 p-6"}`}>

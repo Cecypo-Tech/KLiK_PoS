@@ -2934,7 +2934,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
                   lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
-                  headerMiddle={renderMpesaStatusNotice()}
+                  headerMiddle={showMpesaPanel ? null : renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (
                       <div className="flex items-center gap-2">
@@ -3131,6 +3131,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
           onAddPayments={() => void handleReconcileMpesaPayments()}
+          status={renderMpesaStatusNotice()}
         />
         {renderLeaveConfirm()}
       </div>
@@ -3207,7 +3208,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
                   lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
-                  headerMiddle={renderMpesaStatusNotice()}
+                  headerMiddle={showMpesaPanel ? null : renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (
                       <div className="flex items-center gap-2">
@@ -3296,6 +3297,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
                     onAddPayments={() => void handleReconcileMpesaPayments()}
                     variant="panel"
+                    status={renderMpesaStatusNotice()}
                   />
                 </div>
 
