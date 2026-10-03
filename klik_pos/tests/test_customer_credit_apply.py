@@ -5,10 +5,13 @@ Entry (what desk Payment Reconciliation does). Both outstandings move; no paymen
 no cash or M-Pesa GL. Cancelling the adjustment JE is the undo.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
+from klik_pos.api import customer_credit
 from klik_pos.api.customer_credit import (
 	apply_customer_credit,
 	release_customer_credit,
@@ -105,3 +108,57 @@ class TestValidation(FrappeTestCase):
 		sale.currency = "USD"
 		with self.assertRaises(frappe.ValidationError):
 			validate_allocations(sale, [{"invoice": note.name, "amount": 10}])
+
+
+class TestWalkInVoucher(FrappeTestCase):
+	"""A Walk In credit note pays only with its original sale number - checked again at
+	checkout, so a payload can never spend a Walk In note by its number alone."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.company = COMPANY
+
+	def _unsaved_sale(self, note, amount=50):
+		doc = frappe.get_doc(
+			{
+				"doctype": "Sales Invoice",
+				"customer": CUSTOMER,
+				"company": self.company,
+				"items": [{"item_code": "_Test Item", "qty": 1, "rate": amount}],
+			}
+		)
+		doc.set_missing_values()
+		# set_missing_values() applies the company's currency, but the saved notes take the
+		# site default - sell in the note's own, so only the Walk In rule is under test.
+		doc.currency = note.currency
+		doc.run_method("calculate_taxes_and_totals")
+		return doc
+
+	def _as_walkin(self):
+		return patch.object(customer_credit, "_is_walkin_customer", return_value=True)
+
+	def test_without_the_original_it_is_refused(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		with self._as_walkin(), self.assertRaises(frappe.ValidationError):
+			validate_allocations(self._unsaved_sale(note), [{"invoice": note.name, "amount": 10}])
+
+	def test_with_a_wrong_original_it_is_refused(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		with self._as_walkin(), self.assertRaises(frappe.ValidationError):
+			validate_allocations(
+				self._unsaved_sale(note), [{"invoice": note.name, "amount": 10, "original": "POS-WRONG"}]
+			)
+
+	def test_with_its_original_it_is_accepted_ignoring_case_and_spaces(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		with self._as_walkin():
+			rows = validate_allocations(
+				self._unsaved_sale(note),
+				[{"invoice": note.name, "amount": 10, "original": f" {note.return_against.lower()} "}],
+			)
+		self.assertEqual(rows, [{"invoice": note.name, "amount": 10.0}])
+
+	def test_a_named_note_needs_no_original(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		rows = validate_allocations(self._unsaved_sale(note), [{"invoice": note.name, "amount": 10}])
+		self.assertEqual(rows, [{"invoice": note.name, "amount": 10.0}])

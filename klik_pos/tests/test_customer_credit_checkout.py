@@ -17,6 +17,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
+from klik_pos.api import customer_credit
 from klik_pos.api import sales_invoice as si
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.tests.credit_fixtures import make_credit_note
@@ -122,3 +123,22 @@ class TestCheckoutWithCredit(FrappeTestCase):
 			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
 			0.0,
 		)
+
+	def test_a_walkin_voucher_pays_with_its_original_number(self):
+		note = self._note(200)
+		with patch.object(customer_credit, "_is_walkin_customer", return_value=True):
+			result = self._checkout(
+				[{"invoice": note.name, "amount": self.total, "original": note.return_against}]
+			)
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+
+	def test_a_walkin_voucher_without_its_original_is_refused_at_checkout(self):
+		note = self._note(200)
+		with patch.object(customer_credit, "_is_walkin_customer", return_value=True):
+			result = self._checkout([{"invoice": note.name, "amount": self.total}])
+		self.assertFalse(result.get("success"), result)
+		self.assertIn("original sale number", result.get("message") or "")

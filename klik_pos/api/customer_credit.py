@@ -139,7 +139,16 @@ def validate_allocations(invoice_doc, allocations):
 		note = frappe.db.get_value(
 			"Sales Invoice",
 			name,
-			["name", "customer", "company", "currency", "docstatus", "is_return", "outstanding_amount"],
+			[
+				"name",
+				"customer",
+				"company",
+				"currency",
+				"docstatus",
+				"is_return",
+				"outstanding_amount",
+				"return_against",
+			],
 			as_dict=True,
 		)
 		if not note or note.docstatus != 1 or not note.is_return:
@@ -148,6 +157,10 @@ def validate_allocations(invoice_doc, allocations):
 			frappe.throw(f"{name} belongs to another customer.")
 		if note.company != invoice_doc.company or note.currency != invoice_doc.currency:
 			frappe.throw(f"{name} is from another company or currency.")
+		# Walk In credit belongs to whoever holds the receipt, so both of its numbers are
+		# checked again here: a payload can never spend a Walk In note by its number alone.
+		if _is_walkin_customer(note.customer) and not _same_number(row.get("original"), note.return_against):
+			frappe.throw(f"{name} is a Walk In voucher - enter its original sale number to use it.")
 		available = flt(-note.outstanding_amount, 2)
 		if amount > available:
 			frappe.throw(f"{name} holds {available}, not {amount}.")
