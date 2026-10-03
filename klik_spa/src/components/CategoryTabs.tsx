@@ -1,6 +1,7 @@
 "use client";
 
 import { useProductStore } from "../stores/productStore";
+import { showTabSkeleton } from "../utils/productLoading";
 
 interface CategoryTabsProps {
   selectedCategory: string;
@@ -19,9 +20,8 @@ export default function CategoryTabs({
   const searchProducts = useProductStore((state) => state.searchProducts);
   const searchQuery = useProductStore((state) => state.searchQuery);
 
-  const isValidating = isLoading && !isSearching;
-
-  if (isValidating) {
+  // Placeholders only until the bar has groups; reloads keep it on screen.
+  if (showTabSkeleton(isLoading, isSearching, itemGroups.length)) {
     return (
       <div className="flex space-x-1.5 overflow-x-auto py-1.5 scrollbar-hide">
         {[1, 2, 3, 4, 5].map((i) => (

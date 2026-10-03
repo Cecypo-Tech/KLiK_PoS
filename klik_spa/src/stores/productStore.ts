@@ -5,10 +5,14 @@ import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
 import { resolveNextOffset, shouldKeepPaginating } from '../utils/pagination';
+import { createKeyedDedupe, firstPageKey, listingIncludesGroups } from '../utils/productLoading';
 
 interface ProductStoreState {
   products: MenuItem[];
+  /** What the category bar shows: the till's groups, or a search's narrowed counts. */
   itemGroups: ItemGroup[];
+  /** The till's groups without any search - kept between visits. */
+  baseItemGroups: ItemGroup[];
   customers: Customer[];
   selectedCustomer: Customer | null;
   searchQuery: string;
@@ -45,6 +49,7 @@ interface ProductStoreState {
   searchCustomers: (query: string) => Promise<Customer[]>;
   setSelectedCustomer: (customer: Customer | null) => void;
   clearCache: () => void;
+  fetchItemGroups: () => Promise<void>;
   stopBackgroundRefresh: () => void;
   startBackgroundRefresh: () => void;
   executeSearch: (query: string) => Promise<void>;
@@ -82,11 +87,17 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let identifierTimer: ReturnType<typeof setTimeout> | null = null;
 const IDENTIFIER_LIKE_PATTERN = /^\S{6,}$/;
 
+type FirstPage = Awaited<ReturnType<ProductStoreState['fetchProductsFromAPI']>>;
+// Startup has several triggers (profile load, customer sync, price list); overlapping
+// loads of the same first page share one request.
+const dedupeFirstPage = createKeyedDedupe<FirstPage>();
+
 export const useProductStore = create<ProductStoreState>()(
   persist(
     (set, get) => ({
       products: [],
       itemGroups: [],
+      baseItemGroups: [],
       customers: [],
       selectedCustomer: null,
       searchQuery: '',
@@ -197,7 +208,10 @@ export const useProductStore = create<ProductStoreState>()(
 
           if (search) params.append('search', search);
           if (category && category !== 'all') params.append('category', category);
-          
+          // The bar's groups load on their own (fetchItemGroups); the listing sends them
+          // only while a search narrows their counts.
+          params.append('include_groups', listingIncludesGroups(search || '') ? '1' : '0');
+
           const response = await fetch(`/api/method/klik_pos.api.item.item_listing.get_items?${params.toString()}`);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           
@@ -269,20 +283,26 @@ export const useProductStore = create<ProductStoreState>()(
         
         set({ isLoading: true, error: null });
         currentPosName = posName;
-        
+
+        // The bar's groups in parallel with the items: a few KB that paint long before
+        // the first page of items arrives.
+        void get().fetchItemGroups();
+
         try {
-          const result = await get().fetchProductsFromAPI(
-            PAGE_SIZE,
-            0,
-            '',
-            'all',
-            effectiveCustomerId,
-            effectivePriceList
+          const result = await dedupeFirstPage(
+            firstPageKey({
+              posName,
+              customerId: effectiveCustomerId,
+              priceList: effectivePriceList,
+              warehouse: usePOSProfileStore.getState().warehouse,
+              category: 'all',
+              search: '',
+            }),
+            () => get().fetchProductsFromAPI(PAGE_SIZE, 0, '', 'all', effectiveCustomerId, effectivePriceList)
           );
-          
+
           set({
             products: result.items,
-            itemGroups: result.item_groups,
             totalCount: result.total_count,
             hasMore: result.has_more,
             degraded: result.degraded,
@@ -326,14 +346,28 @@ export const useProductStore = create<ProductStoreState>()(
         set({ isLoading: reset, error: null });
         
         try {
-          const result = await fetchProductsFromAPI(
-            reset ? PAGE_SIZE : LOAD_MORE_SIZE,
-            reset ? 0 : get().currentOffset,
-            requestSearchQuery,
-            requestCategory,
-            customerId,
-            priceList
-          );
+          const load = () =>
+            fetchProductsFromAPI(
+              reset ? PAGE_SIZE : LOAD_MORE_SIZE,
+              reset ? 0 : get().currentOffset,
+              requestSearchQuery,
+              requestCategory,
+              customerId,
+              priceList
+            );
+          const result = reset
+            ? await dedupeFirstPage(
+                firstPageKey({
+                  posName: posName || currentPosName,
+                  customerId,
+                  priceList,
+                  warehouse: usePOSProfileStore.getState().warehouse,
+                  category: requestCategory,
+                  search: requestSearchQuery,
+                }),
+                load
+              )
+            : await load();
 
           // Ignore stale responses that no longer match the active query/filter/customer context.
           const latest = get();
@@ -352,7 +386,14 @@ export const useProductStore = create<ProductStoreState>()(
           
           set({
             products: reset ? result.items : [...get().products, ...result.items],
-            itemGroups: reset ? result.item_groups : get().itemGroups,
+            // A search narrows the bar's counts; otherwise the till's own groups stand
+            // (and come back when a search is cleared).
+            itemGroups:
+              reset && requestSearchQuery.trim()
+                ? result.item_groups
+                : get().baseItemGroups.length
+                  ? get().baseItemGroups
+                  : get().itemGroups,
             totalCount: result.total_count,
             hasMore: result.has_more,
             degraded: result.degraded,
@@ -739,6 +780,7 @@ export const useProductStore = create<ProductStoreState>()(
         set({
           products: [],
           itemGroups: [],
+          baseItemGroups: [],
           customers: [],
           selectedCustomer: null,
           searchQuery: '',
@@ -761,6 +803,28 @@ export const useProductStore = create<ProductStoreState>()(
         localStorage.removeItem('product-storage');
       },
 
+      fetchItemGroups: async () => {
+        try {
+          const params = new URLSearchParams();
+          const warehouse = usePOSProfileStore.getState().warehouse;
+          if (warehouse) params.append('warehouse', warehouse);
+          const response = await fetch(
+            `/api/method/klik_pos.api.item.item_listing.get_item_groups?${params.toString()}`
+          );
+          if (!response.ok) return;
+          const data = await response.json();
+          const groups: ItemGroup[] = Array.isArray(data?.message) ? data.message : [];
+          set((state) => ({
+            baseItemGroups: groups,
+            // A running search keeps its narrowed counts until it is cleared.
+            itemGroups: state.searchQuery.trim() ? state.itemGroups : groups,
+          }));
+        } catch (err) {
+          // The bar keeps what it has; the next load tries again.
+          console.error('fetchItemGroups error:', err);
+        }
+      },
+
       startBackgroundRefresh: () => {
         get().stopBackgroundRefresh();
         
@@ -775,6 +839,7 @@ export const useProductStore = create<ProductStoreState>()(
           const { searchQuery, isLoading } = get();
           if (document.visibilityState === 'visible' && !searchQuery && !isLoading) {
             get().fetchProducts(true);
+            void get().fetchItemGroups();
           }
         }, CACHE_DURATION);
         
@@ -804,11 +869,22 @@ export const useProductStore = create<ProductStoreState>()(
     }),
     {
       name: 'product-storage',
+      // v1 stops keeping isInitialized; a v0 blob on a till still holds `true`, which would
+      // stop the list from ever loading after the upgrade - drop it.
+      version: 1,
+      migrate: (persisted) => {
+        const rest = { ...((persisted ?? {}) as Record<string, unknown>) };
+        delete rest.isInitialized;
+        return rest as unknown as ProductStoreState;
+      },
+      // Products are not kept between visits, so neither is isInitialized: a reload must
+      // load the list again through the one normal path. The bar's groups are kept (the
+      // till's own, never a search's) so it paints at once and refreshes quietly.
       partialize: (state) => ({
-        itemGroups: state.itemGroups,
+        itemGroups: state.baseItemGroups.length ? state.baseItemGroups : state.itemGroups,
+        baseItemGroups: state.baseItemGroups,
         lastFullRefresh: state.lastFullRefresh,
         selectedCustomer: state.selectedCustomer,
-        isInitialized: state.isInitialized,
         posName: state.posName,
       }),
     }
@@ -832,10 +908,15 @@ if (typeof window !== 'undefined') {
       productStore.checkAndInitialize();
     }
     
-    if (previousProfileState.hideUnavailableItems !== state.hideUnavailableItems ||
-        previousProfileState.useScannerOnly !== state.useScannerOnly) {
+    // The profile ARRIVING is not a change of settings: only compare once it had loaded,
+    // or every till start would reload the list a second time.
+    if (previousProfileState.isInitialized &&
+        (previousProfileState.hideUnavailableItems !== state.hideUnavailableItems ||
+         previousProfileState.useScannerOnly !== state.useScannerOnly)) {
       if (productStore.isInitialized && !productStore.searchQuery.trim()) {
         productStore.fetchProducts(true);
+        // Hiding unavailable items changes the counts too.
+        void productStore.fetchItemGroups();
       }
     }
     

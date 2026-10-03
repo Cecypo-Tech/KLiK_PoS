@@ -17,7 +17,6 @@ export default function RetailPOSLayout() {
   const isMobile = useMediaQuery("(max-width: 1024px)");
   
   const {
-    isLoading: isProductsLoading,
     error: productError,
     filteredItems,
     useScannerOnly,
@@ -31,7 +30,6 @@ export default function RetailPOSLayout() {
     setCategory,
     selectedCategory,
     refreshStockOnly,
-    fetchProducts,
   } = useProduct();
 
   const { 
@@ -62,16 +60,6 @@ export default function RetailPOSLayout() {
 
     init();
   }, []);
-
-  useEffect(() => {
-    const loadProducts = async () => {
-      if (posDetails && !isProductsLoading && !isInitializing) {
-        await fetchProducts(true);
-      }
-    };
-
-    loadProducts();
-  }, [posDetails, isInitializing]);
 
   const handleSearchInput = useCallback((query: string) => {
     searchProducts(query);
