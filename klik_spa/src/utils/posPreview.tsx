@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type SyntheticEvent } from "react";
 import { getPrintFormatHTML } from "./getPrintHTML.js";
+import { buildPrintPreviewDocument, unpinFixedElements } from "./printPreviewDocument";
 import { usePOSProfileStore } from "../stores/posProfileStore.js";
 
 type PrintPreviewProps = {
@@ -69,14 +70,43 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
     };
   }, [invoice, invoiceName, posProfile, posLoading, posDetails, printFormat, html]);
 
+  const srcDoc = useMemo(() => buildPrintPreviewDocument(html, style), [html, style]);
+  const [frameHeight, setFrameHeight] = useState(0);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  // The format is shown in its own document so its CSS and fixed footer stay inside the
+  // preview. The frame is as tall as its page; the container scrolls it as before.
+  const fitToContent = useCallback((event: SyntheticEvent<HTMLIFrameElement>) => {
+    const frameDocument = event.currentTarget.contentDocument;
+    const page = frameDocument?.body;
+    if (!page) return;
+    unpinFixedElements(frameDocument);
+    // The body, not the root: the root's scrollHeight is never less than the frame, so a
+    // shorter invoice loaded into a taller frame would keep the old height.
+    const fit = () => setFrameHeight(Math.ceil(page.getBoundingClientRect().height));
+    fit();
+    resizeObserverRef.current?.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserverRef.current = new ResizeObserver(fit);
+      resizeObserverRef.current.observe(page);
+    }
+  }, []);
+
+  useEffect(() => () => resizeObserverRef.current?.disconnect(), []);
+
   if (loading) return <p>Loading Print Preview...</p>;
 
   return (
-    <div className="print-preview-container p-4 relative bg-white text-gray-900 dark:bg-gray-800 dark:text-white shadow overflow-auto max-h-[90vh]">
-      <style dangerouslySetInnerHTML={{ __html: style }} />
-      <div
-        className="print-preview-content"
-        dangerouslySetInnerHTML={{ __html: html }}
+    <div className="print-preview-container p-4 relative bg-white dark:bg-gray-800 shadow overflow-auto max-h-[90vh]">
+      <iframe
+        className="print-preview-content block w-full border-0 bg-white"
+        title="Print preview"
+        // No allow-scripts: a format's markup is shown, never run. allow-same-origin lets
+        // this page measure the frame and unpin its fixed footer.
+        sandbox="allow-same-origin allow-popups"
+        srcDoc={srcDoc}
+        onLoad={fitToContent}
+        style={{ height: frameHeight }}
       />
     </div>
   );
