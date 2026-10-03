@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { followTotal, toggleOn, withPaidMpesa } from "./paymentToggle";
+import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "./paymentToggle";
 
 describe("toggleOn", () => {
   it("fills what is still owed, leaving the other rows alone", () => {
@@ -77,5 +77,22 @@ describe("withPaidMpesa", () => {
 
   it("leaves a method already holding an amount alone", () => {
     expect(withPaidMpesa({ Cash: 300, "Mpesa-1": 260 }, "Mpesa-1", 260, 560)).toEqual({ Cash: 300, "Mpesa-1": 260 });
+  });
+});
+
+describe("trimToPayable", () => {
+  it("takes the excess off the preferred rows first", () => {
+    expect(trimToPayable({ Cash: 1000, Card: 200 }, 900, ["Cash"], null)).toEqual({ Cash: 700, Card: 200 });
+  });
+
+  it("never cuts a locked row (a paid M-Pesa push), even when it is preferred", () => {
+    expect(trimToPayable({ "Mpesa-1": 600, Cash: 400 }, 800, ["Mpesa-1", "Cash"], "Mpesa-1")).toEqual({
+      "Mpesa-1": 600,
+      Cash: 200,
+    });
+  });
+
+  it("leaves rows alone when they do not exceed the payable", () => {
+    expect(trimToPayable({ Cash: 500 }, 900, ["Cash"], null)).toEqual({ Cash: 500 });
   });
 });

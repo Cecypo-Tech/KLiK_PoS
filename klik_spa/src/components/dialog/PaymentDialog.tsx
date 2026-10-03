@@ -7,7 +7,7 @@ import { paymentBlockReason } from "../../utils/paymentBlockReason";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { getCreditTerms } from "../../services/paymentTerms";
 import { chooseTerm, termLabel, type CreditTerms } from "../../utils/creditTerms";
-import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, X } from "lucide-react";
+import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, RefreshCw, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
 import { useSalesTaxCharges } from "../../hooks/useSalesTaxCharges";
@@ -37,10 +37,12 @@ import {
   receiptLeftoverMessage,
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
-import { followTotal, toggleOn, withPaidMpesa } from "../../utils/paymentToggle";
+import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { allocateCredit, fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
+import { nextAllocationTargets, stkAutoSubmitDecision } from "../../utils/stkAutoSubmit";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
   holdBlockedByMpesa,
   mpesaDraftKeptForStk,
@@ -261,7 +263,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [orderDiscountAmount, setOrderDiscountAmount] = useState(0);
   const [orderDiscountPercentInput, setOrderDiscountPercentInput] = useState(0);
   const [backendTaxPreview, setBackendTaxPreview] = useState<BackendTaxPreview | null>(null);
-  const [, setIsTaxPreviewLoading] = useState(false);
+  const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
@@ -684,6 +686,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const previousCheckoutGrandTotalRef = useRef(checkoutPayableTotal);
 
   const toggleCreditSale = () => {
+    if (stkLockedMethod) {
+      toast.error("An M-Pesa push is pending or paid on this sale - it cannot become a credit sale.");
+      return;
+    }
     setIsCreditSale((prev) => {
       if (!prev) setPaymentAmounts({});
       return !prev;
@@ -776,39 +782,45 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Ticking an M-Pesa row is the trigger: the panel follows it, no separate button.
   const showMpesaPanel = hasActiveMpesaPayment && !invoiceSubmitted && !mpesaPanelDismissed;
 
+  // An STK push in flight or paid is money the customer was asked for or has sent: its row
+  // cannot be edited, re-apportioned, trimmed or unticked, and nothing may wipe it.
+  const stkLockedMethod =
+    mpesaFlow?.source === "stk" &&
+    (mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed") &&
+    !invoiceSubmitted
+      ? mpesaFlow.modeOfPayment
+      : null;
+  // Paid and not yet submitted: leaving takes an explicit confirmation.
+  const stkPaidMethod = stkLockedMethod && mpesaFlow?.status === "completed" ? stkLockedMethod : null;
+
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const closeDialog = useCallback(
+    (completed?: boolean) => {
+      if (!completed && stkPaidMethod) {
+        setLeaveConfirmOpen(true);
+        return;
+      }
+      onClose(completed);
+    },
+    [onClose, stkPaidMethod]
+  );
+
   useEffect(() => {
     if (!hasActiveMpesaPayment) setMpesaPanelDismissed(false);
   }, [hasActiveMpesaPayment]);
 
   const trimPaymentAmountsToPayable = useCallback((payableTotal: number) => {
     setPaymentAmounts((prev) => {
-      const updated = { ...prev };
-      let excess = roundCurrency(calculateTotalPayments(Object.values(updated)) - payableTotal);
-
-      if (excess <= 0) {
-        return updated;
-      }
-
       const preferredIds = [
         lastModifiedMethodId,
         activeMethodId,
-        ...Object.entries(updated)
+        ...Object.entries(prev)
           .filter(([, amount]) => (amount || 0) > 0)
           .map(([methodId]) => methodId),
       ].filter((methodId, index, all): methodId is string => Boolean(methodId) && all.indexOf(methodId) === index);
-
-      for (const methodId of preferredIds) {
-        if (excess <= 0) break;
-        const currentAmount = Number(updated[methodId] || 0);
-        if (currentAmount <= 0) continue;
-        const reduction = Math.min(currentAmount, excess);
-        updated[methodId] = roundCurrency(currentAmount - reduction);
-        excess = roundCurrency(excess - reduction);
-      }
-
-      return updated;
+      return trimToPayable(prev, payableTotal, preferredIds, stkLockedMethod);
     });
-  }, [activeMethodId, lastModifiedMethodId]);
+  }, [activeMethodId, lastModifiedMethodId, stkLockedMethod]);
 
   const clearLoyaltyRedemption = useCallback(() => {
     setAppliedLoyalty(null);
@@ -843,6 +855,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [checkoutGrandTotal, selectedCustomer?.loyalty, trimPaymentAmountsToPayable]);
 
   const handleApplyLoyaltyRedemption = useCallback(async () => {
+    if (stkLockedMethod) {
+      // Redeeming now would cut the sale below what the customer was asked to pay.
+      toast.error("Redeem loyalty points before sending the M-Pesa push.");
+      return;
+    }
     const loyalty = selectedCustomer?.loyalty;
     const points = Number.parseInt(loyaltyPointsInput || "0", 10);
 
@@ -885,7 +902,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     } finally {
       setIsApplyingLoyalty(false);
     }
-  }, [checkoutGrandTotal, loyaltyPointsInput, posCompanyName, selectedCustomer, trimPaymentAmountsToPayable]);
+  }, [checkoutGrandTotal, loyaltyPointsInput, posCompanyName, selectedCustomer, trimPaymentAmountsToPayable, stkLockedMethod]);
 
   const refreshMpesaStatus = useCallback(async (requestName?: string) => {
     const name = requestName || mpesaFlow?.requestName;
@@ -1169,6 +1186,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleReconcileMpesaPayments = async () => {
     if (salespersonBlocksMpesa()) return;
+    if (stkLockedMethod) {
+      // Receipts would replace the push's row and flow, orphaning money already asked for.
+      toast.error("An M-Pesa push is pending or paid on this sale - receipts can't be added to it.");
+      return;
+    }
     if (!selectedCustomer?.id && !selectedCustomer?.name) {
       toast.error("Kindly select a customer");
       return;
@@ -1254,12 +1276,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return baseAmounts;
     }
 
-    const methodIndex = orderedPaymentMethodIds.indexOf(methodId);
-    if (methodIndex === -1) {
-      return baseAmounts;
-    }
-
-    const nextMethodIds = orderedPaymentMethodIds.slice(methodIndex + 1);
+    const nextMethodIds = nextAllocationTargets(orderedPaymentMethodIds, methodId, stkLockedMethod);
     if (nextMethodIds.length === 0) {
       return baseAmounts;
     }
@@ -1287,6 +1304,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleToggleMethod = (methodId: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
+    if (methodId === stkLockedMethod) return;
     const currentAmount = paymentAmounts[methodId] || 0;
     if (currentAmount > 0) {
       // turn off: clear this row's amount (reference is pruned by the effect in Step 2)
@@ -1317,6 +1335,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleManualAmountChange = (methodId: string, amount: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
+    if (methodId === stkLockedMethod) return;
     let numericAmount = roundCurrency(parseFloat(amount) || 0);
     if (methodId === CUSTOMER_CREDIT_METHOD) {
       // The tender can never exceed what the notes hold, nor what the sale asks for.
@@ -1598,7 +1617,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   useEffect(() => {
     if (!showMpesaPanel) return;
-    setMpesaPhoneNumber((current) => current || selectedCustomer?.phone || "");
+    // The customer's own number, or the walk-in's when the cashier took one.
+    setMpesaPhoneNumber((current) => current || selectedCustomer?.phone || walkinDetails?.phone || "");
     mpesaOptionsPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     // Only when the panel appears, not on every customer edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1635,7 +1655,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         };
       });
       if (status === "completed") {
-        toast.success("M-Pesa payment confirmed. You can now submit the invoice.");
+        toast.success("M-Pesa payment confirmed.");
       }
     };
 
@@ -1657,6 +1677,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaSearchTerm("");
       setSelectedMpesaPayments([]);
       setDeliveryCharge(0);
+      // The next sale's customer brings their own number; never push to the last one's.
+      setMpesaPhoneNumber("");
     }
   }, [isOpen, releaseUnfinishedMpesaDraft]);
 
@@ -1914,30 +1936,40 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   };
 
+  // One submit at a time across the button, F10 and the paid-push auto-submit: a state flag
+  // only lands on the next render, so two triggers in the same tick would both pass it.
+  const submitInFlightRef = useRef(false);
+
   const handleCompletePayment = async () => {
-    if (requiresSalespersonPin && !currentSalesperson) {
-      setShowSalespersonModal(true);
-      toast.error("Verify the salesperson before completing payment");
-      return;
-    }
-
-    const activeMpesaPayment = getActiveMpesaPayment();
-    if (activeMpesaPayment && activeMpesaPayment.amount > 0) {
-      const sameRequestForMethod =
-        mpesaFlow && mpesaFlow.modeOfPayment === activeMpesaPayment.method ? mpesaFlow : null;
-
-      if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status === "in_progress") {
-        toast.info("M-Pesa payment is still pending. Confirm on phone or click Refresh Status.");
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    try {
+      if (requiresSalespersonPin && !currentSalesperson) {
+        setShowSalespersonModal(true);
+        toast.error("Verify the salesperson before completing payment");
         return;
       }
 
-      if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status !== "completed" && sameRequestForMethod.requestName) {
-        await refreshMpesaStatus(sameRequestForMethod.requestName);
-        return;
-      }
-    }
+      const activeMpesaPayment = getActiveMpesaPayment();
+      if (activeMpesaPayment && activeMpesaPayment.amount > 0) {
+        const sameRequestForMethod =
+          mpesaFlow && mpesaFlow.modeOfPayment === activeMpesaPayment.method ? mpesaFlow : null;
 
-    await processPayment(selectedDeliveryPersonnel);
+        if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status === "in_progress") {
+          toast.info("M-Pesa payment is still pending. Confirm on phone or click Refresh Status.");
+          return;
+        }
+
+        if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status !== "completed" && sameRequestForMethod.requestName) {
+          await refreshMpesaStatus(sameRequestForMethod.requestName);
+          return;
+        }
+      }
+
+      await processPayment(selectedDeliveryPersonnel);
+    } finally {
+      submitInFlightRef.current = false;
+    }
   };
 
   const handleHoldOrder = async () => {
@@ -2068,7 +2100,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   };
 
   const handleEditOrder = () => {
-    onClose(false);
+    closeDialog(false);
   };
 
   const handleViewInvoice = (invoice: any) => {
@@ -2145,6 +2177,65 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
 
+  // A paid STK push submits the sale by itself - once per push request, and only when the
+  // push alone settles the server's total (see stkAutoSubmitDecision).
+  const [stkAutoSubmitFor, setStkAutoSubmitFor] = useState<string | null>(null);
+  const handledStkRequestRef = useRef<string | null>(null);
+  const previewReady = hasBackendTaxPreview && !isTaxPreviewLoading;
+
+  useEffect(() => {
+    if (!isOpen || invoiceSubmitted) return;
+    if (mpesaFlow?.source !== "stk" || mpesaFlow.status !== "completed" || !mpesaFlow.requestName) return;
+    if (handledStkRequestRef.current === mpesaFlow.requestName) return;
+    handledStkRequestRef.current = mpesaFlow.requestName;
+    // The row shows what the customer actually paid, whatever it held before (a resumed
+    // order's pre-filled total, say); the lock then keeps it there.
+    const { modeOfPayment, amount } = mpesaFlow;
+    if (modeOfPayment && amount > 0) {
+      setPaymentAmounts((prev) => ({ ...prev, [modeOfPayment]: roundCurrency(amount) }));
+    }
+    setStkAutoSubmitFor(mpesaFlow.requestName);
+  }, [isOpen, invoiceSubmitted, mpesaFlow]);
+
+  useEffect(() => {
+    if (!stkAutoSubmitFor || !mpesaFlow) return;
+    const paidAmount = Number(mpesaFlow.amount || 0);
+    const decision = stkAutoSubmitDecision({
+      blockReason: submitBlockReason(),
+      isProcessing: isProcessingPayment,
+      invoiceSubmitted,
+      previewReady,
+      paidAmount,
+      payable: checkoutPayableTotal,
+      otherRowsTendered: Object.entries(paymentAmounts).some(
+        ([methodId, value]) => methodId !== mpesaFlow.modeOfPayment && (value || 0) > 0
+      ),
+    });
+    // Waiting keeps the request pending: this runs again when the server total lands.
+    if (decision.action === "wait") return;
+    const requestName = stkAutoSubmitFor;
+    setStkAutoSubmitFor(null);
+    if (decision.action === "submit") {
+      void handleCompletePayment();
+      return;
+    }
+    if (decision.action !== "notify") return;
+    const paid = formatCurrencyWithSymbol(paidAmount, displayCurrencySymbol);
+    const message =
+      decision.reason === "blocked"
+        ? `M-Pesa payment of ${paid} received. ${decision.detail} - then submit the sale.`
+        : decision.reason === "short"
+          ? `M-Pesa payment of ${paid} received - ${formatCurrencyWithSymbol(
+              roundCurrency(checkoutPayableTotal - paidAmount),
+              displayCurrencySymbol
+            )} still to be paid. Collect it, then submit the sale.`
+          : `M-Pesa payment of ${paid} received. Check the other payment rows, then submit the sale.`;
+    toast.info(message, { autoClose: 10000, toastId: `stk-paid-${requestName}` });
+    // Decided once per push, when the server total is in - never again on later edits,
+    // which would submit while the cashier is still typing an amount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stkAutoSubmitFor, previewReady]);
+
   // isProcessingPayment only lands on the next render, so two quick F10 presses would
   // both see it false. The ref closes that gap for the shortcut.
   const f10SubmitInFlight = useRef(false);
@@ -2182,18 +2273,20 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         e.preventDefault();
         // Leaving mid-payment would abandon an STK push or a submit still running.
         if (isProcessingPayment || isHoldingOrder) return;
+        // The leave confirmation handles its own Escape (= stay); don't reopen it.
+        if (leaveConfirmOpen) return;
         // Completed screen: ESC does the default "Start New Order" action.
         // Payment-entry screen: ESC closes the dialog.
         if (invoiceSubmitted) {
           void finalizeCompletedOrderState(() => onClose(true));
         } else {
-          onClose(false);
+          closeDialog(false);
         }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, invoiceSubmitted, isProcessingPayment, isHoldingOrder, finalizeCompletedOrderState, onClose]);
+  }, [isOpen, invoiceSubmitted, isProcessingPayment, isHoldingOrder, finalizeCompletedOrderState, onClose, closeDialog, leaveConfirmOpen]);
 
   const buildOrderText = () => {
     const lines: string[] = [];
@@ -2645,80 +2738,101 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     );
   };
 
+  // Leaving a sale whose push is paid. "Stay" is the focused default, so Enter (or a
+  // scanner's trailing Enter) does not abandon it.
+  const renderLeaveConfirm = () => (
+    <ConfirmDialog
+      isOpen={leaveConfirmOpen}
+      onClose={() => setLeaveConfirmOpen(false)}
+      onConfirm={() => {
+        setLeaveConfirmOpen(false);
+        onClose(false);
+      }}
+      title="The customer has already paid by M-Pesa"
+      message="Leaving keeps this sale on Held with its payment - finish it from Held. Don't ring the same items up again, or the customer will pay twice."
+      confirmText="Leave anyway"
+      cancelText="Stay and finish"
+    />
+  );
+
+  // One compact line in the Payment Methods header; the full detail is its tooltip.
   const renderMpesaStatusNotice = () => {
     if (!mpesaFlow) return null;
 
-    const statusText =
-      mpesaFlow.source === "c2b"
-        ? "Register payments linked"
-        : mpesaFlow.status === "completed"
-          ? "Payment confirmed"
-        : mpesaFlow.status === "failed"
-          ? "Payment failed"
-          : "Awaiting customer confirmation";
+    let label: string;
+    const detail: string[] = [];
+    if (mpesaFlow.source === "c2b") {
+      // Receipts pay in the order they were picked; what they hold beyond the M-Pesa
+      // amount stays on them for a later sale.
+      let left = paymentAmounts[mpesaFlow.modeOfPayment] || 0;
+      let appliedTotal = 0;
+      let staysTotal = 0;
+      const receipts = mpesaFlow.c2bPayments ?? [];
+      for (const payment of receipts) {
+        const applied = roundCurrency(Math.min(payment.amount, Math.max(0, left)));
+        left = roundCurrency(left - applied);
+        const stays = roundCurrency(payment.amount - applied);
+        appliedTotal = roundCurrency(appliedTotal + applied);
+        staysTotal = roundCurrency(staysTotal + stays);
+        detail.push(
+          `${payment.transid || payment.name}: ${formatCurrencyWithSymbol(applied, displayCurrencySymbol)} applied` +
+            (stays > 0 ? `, ${formatCurrencyWithSymbol(stays, displayCurrencySymbol)} stays on the receipt` : "")
+        );
+      }
+      label =
+        `Receipts: ${receipts.length} linked · ${formatCurrencyWithSymbol(appliedTotal, displayCurrencySymbol)} applied` +
+        (staysTotal > 0 ? ` · ${formatCurrencyWithSymbol(staysTotal, displayCurrencySymbol)} stays` : "");
+    } else {
+      label =
+        mpesaFlow.status === "completed"
+          ? "STK: Paid"
+          : mpesaFlow.status === "failed"
+            ? `STK failed${mpesaFlow.message ? ` - ${mpesaFlow.message}` : ""}`
+            : "STK: Awaiting customer";
+      detail.push(`Request: ${mpesaFlow.requestName}`);
+      if (mpesaFlow.transactionId) detail.push(`Txn: ${mpesaFlow.transactionId}`);
+    }
+    if (mpesaFlow.message && mpesaFlow.status !== "failed") detail.push(mpesaFlow.message);
 
-    const statusClass =
+    const tone =
       mpesaFlow.status === "completed"
-        ? "border-green-200 bg-green-50 text-green-800"
+        ? "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300"
         : mpesaFlow.status === "failed"
-          ? "border-red-200 bg-red-50 text-red-800"
-          : "border-yellow-200 bg-yellow-50 text-yellow-800";
+          ? "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+          : mpesaFlow.source === "c2b"
+            ? "border-gray-300 bg-gray-50 text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+            : "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300";
 
     return (
-      <div className={`rounded-lg border p-3 ${statusClass}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="font-semibold">
-              {mpesaFlow.source === "c2b" ? "M-Pesa Register Status" : "M-Pesa STK Status"}: {statusText}
-            </p>
-            {mpesaFlow.source === "c2b" ? (
-              (() => {
-                // Receipts pay in the order they were picked; what they hold beyond the
-                // M-Pesa amount stays on them for a later sale.
-                let left = paymentAmounts[mpesaFlow.modeOfPayment] || 0;
-                return (mpesaFlow.c2bPayments ?? []).map((payment) => {
-                  const applied = roundCurrency(Math.min(payment.amount, Math.max(0, left)));
-                  left = roundCurrency(left - applied);
-                  const stays = roundCurrency(payment.amount - applied);
-                  return (
-                    <p key={payment.name} className="text-xs">
-                      {payment.transid || payment.name} · {formatCurrencyWithSymbol(applied, displayCurrencySymbol)} applied
-                      {stays > 0 ? ` · ${formatCurrencyWithSymbol(stays, displayCurrencySymbol)} stays on the receipt` : ""}
-                    </p>
-                  );
-                });
-              })()
-            ) : (
-              <p className="text-xs">
-                Request: {mpesaFlow.requestName}
-                {mpesaFlow.transactionId ? ` | Txn: ${mpesaFlow.transactionId}` : ""}
-              </p>
-            )}
-            {mpesaFlow.message && <p className="text-xs mt-1">{mpesaFlow.message}</p>}
-          </div>
-          <div className="flex items-center gap-2">
-            {mpesaFlow.source === "stk" && mpesaFlow.requestName && (
-              <button
-                type="button"
-                className="px-2 py-1 rounded border border-current text-xs"
-                onClick={() => void refreshMpesaStatus()}
-                disabled={isProcessingPayment}
-              >
-                Refresh Status
-              </button>
-            )}
-            {mpesaFlow.source === "stk" && mpesaFlow.status === "failed" && (
-              <button
-                type="button"
-                className="px-2 py-1 rounded bg-red-600 text-white text-xs"
-                onClick={() => void retryMpesaRequest()}
-                disabled={isProcessingPayment}
-              >
-                Send again
-              </button>
-            )}
-          </div>
-        </div>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span
+          title={detail.join("\n")}
+          className={`inline-flex items-center min-w-0 rounded-full border px-2.5 py-1 text-xs font-medium ${tone}`}
+        >
+          <span className="truncate">{label}</span>
+        </span>
+        {mpesaFlow.source === "stk" && mpesaFlow.requestName && mpesaFlow.status !== "completed" && (
+          <button
+            type="button"
+            title="Refresh status"
+            aria-label="Refresh M-Pesa status"
+            className="shrink-0 rounded-full border border-gray-300 dark:border-gray-600 p-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+            onClick={() => void refreshMpesaStatus()}
+            disabled={isProcessingPayment}
+          >
+            <RefreshCw size={12} />
+          </button>
+        )}
+        {mpesaFlow.source === "stk" && mpesaFlow.status === "failed" && (
+          <button
+            type="button"
+            className="shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            onClick={() => void retryMpesaRequest()}
+            disabled={isProcessingPayment}
+          >
+            Send again
+          </button>
+        )}
       </div>
     );
   };
@@ -2819,6 +2933,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   onReferenceChange={handleReferenceChange}
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
+                  lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
+                  headerMiddle={renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (
                       <div className="flex items-center gap-2">
@@ -2883,7 +2999,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     )
                   }
                 />
-                {renderMpesaStatusNotice()}
                 {/* Remarks is on every till, so this row always shows. */}
                 <div className="flex flex-wrap items-end gap-3">
                     {renderLoyaltyRedemption()}
@@ -2971,7 +3086,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
                   <div className={`grid ${allow_holding_invoices ? "grid-cols-2" : "grid-cols-1"} gap-3`}>
                     <button
-                      onClick={() => onClose(false)}
+                      onClick={() => closeDialog(false)}
                       disabled={isProcessingPayment || isHoldingOrder}
                       className="py-3 px-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -3017,12 +3132,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
+        {renderLeaveConfirm()}
       </div>
     );
   }
 
   return (
     <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-[60] bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
+      {renderLeaveConfirm()}
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -3031,7 +3148,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           setSharingMode={setSharingMode}
           isProcessingPayment={isProcessingPayment}
           isHoldingOrder={isHoldingOrder}
-          onClose={onClose}
+          onClose={closeDialog}
           backLabel={backLabel}
           handleViewInvoice={handleViewInvoice}
           finalizeCompletedOrderState={(afterClear) => {
@@ -3089,6 +3206,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   onReferenceChange={handleReferenceChange}
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
+                  lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
+                  headerMiddle={renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (
                       <div className="flex items-center gap-2">
@@ -3153,8 +3272,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     )
                   }
                 />
-
-                {renderMpesaStatusNotice()}
 
                 <div ref={mpesaOptionsPanelRef}>
                   <MpesaOptionsModal

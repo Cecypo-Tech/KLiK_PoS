@@ -17,7 +17,11 @@ interface PaymentMethodsProps {
   onReferenceChange: (methodId: string, value: string) => void;
   setActiveMethodId: (id: string | null) => void;
   references: Record<string, string>;
+  /** Sits in the header between the title and headerRight (the M-Pesa status). */
+  headerMiddle?: ReactNode;
   headerRight?: ReactNode;
+  /** Rows whose amount is money already received (a paid STK push): shown, not editable. */
+  lockedMethodIds?: string[];
 }
 
 export default function PaymentMethods({
@@ -29,7 +33,9 @@ export default function PaymentMethods({
   onReferenceChange,
   setActiveMethodId,
   references,
+  headerMiddle,
   headerRight,
+  lockedMethodIds = [],
 }: PaymentMethodsProps) {
   const disabled = invoiceSubmitted || isProcessingPayment;
 
@@ -48,9 +54,13 @@ export default function PaymentMethods({
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const amountInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // A method added from its tag arrives ticked: the cashier picked it to pay with. A phone
+  // mode opens the M-Pesa panel instead, so focus is not sent to the amount behind it.
   const promote = (id: string) => {
     setPromotedIds((current) => (current.includes(id) ? current : [...current, id]));
-    setPendingFocusId(id);
+    onToggle(id);
+    const method = paymentMethods.find((candidate) => candidate.id === id);
+    if (method?.type !== "Phone") setPendingFocusId(id);
   };
   const demote = (id: string) => setPromotedIds((current) => current.filter((x) => x !== id));
 
@@ -64,6 +74,7 @@ export default function PaymentMethods({
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Methods</h3>
+        {headerMiddle ? <div className="flex-1 min-w-0 flex justify-center">{headerMiddle}</div> : null}
         {headerRight}
       </div>
 
@@ -71,17 +82,19 @@ export default function PaymentMethods({
         {rows.map((method) => {
           const isActive = (method.amount || 0) > 0;
           const showRef = isActive && isReferenceMethod(method.type, method.name);
+          const rowLocked = disabled || lockedMethodIds.includes(method.id);
 
           return (
             <div
               key={method.id}
               onClick={(e) => {
-                if (disabled || clickCameFromControl(e.target, e.currentTarget)) return;
+                if (rowLocked || clickCameFromControl(e.target, e.currentTarget)) return;
                 if (isIncidentalClick(e.detail, window.getSelection()?.toString() ?? "")) return;
                 onToggle(method.id);
               }}
+              title={!disabled && rowLocked ? "Paid by M-Pesa - this amount is already received" : undefined}
               className={`flex flex-wrap items-center gap-3 px-3 py-2 transition-colors ${
-                disabled
+                rowLocked
                   ? "bg-gray-50 dark:bg-gray-800"
                   : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60"
               }`}
@@ -92,9 +105,9 @@ export default function PaymentMethods({
                   e.stopPropagation();
                   onToggle(method.id);
                 }}
-                disabled={disabled}
+                disabled={rowLocked}
                 title="Use this method (fill outstanding)"
-                className={`shrink-0 ${disabled ? "cursor-not-allowed opacity-50" : "hover:text-beveren-600"} ${isActive ? "text-beveren-600" : "text-gray-400"}`}
+                className={`shrink-0 ${rowLocked ? "cursor-not-allowed opacity-50" : "hover:text-beveren-600"} ${isActive ? "text-beveren-600" : "text-gray-400"}`}
               >
                 {isActive ? <CheckCircle2 size={20} /> : <Circle size={20} />}
               </button>
@@ -135,8 +148,8 @@ export default function PaymentMethods({
                   }
                 }}
                 placeholder="0.00"
-                disabled={disabled}
-                className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm text-right ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+                disabled={rowLocked}
+                className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm text-right ${rowLocked ? "cursor-not-allowed opacity-50" : ""}`}
               />
 
               {showRef && (
