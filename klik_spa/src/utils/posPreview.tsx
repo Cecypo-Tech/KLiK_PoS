@@ -96,9 +96,8 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
   useEffect(() => {
     const frame = frameRef.current;
     if (loading || !frame) return;
-    const previous = frame.contentDocument;
     const waitForPage = () => {
-      const page = parsedPreviewPage(frame, previous);
+      const page = parsedPreviewPage(frame);
       if (page) fitToPage(page);
       else waitForPageRef.current = requestAnimationFrame(waitForPage);
     };
@@ -118,10 +117,12 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
         // No allow-scripts: a format's markup is shown, never run. allow-same-origin lets
         // this page measure the frame and unpin its fixed footer; a link opens a normal tab.
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        // A frame per page: the wait above then never mistakes the last invoice's page,
+        // still in a reused frame, for the next one's.
+        key={srcDoc}
         ref={frameRef}
         srcDoc={srcDoc}
-        // Again on load, which also ends the wait: a page that loaded before the wait began
-        // would otherwise be taken for the previous one and waited on for good.
+        // Again on load, once images and imported sheets are in; a wait still running ends.
         onLoad={(event) => {
           cancelAnimationFrame(waitForPageRef.current);
           const page = event.currentTarget.contentDocument;

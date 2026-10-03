@@ -67,14 +67,12 @@ export function previewFrameHeight(page: Document | null | undefined): number {
  * The frame's `load` waits for every image - the letterhead - so a frame sized on `load` sat
  * empty until then. The page can be sized as soon as it is parsed; images that load later
  * grow its body. Not before it is parsed: the footer to unpin may not be in it yet. Not the
- * frame's first blank page, and not `previous` - the last invoice's page stays in the frame
- * until the next one replaces it.
+ * blank page every frame starts on, which has no marker. The preview gives each invoice's
+ * page a frame of its own, so a marked page is always the one being waited for. A fixed
+ * footer whose rule is in an @import'ed sheet is not fixed yet at this point; load unpins it.
  */
-export function parsedPreviewPage(
-  frame: Pick<HTMLIFrameElement, "contentDocument"> | null | undefined,
-  previous: Document | null,
-): Document | null {
+export function parsedPreviewPage(frame: Pick<HTMLIFrameElement, "contentDocument"> | null | undefined): Document | null {
   const page = frame?.contentDocument;
-  if (!page || page === previous || page.readyState === "loading") return null;
+  if (!page || page.readyState === "loading") return null;
   return page.body?.hasAttribute("data-print-preview") ? page : null;
 }

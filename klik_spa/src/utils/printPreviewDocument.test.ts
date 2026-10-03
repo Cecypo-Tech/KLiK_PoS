@@ -108,25 +108,24 @@ describe("parsedPreviewPage", () => {
 
   it("is the preview page once its markup is read, before its images load", () => {
     const parsed = page("interactive");
-    expect(parsedPreviewPage(frame(parsed), null)).toBe(parsed);
-    expect(parsedPreviewPage(frame(page("complete")), null)).not.toBeNull();
+    expect(parsedPreviewPage(frame(parsed))).toBe(parsed);
+  });
+
+  it("is a page that has already loaded, so a wait begun after its load still ends", () => {
+    const loaded = page("complete");
+    expect(parsedPreviewPage(frame(loaded))).toBe(loaded);
   });
 
   it("is not a page still being read - its footer may not be there yet", () => {
-    expect(parsedPreviewPage(frame(page("loading")), null)).toBeNull();
+    expect(parsedPreviewPage(frame(page("loading")))).toBeNull();
   });
 
   it("is not the blank page a frame starts on", () => {
-    expect(parsedPreviewPage(frame(page("complete", false)), null)).toBeNull();
-  });
-
-  it("is not the previous invoice's page while the next one is on its way", () => {
-    const previous = page("complete");
-    expect(parsedPreviewPage(frame(previous), previous)).toBeNull();
+    expect(parsedPreviewPage(frame(page("complete", false)))).toBeNull();
   });
 
   it("is nothing for a frame with no page", () => {
-    expect(parsedPreviewPage(null, null)).toBeNull();
-    expect(parsedPreviewPage(frame(null), null)).toBeNull();
+    expect(parsedPreviewPage(null)).toBeNull();
+    expect(parsedPreviewPage(frame(null))).toBeNull();
   });
 });
