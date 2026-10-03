@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type SyntheticEvent } from "react";
 import { getPrintFormatHTML } from "./getPrintHTML.js";
-import { buildPrintPreviewDocument, unpinFixedElements } from "./printPreviewDocument";
+import { buildPrintPreviewDocument, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
 import { usePOSProfileStore } from "../stores/posProfileStore.js";
 
 type PrintPreviewProps = {
@@ -81,9 +81,7 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
     const page = frameDocument?.body;
     if (!page) return;
     unpinFixedElements(frameDocument);
-    // The body, not the root: the root's scrollHeight is never less than the frame, so a
-    // shorter invoice loaded into a taller frame would keep the old height.
-    const fit = () => setFrameHeight(Math.ceil(page.getBoundingClientRect().height));
+    const fit = () => setFrameHeight(previewFrameHeight(frameDocument));
     fit();
     resizeObserverRef.current?.disconnect();
     if (typeof ResizeObserver !== "undefined") {
@@ -102,8 +100,8 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
         className="print-preview-content block w-full border-0 bg-white"
         title="Print preview"
         // No allow-scripts: a format's markup is shown, never run. allow-same-origin lets
-        // this page measure the frame and unpin its fixed footer.
-        sandbox="allow-same-origin allow-popups"
+        // this page measure the frame and unpin its fixed footer; a link opens a normal tab.
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         srcDoc={srcDoc}
         onLoad={fitToContent}
         style={{ height: frameHeight }}

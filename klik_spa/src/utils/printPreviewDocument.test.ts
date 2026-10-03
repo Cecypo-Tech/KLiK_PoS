@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrintPreviewDocument, unpinFixedElements } from "./printPreviewDocument";
+import { buildPrintPreviewDocument, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
 
 describe("buildPrintPreviewDocument", () => {
   it("is a whole document holding the format's style and html", () => {
@@ -20,6 +20,15 @@ describe("buildPrintPreviewDocument", () => {
     expect(buildPrintPreviewDocument("", "")).toMatch(/body\s*{\s*display:\s*flow-root;\s*}/);
   });
 
+  it("keeps a Print Style's @import first in its style element, where CSS honours it", () => {
+    const doc = buildPrintPreviewDocument("", "@import url('https://fonts.googleapis.com/css?family=Lato');\n.x{}");
+    expect(doc).toMatch(/<style>@import url\('https:\/\/fonts\.googleapis\.com/);
+  });
+
+  it("never scrolls the frame up and down - the frame is as tall as the page", () => {
+    expect(buildPrintPreviewDocument("", "")).toMatch(/html\s*{\s*overflow-y:\s*hidden;\s*}/);
+  });
+
   it("opens links outside the preview", () => {
     expect(buildPrintPreviewDocument("", "")).toContain('<base target="_blank">');
   });
@@ -27,7 +36,7 @@ describe("buildPrintPreviewDocument", () => {
   it("does not let the style close its own tag early", () => {
     const doc = buildPrintPreviewDocument("<p>body</p>", "a{} </style><script>alert(1)</script>");
     expect(doc).not.toContain("</style><script>");
-    expect(doc.match(/<\/style>/gi)).toHaveLength(1);
+    expect(doc.match(/<\/style>/gi)).toHaveLength(doc.match(/<style>/gi)!.length);
   });
 
   it("tolerates a missing style or html", () => {
@@ -63,5 +72,31 @@ describe("unpinFixedElements", () => {
   it("does nothing to a page that has not loaded", () => {
     expect(() => unpinFixedElements(null)).not.toThrow();
     expect(() => unpinFixedElements({ body: null, defaultView: null } as unknown as Document)).not.toThrow();
+  });
+});
+
+describe("previewFrameHeight", () => {
+  const frame = ({ rect, scrollHeight, innerHeight = 500, clientHeight = 500 }: Record<string, number>) =>
+    ({
+      body: { getBoundingClientRect: () => ({ height: rect }), scrollHeight },
+      documentElement: { clientHeight },
+      defaultView: { innerHeight },
+    }) as unknown as Document;
+
+  it("is the page's height", () => {
+    expect(previewFrameHeight(frame({ rect: 631.2, scrollHeight: 631 }))).toBe(632);
+  });
+
+  it("counts the content of a format that sets its body to the frame's height", () => {
+    // html, body { height: 100% } in a frame that starts 0px tall: the body is 0px.
+    expect(previewFrameHeight(frame({ rect: 0, scrollHeight: 732 }))).toBe(732);
+  });
+
+  it("leaves room for a sideways scrollbar, so it does not hide the foot of the page", () => {
+    expect(previewFrameHeight(frame({ rect: 717, scrollHeight: 717, innerHeight: 732, clientHeight: 717 }))).toBe(732);
+  });
+
+  it("is 0 for a page that has not loaded", () => {
+    expect(previewFrameHeight(null)).toBe(0);
   });
 });

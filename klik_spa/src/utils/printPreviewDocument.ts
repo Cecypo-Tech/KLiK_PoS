@@ -8,6 +8,8 @@
 export function buildPrintPreviewDocument(html: string | undefined, style: string | undefined): string {
   // A "</style>" inside the CSS would end the style element and turn the rest into markup.
   const safeStyle = (style || "").replace(/<\/style/gi, "<\\/style");
+  // The format's CSS has a <style> of its own: Frappe puts a Print Style's @import first,
+  // and CSS ignores an @import that follows any other rule.
   return `<!doctype html>
 <html>
 <head>
@@ -15,10 +17,12 @@ export function buildPrintPreviewDocument(html: string | undefined, style: strin
 <base target="_blank">
 <style>
 html, body { margin: 0; background: #fff; color: #000; }
+/* The frame is as tall as the page, so it never scrolls up and down. */
+html { overflow-y: hidden; }
 /* Holds the format's margins inside the body, so the body's height is the frame's. */
 body { display: flow-root; }
-${safeStyle}
 </style>
+<style>${safeStyle}</style>
 </head>
 <body>
 ${html || ""}
@@ -40,4 +44,20 @@ export function unpinFixedElements(page: Document | null | undefined): void {
       element.style.setProperty("position", "static", "important");
     }
   }
+}
+
+/** How tall the frame must be to show all of its page.
+ *
+ * The body, not the root: the root's scrollHeight is never less than the frame, so a shorter
+ * invoice loaded into a taller frame would keep the old height. The body's scrollHeight
+ * counts a format that sets `html, body { height: 100% }`, whose body is the frame's height -
+ * 0px at first. A format wider than a narrow till panel scrolls sideways, and that scrollbar
+ * takes its height from the page, so it is added back.
+ */
+export function previewFrameHeight(page: Document | null | undefined): number {
+  const body = page?.body;
+  if (!body) return 0;
+  const view = page.defaultView;
+  const sidewaysScrollbar = view ? Math.max(0, view.innerHeight - page.documentElement.clientHeight) : 0;
+  return Math.ceil(Math.max(body.getBoundingClientRect().height, body.scrollHeight)) + sidewaysScrollbar;
 }
