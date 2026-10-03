@@ -58,6 +58,31 @@ export function followTotal(
  * it - the rest of a split stays, an opening amount on cash shrinks by what M-Pesa paid. A
  * method that already holds an amount is left as the cashier has it.
  */
+/**
+ * Bring the rows down to the payable, taking the excess off `preferredIds` in order. A
+ * locked row (a paid or pending STK push) is never cut: that amount is money in flight.
+ */
+export function trimToPayable(
+  amounts: Record<string, number>,
+  payable: number,
+  preferredIds: string[],
+  lockedId: string | null,
+): Record<string, number> {
+  const updated = { ...amounts };
+  let excess = roundCurrency(Object.values(updated).reduce((sum, value) => sum + (Number(value) || 0), 0) - payable);
+  if (excess <= 0) return updated;
+  for (const methodId of preferredIds) {
+    if (excess <= 0) break;
+    if (methodId === lockedId) continue;
+    const current = Number(updated[methodId] || 0);
+    if (current <= 0) continue;
+    const reduction = Math.min(current, excess);
+    updated[methodId] = roundCurrency(current - reduction);
+    excess = roundCurrency(excess - reduction);
+  }
+  return updated;
+}
+
 export function withPaidMpesa(
   prev: Record<string, number>,
   method: string,

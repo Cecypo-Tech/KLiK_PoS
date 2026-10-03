@@ -37,11 +37,12 @@ import {
   receiptLeftoverMessage,
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
-import { followTotal, toggleOn, withPaidMpesa } from "../../utils/paymentToggle";
+import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { allocateCredit, fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
 import { nextAllocationTargets, stkAutoSubmitDecision } from "../../utils/stkAutoSubmit";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
   holdBlockedByMpesa,
   mpesaDraftKeptForStk,
@@ -262,7 +263,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [orderDiscountAmount, setOrderDiscountAmount] = useState(0);
   const [orderDiscountPercentInput, setOrderDiscountPercentInput] = useState(0);
   const [backendTaxPreview, setBackendTaxPreview] = useState<BackendTaxPreview | null>(null);
-  const [, setIsTaxPreviewLoading] = useState(false);
+  const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
   const [mpesaDraftInvoiceName, setMpesaDraftInvoiceName] = useState<string | null>(null);
@@ -685,6 +686,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const previousCheckoutGrandTotalRef = useRef(checkoutPayableTotal);
 
   const toggleCreditSale = () => {
+    if (stkLockedMethod) {
+      toast.error("An M-Pesa push is pending or paid on this sale - it cannot become a credit sale.");
+      return;
+    }
     setIsCreditSale((prev) => {
       if (!prev) setPaymentAmounts({});
       return !prev;
@@ -777,21 +782,23 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Ticking an M-Pesa row is the trigger: the panel follows it, no separate button.
   const showMpesaPanel = hasActiveMpesaPayment && !invoiceSubmitted && !mpesaPanelDismissed;
 
-  // A paid STK push is money already received: its row cannot be edited, re-apportioned or
-  // unticked, and leaving the sale unfinished takes an explicit confirmation.
-  const stkPaidMethod =
-    mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" && !invoiceSubmitted
+  // An STK push in flight or paid is money the customer was asked for or has sent: its row
+  // cannot be edited, re-apportioned, trimmed or unticked, and nothing may wipe it.
+  const stkLockedMethod =
+    mpesaFlow?.source === "stk" &&
+    (mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed") &&
+    !invoiceSubmitted
       ? mpesaFlow.modeOfPayment
       : null;
+  // Paid and not yet submitted: leaving takes an explicit confirmation.
+  const stkPaidMethod = stkLockedMethod && mpesaFlow?.status === "completed" ? stkLockedMethod : null;
 
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const closeDialog = useCallback(
     (completed?: boolean) => {
       if (!completed && stkPaidMethod) {
-        const leave = window.confirm(
-          "The customer has already paid by M-Pesa for this sale. Leave without finishing it? " +
-            "The payment will then have to be matched to a sale later."
-        );
-        if (!leave) return;
+        setLeaveConfirmOpen(true);
+        return;
       }
       onClose(completed);
     },
@@ -804,33 +811,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const trimPaymentAmountsToPayable = useCallback((payableTotal: number) => {
     setPaymentAmounts((prev) => {
-      const updated = { ...prev };
-      let excess = roundCurrency(calculateTotalPayments(Object.values(updated)) - payableTotal);
-
-      if (excess <= 0) {
-        return updated;
-      }
-
       const preferredIds = [
         lastModifiedMethodId,
         activeMethodId,
-        ...Object.entries(updated)
+        ...Object.entries(prev)
           .filter(([, amount]) => (amount || 0) > 0)
           .map(([methodId]) => methodId),
       ].filter((methodId, index, all): methodId is string => Boolean(methodId) && all.indexOf(methodId) === index);
-
-      for (const methodId of preferredIds) {
-        if (excess <= 0) break;
-        const currentAmount = Number(updated[methodId] || 0);
-        if (currentAmount <= 0) continue;
-        const reduction = Math.min(currentAmount, excess);
-        updated[methodId] = roundCurrency(currentAmount - reduction);
-        excess = roundCurrency(excess - reduction);
-      }
-
-      return updated;
+      return trimToPayable(prev, payableTotal, preferredIds, stkLockedMethod);
     });
-  }, [activeMethodId, lastModifiedMethodId]);
+  }, [activeMethodId, lastModifiedMethodId, stkLockedMethod]);
 
   const clearLoyaltyRedemption = useCallback(() => {
     setAppliedLoyalty(null);
@@ -865,6 +855,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [checkoutGrandTotal, selectedCustomer?.loyalty, trimPaymentAmountsToPayable]);
 
   const handleApplyLoyaltyRedemption = useCallback(async () => {
+    if (stkLockedMethod) {
+      // Redeeming now would cut the sale below what the customer was asked to pay.
+      toast.error("Redeem loyalty points before sending the M-Pesa push.");
+      return;
+    }
     const loyalty = selectedCustomer?.loyalty;
     const points = Number.parseInt(loyaltyPointsInput || "0", 10);
 
@@ -907,7 +902,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     } finally {
       setIsApplyingLoyalty(false);
     }
-  }, [checkoutGrandTotal, loyaltyPointsInput, posCompanyName, selectedCustomer, trimPaymentAmountsToPayable]);
+  }, [checkoutGrandTotal, loyaltyPointsInput, posCompanyName, selectedCustomer, trimPaymentAmountsToPayable, stkLockedMethod]);
 
   const refreshMpesaStatus = useCallback(async (requestName?: string) => {
     const name = requestName || mpesaFlow?.requestName;
@@ -1191,6 +1186,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleReconcileMpesaPayments = async () => {
     if (salespersonBlocksMpesa()) return;
+    if (stkLockedMethod) {
+      // Receipts would replace the push's row and flow, orphaning money already asked for.
+      toast.error("An M-Pesa push is pending or paid on this sale - receipts can't be added to it.");
+      return;
+    }
     if (!selectedCustomer?.id && !selectedCustomer?.name) {
       toast.error("Kindly select a customer");
       return;
@@ -1276,7 +1276,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return baseAmounts;
     }
 
-    const nextMethodIds = nextAllocationTargets(orderedPaymentMethodIds, methodId, stkPaidMethod);
+    const nextMethodIds = nextAllocationTargets(orderedPaymentMethodIds, methodId, stkLockedMethod);
     if (nextMethodIds.length === 0) {
       return baseAmounts;
     }
@@ -1304,7 +1304,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleToggleMethod = (methodId: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
-    if (methodId === stkPaidMethod) return;
+    if (methodId === stkLockedMethod) return;
     const currentAmount = paymentAmounts[methodId] || 0;
     if (currentAmount > 0) {
       // turn off: clear this row's amount (reference is pruned by the effect in Step 2)
@@ -1335,7 +1335,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const handleManualAmountChange = (methodId: string, amount: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
-    if (methodId === stkPaidMethod) return;
+    if (methodId === stkLockedMethod) return;
     let numericAmount = roundCurrency(parseFloat(amount) || 0);
     if (methodId === CUSTOMER_CREDIT_METHOD) {
       // The tender can never exceed what the notes hold, nor what the sale asks for.
@@ -1936,30 +1936,40 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   };
 
+  // One submit at a time across the button, F10 and the paid-push auto-submit: a state flag
+  // only lands on the next render, so two triggers in the same tick would both pass it.
+  const submitInFlightRef = useRef(false);
+
   const handleCompletePayment = async () => {
-    if (requiresSalespersonPin && !currentSalesperson) {
-      setShowSalespersonModal(true);
-      toast.error("Verify the salesperson before completing payment");
-      return;
-    }
-
-    const activeMpesaPayment = getActiveMpesaPayment();
-    if (activeMpesaPayment && activeMpesaPayment.amount > 0) {
-      const sameRequestForMethod =
-        mpesaFlow && mpesaFlow.modeOfPayment === activeMpesaPayment.method ? mpesaFlow : null;
-
-      if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status === "in_progress") {
-        toast.info("M-Pesa payment is still pending. Confirm on phone or click Refresh Status.");
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    try {
+      if (requiresSalespersonPin && !currentSalesperson) {
+        setShowSalespersonModal(true);
+        toast.error("Verify the salesperson before completing payment");
         return;
       }
 
-      if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status !== "completed" && sameRequestForMethod.requestName) {
-        await refreshMpesaStatus(sameRequestForMethod.requestName);
-        return;
-      }
-    }
+      const activeMpesaPayment = getActiveMpesaPayment();
+      if (activeMpesaPayment && activeMpesaPayment.amount > 0) {
+        const sameRequestForMethod =
+          mpesaFlow && mpesaFlow.modeOfPayment === activeMpesaPayment.method ? mpesaFlow : null;
 
-    await processPayment(selectedDeliveryPersonnel);
+        if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status === "in_progress") {
+          toast.info("M-Pesa payment is still pending. Confirm on phone or click Refresh Status.");
+          return;
+        }
+
+        if (sameRequestForMethod?.source === "stk" && sameRequestForMethod.status !== "completed" && sameRequestForMethod.requestName) {
+          await refreshMpesaStatus(sameRequestForMethod.requestName);
+          return;
+        }
+      }
+
+      await processPayment(selectedDeliveryPersonnel);
+    } finally {
+      submitInFlightRef.current = false;
+    }
   };
 
   const handleHoldOrder = async () => {
@@ -2167,40 +2177,64 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
 
-  // A paid STK push submits the sale by itself. Seen once per push request; the decision
-  // waits one render so amounts set in the same moment (a resumed order's paid push) count.
+  // A paid STK push submits the sale by itself - once per push request, and only when the
+  // push alone settles the server's total (see stkAutoSubmitDecision).
   const [stkAutoSubmitFor, setStkAutoSubmitFor] = useState<string | null>(null);
   const handledStkRequestRef = useRef<string | null>(null);
+  const previewReady = hasBackendTaxPreview && !isTaxPreviewLoading;
 
   useEffect(() => {
     if (!isOpen || invoiceSubmitted) return;
     if (mpesaFlow?.source !== "stk" || mpesaFlow.status !== "completed" || !mpesaFlow.requestName) return;
     if (handledStkRequestRef.current === mpesaFlow.requestName) return;
     handledStkRequestRef.current = mpesaFlow.requestName;
+    // The row shows what the customer actually paid, whatever it held before (a resumed
+    // order's pre-filled total, say); the lock then keeps it there.
+    const { modeOfPayment, amount } = mpesaFlow;
+    if (modeOfPayment && amount > 0) {
+      setPaymentAmounts((prev) => ({ ...prev, [modeOfPayment]: roundCurrency(amount) }));
+    }
     setStkAutoSubmitFor(mpesaFlow.requestName);
-  }, [isOpen, invoiceSubmitted, mpesaFlow?.source, mpesaFlow?.status, mpesaFlow?.requestName]);
+  }, [isOpen, invoiceSubmitted, mpesaFlow]);
 
   useEffect(() => {
-    if (!stkAutoSubmitFor) return;
-    const requestName = stkAutoSubmitFor;
-    setStkAutoSubmitFor(null);
+    if (!stkAutoSubmitFor || !mpesaFlow) return;
+    const paidAmount = Number(mpesaFlow.amount || 0);
     const decision = stkAutoSubmitDecision({
       blockReason: submitBlockReason(),
       isProcessing: isProcessingPayment,
       invoiceSubmitted,
+      previewReady,
+      paidAmount,
+      payable: checkoutPayableTotal,
+      otherRowsTendered: Object.entries(paymentAmounts).some(
+        ([methodId, value]) => methodId !== mpesaFlow.modeOfPayment && (value || 0) > 0
+      ),
     });
+    // Waiting keeps the request pending: this runs again when the server total lands.
+    if (decision.action === "wait") return;
+    const requestName = stkAutoSubmitFor;
+    setStkAutoSubmitFor(null);
     if (decision.action === "submit") {
       void handleCompletePayment();
-    } else if (decision.action === "notify") {
-      toast.info(`M-Pesa payment received. ${decision.reason} - then submit the sale.`, {
-        autoClose: 10000,
-        toastId: `stk-paid-${requestName}`,
-      });
+      return;
     }
-    // Decided once, on the render after the push was confirmed - not again when other
-    // state changes, which would submit while the cashier is still typing an amount.
+    if (decision.action !== "notify") return;
+    const paid = formatCurrencyWithSymbol(paidAmount, displayCurrencySymbol);
+    const message =
+      decision.reason === "blocked"
+        ? `M-Pesa payment of ${paid} received. ${decision.detail} - then submit the sale.`
+        : decision.reason === "short"
+          ? `M-Pesa payment of ${paid} received - ${formatCurrencyWithSymbol(
+              roundCurrency(checkoutPayableTotal - paidAmount),
+              displayCurrencySymbol
+            )} still to be paid. Collect it, then submit the sale.`
+          : `M-Pesa payment of ${paid} received. Check the other payment rows, then submit the sale.`;
+    toast.info(message, { autoClose: 10000, toastId: `stk-paid-${requestName}` });
+    // Decided once per push, when the server total is in - never again on later edits,
+    // which would submit while the cashier is still typing an amount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stkAutoSubmitFor]);
+  }, [stkAutoSubmitFor, previewReady]);
 
   // isProcessingPayment only lands on the next render, so two quick F10 presses would
   // both see it false. The ref closes that gap for the shortcut.
@@ -2239,6 +2273,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         e.preventDefault();
         // Leaving mid-payment would abandon an STK push or a submit still running.
         if (isProcessingPayment || isHoldingOrder) return;
+        // The leave confirmation handles its own Escape (= stay); don't reopen it.
+        if (leaveConfirmOpen) return;
         // Completed screen: ESC does the default "Start New Order" action.
         // Payment-entry screen: ESC closes the dialog.
         if (invoiceSubmitted) {
@@ -2250,7 +2286,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, invoiceSubmitted, isProcessingPayment, isHoldingOrder, finalizeCompletedOrderState, onClose, closeDialog]);
+  }, [isOpen, invoiceSubmitted, isProcessingPayment, isHoldingOrder, finalizeCompletedOrderState, onClose, closeDialog, leaveConfirmOpen]);
 
   const buildOrderText = () => {
     const lines: string[] = [];
@@ -2702,6 +2738,23 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     );
   };
 
+  // Leaving a sale whose push is paid. "Stay" is the focused default, so Enter (or a
+  // scanner's trailing Enter) does not abandon it.
+  const renderLeaveConfirm = () => (
+    <ConfirmDialog
+      isOpen={leaveConfirmOpen}
+      onClose={() => setLeaveConfirmOpen(false)}
+      onConfirm={() => {
+        setLeaveConfirmOpen(false);
+        onClose(false);
+      }}
+      title="The customer has already paid by M-Pesa"
+      message="Leaving keeps this sale on Held with its payment - finish it from Held. Don't ring the same items up again, or the customer will pay twice."
+      confirmText="Leave anyway"
+      cancelText="Stay and finish"
+    />
+  );
+
   // One compact line in the Payment Methods header; the full detail is its tooltip.
   const renderMpesaStatusNotice = () => {
     if (!mpesaFlow) return null;
@@ -2880,7 +2933,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   onReferenceChange={handleReferenceChange}
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
-                  lockedMethodIds={stkPaidMethod ? [stkPaidMethod] : []}
+                  lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
                   headerMiddle={renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (
@@ -3079,12 +3132,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
           onAddPayments={() => void handleReconcileMpesaPayments()}
         />
+        {renderLeaveConfirm()}
       </div>
     );
   }
 
   return (
     <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-[60] bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
+      {renderLeaveConfirm()}
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -3151,7 +3206,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   onReferenceChange={handleReferenceChange}
                   setActiveMethodId={setActiveMethodId}
                   references={paymentReferences}
-                  lockedMethodIds={stkPaidMethod ? [stkPaidMethod] : []}
+                  lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
                   headerMiddle={renderMpesaStatusNotice()}
                   headerRight={
                     allowCreditSales ? (

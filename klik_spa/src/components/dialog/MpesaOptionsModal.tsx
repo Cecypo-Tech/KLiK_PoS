@@ -216,7 +216,7 @@ export default function MpesaOptionsModal({
             <button
               type="button"
               onClick={onAddPayments}
-              disabled={isProcessing || selectedPaymentNames.length === 0}
+              disabled={isProcessing || stkPending || stkPaid || selectedPaymentNames.length === 0}
               className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : null}

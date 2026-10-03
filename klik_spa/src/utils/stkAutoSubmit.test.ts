@@ -2,16 +2,44 @@ import { describe, expect, it } from "vitest";
 import { canSendStk, nextAllocationTargets, stkAutoSubmitDecision } from "./stkAutoSubmit";
 
 describe("stkAutoSubmitDecision", () => {
-  const ready = { blockReason: null, isProcessing: false, invoiceSubmitted: false };
+  // The paid push alone covers the server's total, nothing else is tendered or blocking.
+  const ready = {
+    blockReason: null,
+    isProcessing: false,
+    invoiceSubmitted: false,
+    previewReady: true,
+    paidAmount: 430,
+    payable: 430,
+    otherRowsTendered: false,
+  };
 
-  it("submits the sale the moment a paid push leaves nothing else to do", () => {
+  it("submits when the paid push alone covers the sale", () => {
     expect(stkAutoSubmitDecision(ready)).toEqual({ action: "submit" });
   });
 
-  it("does not guess when something still blocks the submit - it says what", () => {
-    expect(stkAutoSubmitDecision({ ...ready, blockReason: "Enter the remaining Sh 70.00." })).toEqual({
+  it("waits for the server's total before deciding anything", () => {
+    expect(stkAutoSubmitDecision({ ...ready, previewReady: false })).toEqual({ action: "wait" });
+  });
+
+  it("never submits other rows the cashier has not confirmed (a split or a pre-filled cash row)", () => {
+    expect(stkAutoSubmitDecision({ ...ready, payable: 1000, paidAmount: 600, otherRowsTendered: true })).toEqual({
       action: "notify",
-      reason: "Enter the remaining Sh 70.00.",
+      reason: "other_rows",
+    });
+  });
+
+  it("says what is still to pay when the push covers only part of the sale", () => {
+    expect(stkAutoSubmitDecision({ ...ready, payable: 1000, paidAmount: 600 })).toEqual({
+      action: "notify",
+      reason: "short",
+    });
+  });
+
+  it("does not guess when something else still blocks the submit - it passes the reason on", () => {
+    expect(stkAutoSubmitDecision({ ...ready, blockReason: "Select a due date for this credit sale" })).toEqual({
+      action: "notify",
+      reason: "blocked",
+      detail: "Select a due date for this credit sale",
     });
   });
 

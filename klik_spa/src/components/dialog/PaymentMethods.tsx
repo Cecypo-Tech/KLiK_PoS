@@ -54,11 +54,13 @@ export default function PaymentMethods({
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const amountInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  // A method added from its tag arrives ticked: the cashier picked it to pay with.
+  // A method added from its tag arrives ticked: the cashier picked it to pay with. A phone
+  // mode opens the M-Pesa panel instead, so focus is not sent to the amount behind it.
   const promote = (id: string) => {
     setPromotedIds((current) => (current.includes(id) ? current : [...current, id]));
     onToggle(id);
-    setPendingFocusId(id);
+    const method = paymentMethods.find((candidate) => candidate.id === id);
+    if (method?.type !== "Phone") setPendingFocusId(id);
   };
   const demote = (id: string) => setPromotedIds((current) => current.filter((x) => x !== id));
 
