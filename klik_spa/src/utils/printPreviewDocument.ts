@@ -24,7 +24,7 @@ body { display: flow-root; }
 </style>
 <style>${safeStyle}</style>
 </head>
-<body>
+<body data-print-preview>
 ${html || ""}
 </body>
 </html>`;
@@ -60,4 +60,19 @@ export function previewFrameHeight(page: Document | null | undefined): number {
   const view = page.defaultView;
   const sidewaysScrollbar = view ? Math.max(0, view.innerHeight - page.documentElement.clientHeight) : 0;
   return Math.ceil(Math.max(body.getBoundingClientRect().height, body.scrollHeight)) + sidewaysScrollbar;
+}
+
+/** The frame's preview page, once its markup has been read.
+ *
+ * The frame's `load` waits for every image - the letterhead - so a frame sized on `load` sat
+ * empty until then. The page can be sized as soon as it is parsed; images that load later
+ * grow its body. Not before it is parsed: the footer to unpin may not be in it yet. Not the
+ * blank page every frame starts on, which has no marker. The preview gives each invoice's
+ * page a frame of its own, so a marked page is always the one being waited for. A fixed
+ * footer whose rule is in an @import'ed sheet is not fixed yet at this point; load unpins it.
+ */
+export function parsedPreviewPage(frame: Pick<HTMLIFrameElement, "contentDocument"> | null | undefined): Document | null {
+  const page = frame?.contentDocument;
+  if (!page || page.readyState === "loading") return null;
+  return page.body?.hasAttribute("data-print-preview") ? page : null;
 }
