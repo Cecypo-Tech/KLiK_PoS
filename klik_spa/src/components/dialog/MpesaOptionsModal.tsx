@@ -94,10 +94,10 @@ export default function MpesaOptionsModal({
         <div className={`grid md:grid-cols-5 ${variant === "panel" ? "gap-4 p-4" : "gap-6 p-6"}`}>
           <section className="md:col-span-2 space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-900 p-4">
             <h3 className="font-semibold text-emerald-800 dark:text-emerald-300">Initiate STK Push</h3>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Phone Number</label>
+            <div className="flex gap-2">
               <input
                 type="text"
+                aria-label="Phone number for the STK push"
                 value={phoneNumber}
                 onChange={(event) => onPhoneNumberChange(event.target.value)}
                 onKeyDown={(event) => {
@@ -108,18 +108,18 @@ export default function MpesaOptionsModal({
                 }}
                 placeholder="0712345678 or 254712345678"
                 disabled={isProcessing}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white"
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white"
               />
+              <button
+                type="button"
+                onClick={onInitiateStk}
+                disabled={!stkSendable}
+                className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {isProcessing ? <Loader2 size={14} className="animate-spin" /> : null}
+                <span>{stkPaid ? "Paid" : stkPending ? "Waiting…" : "Send"}</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onInitiateStk}
-              disabled={!stkSendable}
-              className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isProcessing ? <Loader2 size={16} className="animate-spin" /> : null}
-              <span>{stkPaid ? "Paid — submit the sale" : stkPending ? "Waiting on the customer…" : "Send STK Push"}</span>
-            </button>
           </section>
 
           <section className="md:col-span-3 space-y-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
@@ -143,24 +143,25 @@ export default function MpesaOptionsModal({
                 onChange={(event) => onSearchChange(event.target.value)}
                 placeholder="Type at least 3 characters"
                 disabled={isProcessing}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 pl-9 pr-3 py-2 text-gray-900 dark:text-white"
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 pl-9 pr-24 py-2 text-gray-900 dark:text-white"
               />
+              {/* The search's state sits inside the box's right edge, so the panel only
+                  grows when there are receipts to show. */}
+              <span
+                aria-live="polite"
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex items-center text-xs text-gray-500 dark:text-gray-400"
+              >
+                {isLoadingPayments ? (
+                  <Loader2 size={14} className="animate-spin" aria-label="Searching" />
+                ) : searchTerm.trim().length >= 3 && payments.length === 0 ? (
+                  "No matches"
+                ) : null}
+              </span>
             </div>
 
-            {/* Nothing below the box until a search runs: its placeholder already says how. */}
-            {(isLoadingPayments || searchTerm.trim().length >= 3) && (
+            {!isLoadingPayments && searchTerm.trim().length >= 3 && payments.length > 0 && (
             <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
-              {isLoadingPayments ? (
-                <div className="p-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Loading M-Pesa payments...</span>
-                </div>
-              ) : payments.length === 0 ? (
-                <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
-                  No pending payments matched your search.
-                </div>
-              ) : (
-                payments.map((payment) => {
+              {payments.map((payment) => {
                   const checked = selectedPaymentNames.includes(payment.name);
                   const card = receiptCardState(payment);
                   return (
@@ -208,8 +209,7 @@ export default function MpesaOptionsModal({
                       </div>
                     </label>
                   );
-                })
-              )}
+              })}
             </div>
             )}
 
