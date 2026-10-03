@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { getPrintFormatHTML } from "./getPrintHTML.js";
 import { buildPrintPreviewDocument, parsedPreviewPage, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
+import { drawPreviewBarcodes } from "./previewBarcodes";
 import { usePOSProfileStore } from "../stores/posProfileStore.js";
 
 type PrintPreviewProps = {
@@ -81,6 +82,7 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
   const fitToPage = useCallback((frameDocument: Document) => {
     const page = frameDocument.body;
     if (!page) return;
+    drawPreviewBarcodes(frameDocument);
     unpinFixedElements(frameDocument);
     const fit = () => setFrameHeight(previewFrameHeight(frameDocument));
     fit();
