@@ -52,11 +52,15 @@ describe("followTotal", () => {
 
   it("leaves a method whose money is already asked for or paid alone", () => {
     // A push for 560 is waiting on, or was paid by, the customer: the amount is that push's.
-    expect(followTotal({ "Mpesa-1": 560 }, 560, 4, "Mpesa-1")).toEqual({ "Mpesa-1": 560 });
+    expect(followTotal({ "Mpesa-1": 560 }, 560, 4, ["Mpesa-1"])).toEqual({ "Mpesa-1": 560 });
   });
 
   it("has nothing to move when nothing is paid", () => {
     expect(followTotal({}, 560, 4)).toEqual({});
+  });
+
+  it("leaves any locked row - an applied voucher total - as it is", () => {
+    expect(followTotal({ __v: 450 }, 450, 500, ["Mpesa-1", "__v"])).toEqual({ __v: 450 });
   });
 });
 
@@ -82,17 +86,25 @@ describe("withPaidMpesa", () => {
 
 describe("trimToPayable", () => {
   it("takes the excess off the preferred rows first", () => {
-    expect(trimToPayable({ Cash: 1000, Card: 200 }, 900, ["Cash"], null)).toEqual({ Cash: 700, Card: 200 });
+    expect(trimToPayable({ Cash: 1000, Card: 200 }, 900, ["Cash"], [])).toEqual({ Cash: 700, Card: 200 });
   });
 
   it("never cuts a locked row (a paid M-Pesa push), even when it is preferred", () => {
-    expect(trimToPayable({ "Mpesa-1": 600, Cash: 400 }, 800, ["Mpesa-1", "Cash"], "Mpesa-1")).toEqual({
+    expect(trimToPayable({ "Mpesa-1": 600, Cash: 400 }, 800, ["Mpesa-1", "Cash"], ["Mpesa-1"])).toEqual({
       "Mpesa-1": 600,
       Cash: 200,
     });
   });
 
   it("leaves rows alone when they do not exceed the payable", () => {
-    expect(trimToPayable({ Cash: 500 }, 900, ["Cash"], null)).toEqual({ Cash: 500 });
+    expect(trimToPayable({ Cash: 500 }, 900, ["Cash"], [])).toEqual({ Cash: 500 });
+  });
+
+  it("never cuts any of several locked rows", () => {
+    expect(trimToPayable({ "Mpesa-1": 300, __v: 200, Cash: 400 }, 600, ["Mpesa-1", "__v", "Cash"], ["Mpesa-1", "__v"])).toEqual({
+      "Mpesa-1": 300,
+      __v: 200,
+      Cash: 100,
+    });
   });
 });

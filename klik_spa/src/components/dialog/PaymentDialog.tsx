@@ -818,7 +818,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           .filter(([, amount]) => (amount || 0) > 0)
           .map(([methodId]) => methodId),
       ].filter((methodId, index, all): methodId is string => Boolean(methodId) && all.indexOf(methodId) === index);
-      return trimToPayable(prev, payableTotal, preferredIds, stkLockedMethod);
+      return trimToPayable(prev, payableTotal, preferredIds, stkLockedMethod ? [stkLockedMethod] : []);
     });
   }, [activeMethodId, lastModifiedMethodId, stkLockedMethod]);
 
@@ -2487,7 +2487,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed")
         ? mpesaFlow.modeOfPayment
         : null;
-    setPaymentAmounts((prev) => followTotal(prev, previousTotal, checkoutPayableTotal, lockedMethod));
+    setPaymentAmounts((prev) => followTotal(prev, previousTotal, checkoutPayableTotal, lockedMethod ? [lockedMethod] : []));
 
     previousCheckoutGrandTotalRef.current = checkoutPayableTotal;
   }, [checkoutPayableTotal, isOpen, invoiceSubmitted, isProcessingPayment, isCreditSale, mpesaFlow]);
