@@ -63,6 +63,10 @@ describe("voucherCustomerRule", () => {
   it("a Walk In voucher never pays a named sale", () => {
     expect(voucherCustomerRule(namedSale, { customer: "Walk In", isWalkin: true })).toBe("refuse_walkin");
   });
+
+  it("a Walk In voucher never pays another Walk In customer's sale", () => {
+    expect(voucherCustomerRule(walkinSale, { customer: "Walk In 2", isWalkin: true })).toBe("refuse_walkin");
+  });
 });
 
 describe("voucherApplyAmount", () => {
@@ -130,5 +134,15 @@ describe("vouchersBlockedReason", () => {
     expect(vouchersBlockedReason({ isCreditSale: true, mpesaOrder: false, editingDraft: false })).toMatch(/credit sale/);
     expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: true, editingDraft: false })).toMatch(/M-Pesa/);
     expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toMatch(/draft/);
+  });
+
+  it("names the reason as a bare phrase, to follow the dialog's prefix", () => {
+    expect(vouchersBlockedReason({ isCreditSale: true, mpesaOrder: false, editingDraft: false })).toBe("this is a credit sale");
+    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: true, editingDraft: false })).toBe(
+      "this sale is an M-Pesa order",
+    );
+    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toBe(
+      "this sale is finishing an older draft",
+    );
   });
 });

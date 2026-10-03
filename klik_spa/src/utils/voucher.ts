@@ -53,12 +53,13 @@ export function isUsable(lookup: VoucherLookup | null): boolean {
   );
 }
 
-/** Payment Reconciliation only settles a customer's own invoices: who may use which voucher. */
+/** Payment Reconciliation only settles a customer's own invoices: who may use which voucher.
+A Walk In voucher pays only its own Walk In customer's sales - the server compares the two. */
 export function voucherCustomerRule(
   sale: { customer: string; isWalkin: boolean },
   voucher: { customer: string; isWalkin: boolean },
 ): VoucherCustomerRule {
-  if (voucher.isWalkin) return sale.isWalkin ? "apply" : "refuse_walkin";
+  if (voucher.isWalkin) return sale.isWalkin && voucher.customer === sale.customer ? "apply" : "refuse_walkin";
   if (voucher.customer === sale.customer) return "apply";
   return sale.isWalkin ? "switch" : "refuse_named";
 }
@@ -91,14 +92,15 @@ export function capVouchers(applied: AppliedVoucher[], payable: number): Applied
   return capped.filter((voucher) => voucher.amount > 0);
 }
 
-/** Why this sale cannot carry vouchers right now, or null when it can. */
+/** Why this sale cannot carry vouchers right now, or null when it can - a bare phrase the
+dialog puts after "Vouchers removed:" or "Vouchers unavailable:". */
 export function vouchersBlockedReason(state: {
   isCreditSale: boolean;
   mpesaOrder: boolean;
   editingDraft: boolean;
 }): string | null {
-  if (state.isCreditSale) return "a credit sale is paid later, not with vouchers";
-  if (state.mpesaOrder) return "vouchers can't be combined with an M-Pesa order";
-  if (state.editingDraft) return "vouchers can't be used when finishing an older draft";
+  if (state.isCreditSale) return "this is a credit sale";
+  if (state.mpesaOrder) return "this sale is an M-Pesa order";
+  if (state.editingDraft) return "this sale is finishing an older draft";
   return null;
 }
