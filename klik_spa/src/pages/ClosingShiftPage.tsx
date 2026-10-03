@@ -1275,12 +1275,14 @@ export default function ClosingShiftPage() {
           onCancel={handleCancel}
         />
 
-        {/* Single Invoice Return Modal */}
+        {/* Single Invoice Return Modal - no exchange-now mid-close: a cashier closing
+            the shift must not be opening new sales from here. */}
         <SingleInvoiceReturn
           invoice={selectedInvoiceForReturn}
           isOpen={showSingleReturn}
           onClose={() => setShowSingleReturn(false)}
           onSuccess={handleSingleReturnSuccess}
+          allowExchange={false}
         />
 
         {/* Delete Confirmation Dialog */}
