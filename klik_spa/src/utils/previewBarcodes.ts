@@ -3,7 +3,11 @@ import JsBarcode from "jsbarcode";
 type BarcodeOptions = Record<string, unknown> & { format?: string };
 type Draw = (element: Element, value: string, options: BarcodeOptions) => void;
 
-/** JsBarcode options for a Barcode field, as Frappe's print page builds them. */
+/** JsBarcode options for a Barcode field, as Frappe's desk print preview builds them.
+ *
+ * Options that are not JSON are ignored, as the desk preview does; /printview would leave
+ * such a barcode blank.
+ */
 export function barcodeOptions(value: string, fieldOptions: string | undefined): BarcodeOptions {
   const options: BarcodeOptions = { fontSize: "16", width: "3", height: "50" };
   try {

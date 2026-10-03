@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import JsBarcode from "jsbarcode";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { barcodeOptions, drawPreviewBarcodes } from "./previewBarcodes";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("barcodeOptions", () => {
   it("are Frappe's print defaults", () => {
@@ -22,6 +25,17 @@ describe("barcodeOptions", () => {
 
   it("ignore options that are not JSON", () => {
     expect(barcodeOptions("12345", "not json")).toEqual({ fontSize: "16", width: "3", height: "50" });
+  });
+
+  it("are options the installed JsBarcode draws with", () => {
+    // JsBarcode draws into a plain object without a DOM: the encodings it would render.
+    const code128: { encodings?: unknown[] } = {};
+    JsBarcode(code128, "ITEM-001", barcodeOptions("ITEM-001", undefined));
+    expect(code128.encodings?.length).toBeGreaterThan(0);
+
+    const ean: { encodings?: unknown[] } = {};
+    JsBarcode(ean, "5901234123457", barcodeOptions("5901234123457", '{"format": "EAN"}'));
+    expect(ean.encodings?.length).toBeGreaterThan(0);
   });
 });
 
@@ -59,13 +73,12 @@ describe("drawPreviewBarcodes", () => {
     const draw = vi.fn((element) => {
       if (element === bad) throw new Error("invalid EAN");
     });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     expect(() => drawPreviewBarcodes(page([bad, good]), draw)).not.toThrow();
 
     expect(good.attributes.width).toBe("100%");
     expect(bad.attributes.width).toBeUndefined();
-    warn.mockRestore();
   });
 
   it("skips an empty value and a page that has not loaded", () => {
