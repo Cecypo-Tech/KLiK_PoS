@@ -4607,7 +4607,7 @@ def _stamp_return_with_refunding_shift(return_doc):
 
 
 @frappe.whitelist()
-def return_sales_invoice(invoice_name):
+def return_sales_invoice(invoice_name, credit_action=None, allow_walkin_credit=0):
 	try:
 		_ensure_return_allowed()
 
@@ -4674,6 +4674,16 @@ def return_sales_invoice(invoice_name):
 
 		return_doc.calculate_taxes_and_totals()
 
+		# The cashier's choice for value that cannot go back as cash is validated BEFORE
+		# anything persists: a throw here leaves no return behind.
+		precision = return_doc.precision("grand_total") or 2
+		prospective_credit = flt(
+			abs(flt(return_doc.rounded_total or return_doc.grand_total)) - flt(refunded_cash), precision
+		)
+		final_credit_action = _validated_credit_action(
+			return_doc.customer, credit_action, allow_walkin_credit, prospective_credit
+		)
+
 		# Whatever was not refunded in cash is credit; allocate it against the original invoice.
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
@@ -4682,7 +4692,16 @@ def return_sales_invoice(invoice_name):
 		_enforce_submit_permission(return_doc)
 		return_doc.submit()
 
-		return {"success": True, "return_invoice": return_doc.name}
+		available_credit = flt(-return_doc.outstanding_amount, precision)
+		return {
+			"success": True,
+			"return_invoice": return_doc.name,
+			"credit": (
+				{"note": return_doc.name, "available": available_credit, "action": final_credit_action}
+				if available_credit > 0
+				else None
+			),
+		}
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Return Invoice Error")
@@ -5265,6 +5284,8 @@ def create_partial_return(
 	return_amount=None,
 	expected_return_amount=None,
 	return_fixed_charges=None,
+	credit_action=None,
+	allow_walkin_credit=0,
 ):
 	"""Create a partial return for selected items from an invoice with custom payment method.
 
@@ -5401,6 +5422,17 @@ def create_partial_return(
 		except Exception:
 			pass
 
+		# The cashier's choice for value that cannot go back as cash is validated BEFORE
+		# anything persists: a throw here leaves no return behind.
+		prospective_precision = return_doc.precision("grand_total") or 2
+		prospective_credit = flt(
+			abs(flt(return_doc.rounded_total or return_doc.grand_total)) - flt(refunded_cash),
+			prospective_precision,
+		)
+		final_credit_action = _validated_credit_action(
+			return_doc.customer, credit_action, allow_walkin_credit, prospective_credit
+		)
+
 		# Whatever was not refunded in cash is credit; allocate it against the original invoice.
 		_allocate_return_against_original(return_doc, original_invoice, refunded_cash)
 
@@ -5427,18 +5459,48 @@ def create_partial_return(
 				return_doc.name, credited_amount
 			)
 
+		available_credit = flt(-return_doc.outstanding_amount, precision)
 		return {
 			"success": True,
 			"return_invoice": return_doc.name,
 			"refunded_amount": flt(refunded_cash, precision),
 			"credited_amount": credited_amount,
 			"payment_method": final_payment_method if refunded_cash > 0 else None,
+			"credit": (
+				{
+					"note": return_doc.name,
+					"available": available_credit,
+					"action": final_credit_action,
+				}
+				if available_credit > 0
+				else None
+			),
 			"message": message,
 		}
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Partial Return Error")
 		return {"success": False, "message": str(e)}
+
+
+def _validated_credit_action(customer, credit_action, allow_walkin_credit, prospective_credit):
+	"""The cashier's choice for return value that cannot go back as cash.
+
+	Named customers keep the credit (default) or exchange now. Walk In may not keep -
+	nobody can prove the credit is theirs later - unless a manager overrides.
+	"""
+	action = credit_action or "keep"
+	if action not in ("keep", "exchange"):
+		frappe.throw(_("Unknown credit action: {0}").format(action))
+	if prospective_credit <= 0:
+		return action
+	if action == "keep" and _is_walkin_customer(customer) and not cint(allow_walkin_credit):
+		frappe.throw(
+			_(
+				"Walk In credit cannot be kept - exchange it now, refund it, or have a manager override."
+			)
+		)
+	return action
 
 
 @frappe.whitelist()
@@ -5454,6 +5516,7 @@ def create_multi_invoice_return(return_data):
 
 		created_returns = []
 		failed = []
+		credits = {}
 
 		for _i, invoice_return in enumerate(invoice_returns):
 			invoice_name = invoice_return.get("invoice_name")
@@ -5469,9 +5532,13 @@ def create_multi_invoice_return(return_data):
 					payment_method=payment_method,
 					return_amount=return_amount,
 					return_fixed_charges=invoice_return.get("return_fixed_charges"),
+					credit_action=invoice_return.get("credit_action") or return_data.get("credit_action"),
+					allow_walkin_credit=return_data.get("allow_walkin_credit") or 0,
 				)
 				if result.get("success"):
 					created_returns.append(result.get("return_invoice"))
+					if result.get("credit"):
+						credits[result["return_invoice"]] = result["credit"]
 				else:
 					failed.append({"invoice_name": invoice_name, "message": result.get("message")})
 
@@ -5489,6 +5556,7 @@ def create_multi_invoice_return(return_data):
 			"success": not failed,
 			"created_returns": created_returns,
 			"failed": failed,
+			"credits": credits,
 			"message": message,
 		}
 
