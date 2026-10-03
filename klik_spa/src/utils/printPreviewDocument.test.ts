@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrintPreviewDocument, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
+import { buildPrintPreviewDocument, parsedPreviewPage, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
 
 describe("buildPrintPreviewDocument", () => {
   it("is a whole document holding the format's style and html", () => {
@@ -41,7 +41,7 @@ describe("buildPrintPreviewDocument", () => {
 
   it("tolerates a missing style or html", () => {
     const doc = buildPrintPreviewDocument(undefined, undefined);
-    expect(doc).toContain("<body>");
+    expect(doc).toContain("<body data-print-preview>");
     expect(doc).not.toContain("undefined");
   });
 });
@@ -98,5 +98,35 @@ describe("previewFrameHeight", () => {
 
   it("is 0 for a page that has not loaded", () => {
     expect(previewFrameHeight(null)).toBe(0);
+  });
+});
+
+describe("parsedPreviewPage", () => {
+  const page = (readyState: string, marked = true) =>
+    ({ readyState, body: { hasAttribute: (name: string) => marked && name === "data-print-preview" } }) as unknown as Document;
+  const frame = (contentDocument: Document | null) => ({ contentDocument }) as HTMLIFrameElement;
+
+  it("is the preview page once its markup is read, before its images load", () => {
+    const parsed = page("interactive");
+    expect(parsedPreviewPage(frame(parsed), null)).toBe(parsed);
+    expect(parsedPreviewPage(frame(page("complete")), null)).not.toBeNull();
+  });
+
+  it("is not a page still being read - its footer may not be there yet", () => {
+    expect(parsedPreviewPage(frame(page("loading")), null)).toBeNull();
+  });
+
+  it("is not the blank page a frame starts on", () => {
+    expect(parsedPreviewPage(frame(page("complete", false)), null)).toBeNull();
+  });
+
+  it("is not the previous invoice's page while the next one is on its way", () => {
+    const previous = page("complete");
+    expect(parsedPreviewPage(frame(previous), previous)).toBeNull();
+  });
+
+  it("is nothing for a frame with no page", () => {
+    expect(parsedPreviewPage(null, null)).toBeNull();
+    expect(parsedPreviewPage(frame(null), null)).toBeNull();
   });
 });

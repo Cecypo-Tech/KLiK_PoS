@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type SyntheticEvent } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { getPrintFormatHTML } from "./getPrintHTML.js";
-import { buildPrintPreviewDocument, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
+import { buildPrintPreviewDocument, parsedPreviewPage, previewFrameHeight, unpinFixedElements } from "./printPreviewDocument";
 import { usePOSProfileStore } from "../stores/posProfileStore.js";
 
 type PrintPreviewProps = {
@@ -73,12 +73,13 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
   const srcDoc = useMemo(() => buildPrintPreviewDocument(html, style), [html, style]);
   const [frameHeight, setFrameHeight] = useState(0);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const waitForPageRef = useRef(0);
 
   // The format is shown in its own document so its CSS and fixed footer stay inside the
   // preview. The frame is as tall as its page; the container scrolls it as before.
-  const fitToContent = useCallback((event: SyntheticEvent<HTMLIFrameElement>) => {
-    const frameDocument = event.currentTarget.contentDocument;
-    const page = frameDocument?.body;
+  const fitToPage = useCallback((frameDocument: Document) => {
+    const page = frameDocument.body;
     if (!page) return;
     unpinFixedElements(frameDocument);
     const fit = () => setFrameHeight(previewFrameHeight(frameDocument));
@@ -89,6 +90,21 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
       resizeObserverRef.current.observe(page);
     }
   }, []);
+
+  // Size the page once it is parsed rather than on load, which waits for the letterhead and
+  // every other image; the observer grows the frame as they arrive.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (loading || !frame) return;
+    const previous = frame.contentDocument;
+    const waitForPage = () => {
+      const page = parsedPreviewPage(frame, previous);
+      if (page) fitToPage(page);
+      else waitForPageRef.current = requestAnimationFrame(waitForPage);
+    };
+    waitForPage();
+    return () => cancelAnimationFrame(waitForPageRef.current);
+  }, [srcDoc, loading, fitToPage]);
 
   useEffect(() => () => resizeObserverRef.current?.disconnect(), []);
 
@@ -102,8 +118,15 @@ export default function PrintPreview({ invoice }: PrintPreviewProps) {
         // No allow-scripts: a format's markup is shown, never run. allow-same-origin lets
         // this page measure the frame and unpin its fixed footer; a link opens a normal tab.
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        ref={frameRef}
         srcDoc={srcDoc}
-        onLoad={fitToContent}
+        // Again on load, which also ends the wait: a page that loaded before the wait began
+        // would otherwise be taken for the previous one and waited on for good.
+        onLoad={(event) => {
+          cancelAnimationFrame(waitForPageRef.current);
+          const page = event.currentTarget.contentDocument;
+          if (page) fitToPage(page);
+        }}
         style={{ height: frameHeight }}
       />
     </div>
