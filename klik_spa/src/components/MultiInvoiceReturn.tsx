@@ -61,7 +61,9 @@ export default function MultiInvoiceReturn({
 
   // The credit router: who the non-cash value belongs to, and what the cashier chose.
   // A multi-invoice exchange ends in the page reload below, so the choice is recorded
-  // on the notes and the fresh credit shows up in the payment dialog by itself.
+  // on the notes; a NAMED customer's fresh credit is then offered by the payment
+  // dialog's own fetch on their next sale (Walk In gets no till choice - see
+  // creditChoices - and needs a manager either way).
   const [returnCustomer, setReturnCustomer] = useState<Customer | null>(null);
   const [creditAction, setCreditAction] = useState<CreditAction | null>(null);
 
@@ -1324,6 +1326,12 @@ export default function MultiInvoiceReturn({
                     <span>{choice === "keep" ? "Keep as customer credit" : "Exchange now"}</span>
                   </label>
                 ))}
+                {!actionChoices.length && (
+                  <span className="text-amber-700 dark:text-amber-400">
+                    Walk In credit cannot be kept or exchanged at the till yet - refund it via
+                    accounts, or have a manager handle it from desk.
+                  </span>
+                )}
               </div>
             )}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -92,6 +92,10 @@ def apply_customer_credit(invoice_name, allocations):
 		pr.party_type = "Customer"
 		pr.party = invoice.customer
 		pr.receivable_payable_account = invoice.debit_to
+		# Name both sides so ERPNext filters server-side: without this, its 50-row
+		# fetch caps can slice a busy customer's credit notes out of the list entirely.
+		pr.payment_name = row["invoice"]
+		pr.invoice_name = invoice_name
 		pr.get_unreconciled_entries()
 		payments = [p.as_dict() for p in pr.payments if p.reference_name == row["invoice"]]
 		invoices = [i.as_dict() for i in pr.invoices if i.invoice_number == invoice_name]
@@ -101,7 +105,9 @@ def apply_customer_credit(invoice_name, allocations):
 		for a in pr.allocation:
 			a.allocated_amount = min(flt(a.allocated_amount, 2), flt(row["amount"], 2))
 		pr.reconcile()
-		applied += flt(row["amount"], 2)
+		# What actually got booked, not what was asked: a concurrently drained note
+		# reconciles less, and the caller reports that honestly.
+		applied += flt(sum(flt(a.allocated_amount) for a in pr.allocation), 2)
 	return {
 		"applied": flt(applied, 2),
 		"journal_entries": [je.name for je in _adjustment_jes(invoice_name) if je.name not in before],

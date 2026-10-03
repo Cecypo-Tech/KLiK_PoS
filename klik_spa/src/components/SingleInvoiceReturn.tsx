@@ -722,7 +722,8 @@ export default function SingleInvoiceReturn({
                 ))}
                 {!actionChoices.length && (
                   <span className="text-amber-700 dark:text-amber-400">
-                    Walk In credit cannot be kept - exchange it from Invoice History or refund via accounts.
+                    Walk In credit cannot be kept or exchanged at the till yet - refund it via
+                    accounts, or have a manager handle it from desk.
                   </span>
                 )}
               </div>

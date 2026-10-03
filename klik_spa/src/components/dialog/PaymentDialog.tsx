@@ -361,7 +361,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setCustomerCredit(null);
       return;
     }
-    fetchCustomerCredit(String(customerId), posCompanyName)
+    const tillCurrency = typeof posDetails?.currency === "string" ? posDetails.currency : undefined;
+    fetchCustomerCredit(String(customerId), posCompanyName, tillCurrency)
       .then((credit) => {
         if (!cancelled) setCustomerCredit(credit);
       })
@@ -371,7 +372,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, selectedCustomer, posCompanyName]);
+  }, [isOpen, selectedCustomer, posCompanyName, posDetails?.currency]);
+
+  // A draft/M-Pesa-order flow starting mid-dialog clears any credit already entered:
+  // those submit paths refuse the tender, so the figures must stop counting it.
+  useEffect(() => {
+    if (!(mpesaOrderName || mpesaDraftInvoiceName)) return;
+    setPaymentAmounts((prev) =>
+      (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
+    );
+  }, [mpesaOrderName, mpesaDraftInvoiceName]);
 
   const isB2B = posDetails?.business_type === "B2B";
   const isB2C = posDetails?.business_type === "B2C";
@@ -711,9 +721,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         idx: mode.idx,
       };
     });
-    // The credit router's pseudo-tender: offered only when the customer holds credit
-    // and this is not a credit sale (paying a credit sale with credit is a contradiction).
-    if (customerCredit && customerCredit.total > 0 && !isCreditSale) {
+    // The credit router's pseudo-tender: offered only when the customer holds credit,
+    // this is not a credit sale (paying a credit sale with credit is a contradiction),
+    // no draft/M-Pesa-order flow is active (those submit paths have no credit wiring),
+    // and no REAL mode of payment shares the name (legacy store-credit setups).
+    const creditFlowActive = Boolean(mpesaOrderName || mpesaDraftInvoiceName);
+    const realModeCollision = modes.some((mode) => mode.mode_of_payment === CUSTOMER_CREDIT_METHOD);
+    if (customerCredit && customerCredit.total > 0 && !isCreditSale && !creditFlowActive && !realModeCollision) {
       const creditLook = getIconAndColor("Default");
       rows.push({
         id: CUSTOMER_CREDIT_METHOD,
@@ -728,7 +742,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       });
     }
     return rows;
-  }, [modes, paymentAmounts, customerCredit, isCreditSale]);
+  }, [modes, paymentAmounts, customerCredit, isCreditSale, mpesaOrderName, mpesaDraftInvoiceName]);
 
   const orderedPaymentMethodIds = useMemo(() => {
     const sortedModes = [...modes].sort((a, b) => {
@@ -907,7 +921,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const adjustedPaymentMethods = Object.entries(paymentAmounts).filter(([, amount]) => amount > 0);
     // Customer credit is not a payment row: it leaves this list, leaves amountPaid,
     // and reaches the server as customerCredit allocations settled after submit.
-    const creditAmount = roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
+    // Draft and M-Pesa-order submits have no credit wiring server-side, so those
+    // flows carry no credit at all - the tender is hidden and zeroed for them too.
+    const creditFlowBlocked = Boolean(
+      mpesaOrderName || mpesaDraftInvoiceName || getOriginalDraftInvoiceId()
+    );
+    const creditAmount = creditFlowBlocked
+      ? 0
+      : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
 
     return {
       items: cartItems.map((item) => {
@@ -1298,8 +1319,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (invoiceSubmitted || isProcessingPayment) return;
     let numericAmount = roundCurrency(parseFloat(amount) || 0);
     if (methodId === CUSTOMER_CREDIT_METHOD) {
-      // The tender can never exceed what the customer's notes actually hold.
-      numericAmount = Math.min(numericAmount, roundCurrency(customerCredit?.total ?? 0));
+      // The tender can never exceed what the notes hold, nor what the sale asks for.
+      numericAmount = Math.min(
+        numericAmount,
+        roundCurrency(customerCredit?.total ?? 0),
+        roundCurrency(Math.max(0, checkoutPayableTotal))
+      );
     }
     setLastModifiedMethodId(methodId);
     setPaymentAmounts((prev) => {

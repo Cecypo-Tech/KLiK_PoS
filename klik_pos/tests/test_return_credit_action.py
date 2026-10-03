@@ -46,6 +46,15 @@ class TestCreditAction(CashOnlyReturnCase):
 		self.assertIn("Walk In credit", result.get("message") or "")
 		self.assertFalse(frappe.get_all("Sales Invoice", {"return_against": invoice.name, "is_return": 1}))
 
+	def test_walkin_exchange_is_also_refused_without_the_override(self):
+		# The till cannot hand a specific note to the next sale yet, so an exchanged
+		# Walk In note would float unclaimed - both routes need the override for now.
+		invoice = self._sale(500, card=500)
+		with patch.object(si, "_is_walkin_customer", return_value=True):
+			result = self._return_with_action(invoice, credit_action="exchange")
+		self.assertFalse(result.get("success"), result)
+		self.assertIn("Walk In credit", result.get("message") or "")
+
 	def test_walkin_keep_passes_with_the_override(self):
 		invoice = self._sale(500, card=500)
 		with patch.object(si, "_is_walkin_customer", return_value=True):

@@ -2432,19 +2432,25 @@ def get_checkout_request_status(checkout_request_id):
 	return response
 
 
-@frappe.whitelist()
 def _apply_checkout_credit(doc, credit_rows):
 	"""Settle validated credit-note allocations right after submit; never undo the sale.
 
 	A stale allocation (the note was spent between validation and here) must not lose
-	the submitted sale: log it and tell the cashier to apply the credit from desk.
+	the submitted sale: log it and tell the cashier to apply the credit from desk. A
+	partial application (a note drained concurrently) is reported as partial.
 	"""
 	result = {"applied": 0.0, "warning": None}
 	if not credit_rows:
 		return result
+	requested = flt(sum(r["amount"] for r in credit_rows), 2)
 	try:
 		applied = apply_customer_credit(doc.name, credit_rows)
 		result["applied"] = applied["applied"]
+		if flt(applied["applied"], 2) < requested:
+			result["warning"] = (
+				"Only part of the customer credit could be applied - settle the rest "
+				"from desk Payment Reconciliation."
+			)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Customer credit not applied")
 		result["warning"] = (
@@ -2454,6 +2460,7 @@ def _apply_checkout_credit(doc, credit_rows):
 	return result
 
 
+@frappe.whitelist()
 def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
 	"""Background worker that submits a queued draft sales invoice."""
 	try:
@@ -2907,11 +2914,12 @@ def parse_invoice_data(data):
 	business_type = data.get("businessType")
 
 	# Customer credit tendered at checkout (open credit notes); validated against the
-	# built document later - here it only counts as money for the tender checks.
+	# built document later - here it only counts as money for the tender checks, at the
+	# same 2dp the validator uses, so a sub-cent row cannot sneak past this gate.
 	credit_total = sum(
-		flt(row.get("amount"))
+		flt(row.get("amount"), 2)
 		for row in (data.get("customerCredit") or [])
-		if isinstance(row, dict)
+		if isinstance(row, dict) and flt(row.get("amount"), 2) > 0
 	)
 
 	# ERPNext owns invoice rounding through rounding_adjustment/rounded_total.
@@ -5494,10 +5502,13 @@ def _validated_credit_action(customer, credit_action, allow_walkin_credit, prosp
 		frappe.throw(_("Unknown credit action: {0}").format(action))
 	if prospective_credit <= 0:
 		return action
-	if action == "keep" and _is_walkin_customer(customer) and not cint(allow_walkin_credit):
+	# Until the till can hand a specific note straight to the next sale, Walk In credit
+	# has no claimable home either way - keep AND exchange both need the override.
+	if _is_walkin_customer(customer) and not cint(allow_walkin_credit):
 		frappe.throw(
 			_(
-				"Walk In credit cannot be kept - exchange it now, refund it, or have a manager override."
+				"Walk In credit cannot be kept or exchanged at the till yet - refund it, "
+				"or have a manager handle it from desk."
 			)
 		)
 	return action
@@ -5741,6 +5752,18 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 	remarks: the checkout's note, applied whether or not `data` comes - an M-Pesa sale paid
 	wholly from receipts sends no cart data, and a note typed after picking them must land.
 	"""
+	# This path has no customer-credit wiring (no validate, no apply). Refusing the
+	# payload outright beats silently dropping a tender the cashier watched being taken.
+	if data:
+		_payload = json.loads(data) if isinstance(data, str) else data
+		if isinstance(_payload, dict) and _payload.get("customerCredit"):
+			frappe.throw(
+				_(
+					"Customer credit cannot be used on this checkout path yet - remove the "
+					"credit tender, or ring the sale as a normal checkout."
+				)
+			)
+
 	draft_touched = False
 	try:
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_id)
