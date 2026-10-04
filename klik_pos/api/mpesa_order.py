@@ -324,7 +324,7 @@ def _receipt_used(push_name):
 
 	The row is locked by name (`transid` has no index, so a locked read by it would lock the whole
 	register): a till that turned it into a Payment Entry a moment ago is seen, and one about to
-	waits for this sale.
+	waits for this sale, then finds the row touched and refuses (mpesa._ensure_receipt_payment_entries).
 	"""
 	transid = frappe.db.get_value(EXPRESS, push_name, "transaction_id")
 	if not transid:
@@ -341,6 +341,8 @@ def _receipt_used(push_name):
 	)
 	if any(row.docstatus != 0 or row.payment_entry for row in rows) or _klik_entry_for_transid(transid):
 		return transid
+	for name in names:
+		frappe.db.set_value(REGISTER, name, "modified", now_datetime(), update_modified=False)
 	return None
 
 

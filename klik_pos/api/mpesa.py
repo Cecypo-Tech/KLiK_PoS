@@ -128,6 +128,24 @@ def _stk_used_transids(transids: list[str]) -> set[str]:
 
 
 
+def _refuse_if_stk_receipt(transid: str | None) -> None:
+	"""Refuse a receipt that is a completed push's own (see _stk_used_transids): that push already
+	paid its sale, or holds it for a klik M-Pesa order still being finished."""
+	if not transid or transid not in _stk_used_transids([transid]):
+		return
+	push = frappe.db.get_value(
+		"Mpesa Express Request",
+		{"transaction_id": transid, "status": "Completed"},
+		["reference_doctype", "reference_name"],
+		as_dict=True,
+	)
+	if push.reference_doctype == "Sales Order":
+		message = _("This M-Pesa payment {0} is held for order {1}.")
+	else:
+		message = _("This M-Pesa payment {0} already paid sale {1}.")
+	frappe.throw(message.format(transid, push.reference_name), title=_("Receipt already used"))
+
+
 def _mpesa_modes() -> set[str]:
 	"""Modes an M-Pesa integration is set up for - whose money must therefore come from a
 	receipt or an STK push: the mode a register URL maps a shortcode to, and the mode ERPNext's
@@ -545,10 +563,16 @@ def _ensure_receipt_payment_entries(invoice) -> dict:
 		# Lock the register row: two tills picking the same new receipt must end up on one
 		# entry, so the second waits here and then finds the entry the first linked.
 		locked = frappe.db.sql(
-			"SELECT payment_entry FROM `tabMpesa C2B Payment Register` WHERE name=%s FOR UPDATE", register
+			"SELECT payment_entry, modified FROM `tabMpesa C2B Payment Register` WHERE name=%s FOR UPDATE", register
 		)
 		linked = locked[0][0] if locked else None
 		_refuse_if_used_meanwhile("Mpesa C2B Payment Register", register, "payment_entry", linked, child.transid)
+		# A push's sale, or an attach, touches the row's `modified` under this lock: changed since
+		# our snapshot means the push check below would read stale data.
+		_refuse_if_used_meanwhile(
+			"Mpesa C2B Payment Register", register, "modified", locked[0][1] if locked else None, child.transid
+		)
+		_refuse_if_stk_receipt(child.transid)
 		existing = linked or child.payment_entry or _klik_entry_for_transid(child.transid)
 		if existing and frappe.db.get_value("Payment Entry", existing, "docstatus") == 1:
 			child.payment_entry = existing

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import get_system_timezone, now_datetime
+from frappe.utils import get_datetime, get_system_timezone, now_datetime
 
 from klik_pos.api import mpesa, mpesa_order, sales_order
 from klik_pos.api.mpesa_order import attach_push_receipt, check_mpesa_push, find_push_receipts
@@ -319,3 +319,88 @@ class TestThePushReceipt(PushCase):
 				self.assertFalse(result["success"])
 				self.assertEqual(result.get("code"), "mpesa_receipt_used", result)
 				self.assertIn(transid, result["error"])
+
+	def _consume(self, register):
+		"""The receipt path a till with a stale search result takes: mint its Payment Entry."""
+		invoice = frappe._dict(
+			custom_mpesa_reconciled_payments=[
+				frappe._dict(
+					mpesa_c2b_payment_register=register,
+					transid=self._transid(register),
+					amount=450,
+					mode_of_payment="Mpesa-Test",
+					payment_entry=None,
+				)
+			]
+		)
+		with patch(
+			"frappe_mpsa_payments.frappe_mpsa_payments.api.payment_entry.create_payment_entry",
+			side_effect=AssertionError("minted a Payment Entry"),
+		):
+			mpesa._ensure_receipt_payment_entries(invoice)
+
+	def _sold(self):
+		"""The push's sale submitted: its invoice records the push and the push names it."""
+		invoice = f"_Test SI {frappe.generate_hash(length=8)}"
+		frappe.get_doc(
+			{"doctype": "Sales Invoice", "name": invoice, "docstatus": 1, "company": COMPANY}
+		).db_insert()
+		frappe.get_doc(
+			{
+				"doctype": "Sales Invoice Payment",
+				"name": frappe.generate_hash(length=10),
+				"parent": invoice,
+				"parenttype": "Sales Invoice",
+				"parentfield": "payments",
+				"mode_of_payment": "Mpesa-Test",
+				"amount": 450,
+				"custom_reference_text": self.push,
+			}
+		).db_insert()
+		frappe.db.set_value(
+			EXPRESS, self.push, {"reference_doctype": "Sales Invoice", "reference_name": invoice}
+		)
+		return invoice
+
+	def _consumed_refusal(self, confirm):
+		receipt = self._receipt()
+		if confirm == "attached":
+			self._attach(receipt)
+		else:
+			frappe.db.set_value(EXPRESS, self.push, "transaction_id", self._transid(receipt))
+		return receipt
+
+	def test_a_push_s_receipt_held_for_its_order_cannot_pay_another_sale(self):
+		for confirm in ("attached", "confirmed by Safaricom"):
+			with self.subTest(confirm=confirm):
+				receipt = self._consumed_refusal(confirm)
+				with self.assertRaisesRegex(frappe.ValidationError, f"held for order {self.order}"):
+					self._consume(receipt)
+				frappe.db.set_value(EXPRESS, self.push, "transaction_id", None)
+
+	def test_a_push_s_receipt_that_paid_its_sale_cannot_pay_another(self):
+		for confirm in ("attached", "confirmed by Safaricom"):
+			with self.subTest(confirm=confirm):
+				receipt = self._consumed_refusal(confirm)
+				invoice = self._sold()
+				with self.assertRaisesRegex(frappe.ValidationError, f"already paid sale {invoice}"):
+					self._consume(receipt)
+				frappe.db.set_value(
+					EXPRESS,
+					self.push,
+					{
+						"transaction_id": None,
+						"reference_doctype": "Sales Order",
+						"reference_name": self.order,
+					},
+				)
+
+	def test_the_push_s_sale_touches_its_receipt_row(self):
+		"""A till that locked the receipt row after this sale then finds it changed and refuses."""
+		receipt = self._receipt()
+		self._attach(receipt)
+		frappe.db.set_value(REGISTER, receipt, "modified", "2000-01-01 00:00:00", update_modified=False)
+
+		self.assertIsNone(mpesa_order._receipt_used(self.push))
+
+		self.assertGreater(frappe.db.get_value(REGISTER, receipt, "modified"), get_datetime("2000-01-02"))
