@@ -18,7 +18,7 @@ from .item_price import (
 from ..sql_builder import apply_sql_permissions
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def apply_pricing_rules_to_cart(cart_items, customer=None):
     try:
         cart_items = _parse_cart_items(cart_items)

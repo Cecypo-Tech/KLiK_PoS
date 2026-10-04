@@ -144,7 +144,7 @@ def get_item_uoms_and_prices(item_code, customer=None):
         }
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_serial_nos_for_item(item_code: str):
     if not item_code:
         return []

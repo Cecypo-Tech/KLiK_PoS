@@ -8,7 +8,7 @@ from klik_pos.klik_pos.utils import get_current_pos_profile
 from .item_price import is_enabled_price_list
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_item_tax_details(item_code, customer=None, qty=1, uom=None):
     """
     Get per-item tax details for cart items, similar to ERPNext's process_item_selection.
