@@ -19,6 +19,7 @@ interface ProductLineViewProps {
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
   stockUnavailable?: boolean
+  lossOfSaleEnabled?: boolean
   quantityBuffer?: string
 }
 
@@ -34,6 +35,7 @@ export default function ProductLineView({
   onItemFocus,
   onItemKeyDown,
   stockUnavailable = false,
+  lossOfSaleEnabled = false,
   quantityBuffer = "",
 }: ProductLineViewProps) {
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null)
@@ -101,6 +103,7 @@ export default function ProductLineView({
                 useItemCodeAsName={useItemCodeAsName}
                 hideImages={hideImages}
                 stockUnavailable={stockUnavailable}
+                lossOfSaleEnabled={lossOfSaleEnabled}
                 showCostColumn={showCostColumn}
                 productColSpan={productColSpan}
                 onAddToCart={onAddToCart}

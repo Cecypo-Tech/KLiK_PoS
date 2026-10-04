@@ -107,7 +107,7 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
       let added = 0;
       for (const entry of plan.toAdd) {
         const code = String(entry.item.id);
-        if (isItemOutOfStock(entry.item as unknown as MenuItem, stockUnavailable)) {
+        if (isItemOutOfStock(entry.item as unknown as MenuItem, stockUnavailable, !!posDetails?.custom_enable_loss_of_sale)) {
           plan.failed.push({ line: entry.line, text: textOf(entry.line), reason: `${code} is out of stock` });
           continue;
         }

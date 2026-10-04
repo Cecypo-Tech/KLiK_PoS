@@ -31,6 +31,7 @@ from klik_pos.api.sales_invoice import (
 	parse_invoice_data,
 	submit_draft_invoice,
 )
+from klik_pos.overrides.loss_of_sale import fold_los_into_quantity
 
 EXPRESS = "Mpesa Express Request"
 REGISTER = "Mpesa C2B Payment Register"
@@ -168,6 +169,8 @@ def save_mpesa_order(data):
 			_enable_background_submission,
 			_loyalty_redemption,
 		) = parse_invoice_data(data)
+		# A Sales Order refuses qty-0 lines: hold what was asked for, as a held order does.
+		fold_los_into_quantity(items)
 
 		cart_meta = sales_order._build_cart_meta(
 			data,

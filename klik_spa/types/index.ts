@@ -40,6 +40,8 @@ export interface CartItem {
   /** Per stock UOM, from the Item. */
   weight_per_unit?: number
   weight_uom?: string
+  /** Asked for but not in stock: recorded on the invoice line as Loss of Sale. */
+  los_qty?: number
 }
 
 export interface TaxTemplate {
@@ -125,6 +127,7 @@ export interface MenuItem {
   price_lists?: PriceListRate[]
   item_group?: string // Item group reference
   is_product_bundle?: boolean
+  has_serial_no?: boolean
   bundle_items?: BundleComponent[]
   is_variant_template?: boolean
   has_variants?: boolean

@@ -21,6 +21,7 @@ interface ProductContextType {
   degraded: boolean;
   degradedReason: string | null;
   stockUnavailable: boolean;
+  lossOfSaleEnabled: boolean;
   
   isLoading: boolean;
   isLoadingMore: boolean;
@@ -104,6 +105,7 @@ export function ProductProvider({ children, posName, initialCustomerId }: Produc
       hideUnavailableItems: p.hideUnavailableItems,
       scalePrefix: p.scalePrefix,
       defaultView: p.defaultView,
+      lossOfSaleEnabled: !!p.posDetails?.custom_enable_loss_of_sale,
     })),
   );
 
