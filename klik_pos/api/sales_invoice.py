@@ -5428,6 +5428,10 @@ def create_partial_return(
 			total_returned_amount = credit_total
 
 		final_return_amount = return_amount if return_amount is not None else total_returned_amount
+		# The till offers the unrounded total (399.90); the note settles at its rounded one (400).
+		# Refunding the former would leave the rounding difference open as a stray voucher.
+		if abs(flt(final_return_amount) - abs(flt(return_doc.grand_total))) < 0.005:
+			final_return_amount = credit_total
 
 		# No mode given: refund through the sale's own cash mode - not a mode assumed to be
 		# named "Cash", which a till may not have.
