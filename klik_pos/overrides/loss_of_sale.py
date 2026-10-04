@@ -121,3 +121,84 @@ def _available(keys, exclude_invoice=None):
 def _refuse_if_nothing_sold(quantities):
 	if quantities and not any(flt(qty) > 0 for qty in quantities):
 		frappe.throw(_("Nothing on this sale is in stock."), title=_("Loss of Sale"))
+
+
+def split_invoice_rows(doc):
+	"""A Sales Invoice's own rows, split in place. Returns one
+	{idx, item_code, from_qty, qty, los_qty} per row it changed; from_qty is what was asked for."""
+	rows = [row for row in doc.items if row.item_code and row.warehouse]
+	eligible = _eligible_item_codes({row.item_code for row in rows})
+	whole = _whole_number_uoms(row.uom for row in rows)
+	picked = [
+		row
+		for row in rows
+		if row.item_code in eligible
+		and not (row.get("serial_and_batch_bundle") or row.get("batch_no") or row.get("serial_no"))
+	]
+	if not picked:
+		return []
+
+	lines = [
+		{
+			"key": (row.item_code, row.warehouse),
+			"requested": flt(row.qty) + flt(row.get(LOS_FIELD)),
+			"factor": flt(row.conversion_factor) or 1,
+			"whole": row.uom in whole,
+		}
+		for row in picked
+	]
+	available = _available({line["key"] for line in lines}, exclude_invoice=None if doc.is_new() else doc.name)
+
+	changes = []
+	for row, line, (qty, los_qty) in zip(picked, lines, split_lines(lines, available)):
+		if qty != flt(row.qty) or los_qty != flt(row.get(LOS_FIELD)):
+			changes.append(
+				{"idx": row.idx, "item_code": row.item_code, "from_qty": line["requested"], "qty": qty, "los_qty": los_qty}
+			)
+		row.qty = qty
+		row.set(LOS_FIELD, los_qty)
+		row.stock_qty = flt(qty * line["factor"])
+	_refuse_if_nothing_sold([row.qty for row in doc.items])
+	return changes
+
+
+def before_validate(doc, method=None):
+	"""Sales Invoice doc_event. On submit of an unpaid stock invoice whose till records Loss of
+	Sale, shorten lines to the stock there is instead of ERPNext refusing with 'units needed'.
+	A paid invoice is left alone: shortening it would leave money unaccounted for."""
+	if doc.get("is_return") or not cint(doc.get("update_stock")):
+		return
+	if (
+		doc.get("_action") == "submit"
+		and not flt(doc.get("paid_amount"))
+		and doc.get("pos_profile")
+		and cint(frappe.db.get_value("POS Profile", doc.pos_profile, PROFILE_FLAG))
+	):
+		changes = split_invoice_rows(doc)
+		if changes:
+			_announce(changes)
+	_allow_los_zero_rows(doc)
+
+
+def _allow_los_zero_rows(doc):
+	"""ERPNext refuses qty-0 lines. One that records Loss of Sale is meant to be there - and has
+	to be allowed on every save, as a background submit reloads the invoice."""
+	zero = [row for row in doc.items if not flt(row.qty)]
+	if zero and all(flt(row.get(LOS_FIELD)) > 0 for row in zero):
+		doc.flags.allow_zero_qty = True
+
+
+def _announce(changes):
+	rows = "".join(
+		"<tr><td>{0}</td><td>{1}</td><td>{2} → {3}</td><td>{4}</td></tr>".format(
+			change["idx"], frappe.bold(change["item_code"]), flt(change["from_qty"]), flt(change["qty"]), flt(change["los_qty"])
+		)
+		for change in changes
+	)
+	frappe.msgprint(
+		"<table class='table table-bordered'><tr><th>{0}</th><th>{1}</th><th>{2}</th><th>{3}</th></tr>{4}</table>".format(
+			_("Row"), _("Item"), _("Qty"), _("Loss of Sale"), rows
+		),
+		title=_("Sold what is in stock"),
+		indicator="orange",
+	)

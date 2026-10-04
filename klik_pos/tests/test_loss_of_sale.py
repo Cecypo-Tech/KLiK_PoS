@@ -191,3 +191,66 @@ class TestLossOfSale(FrappeTestCase):
 		cart = self._cart((STOCKED, 16, 0))
 		self._split(cart)
 		self.assertEqual(self._split(cart), [])
+
+	# Task 3
+
+	def _desk_invoice(self, *rows):
+		invoice = frappe.new_doc("Sales Invoice")
+		invoice.customer = self.customer
+		invoice.company = self.company
+		invoice.pos_profile = self.profile.name
+		invoice.update_stock = 1
+		for code, qty in rows:
+			invoice.append("items", {"item_code": code, "qty": qty, "rate": 100, "warehouse": self.warehouse})
+		invoice.insert(ignore_permissions=True)
+		self.addCleanup(self._drop_invoice, invoice.name)
+		return invoice
+
+	def _ledger(self, invoice):
+		return {
+			row.item_code: row.actual_qty
+			for row in frappe.get_all(
+				"Stock Ledger Entry",
+				filters={"voucher_no": invoice.name, "is_cancelled": 0},
+				fields=["item_code", "actual_qty"],
+			)
+		}
+
+	def test_desk_submit_sells_what_is_in_stock(self):
+		invoice = self._desk_invoice((STOCKED, 16))
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			invoice.submit()
+		self.assertEqual((invoice.items[0].qty, invoice.items[0].custom_los_qty), (10, 6))
+		self.assertEqual(self._ledger(invoice), {STOCKED: -10})
+
+	def test_desk_zero_stock_line_is_kept_without_a_ledger_entry(self):
+		invoice = self._desk_invoice((STOCKED, 4), (EMPTY, 6))
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			invoice.submit()
+		self.assertEqual([(row.qty, row.custom_los_qty) for row in invoice.items], [(4, 0), (0, 6)])
+		self.assertEqual(self._ledger(invoice), {STOCKED: -4})
+
+	def test_desk_with_loss_of_sale_off_still_refuses(self):
+		invoice = self._desk_invoice((STOCKED, 16))
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=0):
+			with self.assertRaises(frappe.ValidationError):
+				invoice.submit()
+
+	def test_desk_sale_with_nothing_in_stock_is_refused(self):
+		invoice = self._desk_invoice((EMPTY, 6))
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			with self.assertRaisesRegex(frappe.ValidationError, "Nothing on this sale is in stock"):
+				invoice.submit()
+
+	def test_a_paid_invoice_is_never_shortened(self):
+		from klik_pos.overrides.loss_of_sale import before_validate
+
+		invoice = frappe.new_doc("Sales Invoice")
+		invoice.update({"customer": self.customer, "company": self.company, "pos_profile": self.profile.name})
+		invoice.update_stock = 1
+		invoice.paid_amount = 50
+		invoice.append("items", {"item_code": STOCKED, "qty": 16, "rate": 100, "warehouse": self.warehouse})
+		invoice._action = "submit"
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			before_validate(invoice)
+		self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
