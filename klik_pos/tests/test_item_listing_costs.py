@@ -63,3 +63,11 @@ class TestSmallerPageCosts(ListingQueryCase):
 		with patch.object(item_stock, "get_current_pos_profile", return_value=profile):
 			stock = item_stock.get_items_stock_batch(",".join(codes))
 		self.assertEqual(stock, {fx.EMPTY: 0, fx.STOCKED: 5})
+
+	def test_the_stock_refresh_reads_the_warehouse_the_till_asks_for(self):
+		profile = frappe._dict(warehouse=fx.WAREHOUSE, hide_unavailable_items=0)
+		with patch.object(item_stock, "get_current_pos_profile", return_value=profile):
+			stock = item_stock.get_items_stock_batch(fx.ELSEWHERE, warehouse=fx.OTHER_WAREHOUSE)
+			home = item_stock.get_items_stock_batch(fx.ELSEWHERE)
+		self.assertEqual(stock, {fx.ELSEWHERE: 5})
+		self.assertEqual(home, {fx.ELSEWHERE: 0})

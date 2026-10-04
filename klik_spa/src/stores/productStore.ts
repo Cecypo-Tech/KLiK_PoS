@@ -117,7 +117,7 @@ async function fetchStockFor(codes: string[]): Promise<Record<string, number>> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': getCSRFToken() ?? '' },
         credentials: 'include',
-        body: JSON.stringify({ item_codes: chunk.join(',') }),
+        body: JSON.stringify({ item_codes: chunk.join(','), warehouse: usePOSProfileStore.getState().warehouse || undefined }),
       });
       if (response.ok) {
         const data = await response.json();

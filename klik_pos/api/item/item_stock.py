@@ -179,9 +179,10 @@ def get_item_stock(item_code):
 
 
 @frappe.whitelist()
-def get_items_stock_batch(item_codes):
+def get_items_stock_batch(item_codes, warehouse=None):
+    # Like get_items: the till may ask for the warehouse it switched to.
     pos_doc = get_current_pos_profile()
-    warehouse = pos_doc.warehouse
+    warehouse = warehouse or pos_doc.warehouse
 
     try:
         item_codes_list = [
