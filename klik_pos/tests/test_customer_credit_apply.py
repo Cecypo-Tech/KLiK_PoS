@@ -140,13 +140,19 @@ class TestWalkInVoucher(FrappeTestCase):
 	def test_without_the_original_it_is_refused(self):
 		note = make_credit_note(CUSTOMER, self.company, 30)
 		sale = self._unsaved_sale(note)
-		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "original sale number"):
+		with (
+			self._as_walkin(),
+			self.assertRaisesRegex(frappe.ValidationError, "enter its original sale number"),
+		):
 			validate_allocations(sale, [{"invoice": note.name, "amount": 10}])
 
 	def test_with_a_wrong_original_it_is_refused(self):
 		note = make_credit_note(CUSTOMER, self.company, 30)
 		sale = self._unsaved_sale(note)
-		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "original sale number"):
+		with (
+			self._as_walkin(),
+			self.assertRaisesRegex(frappe.ValidationError, "enter its original sale number"),
+		):
 			validate_allocations(sale, [{"invoice": note.name, "amount": 10, "original": "POS-WRONG"}])
 
 	def test_a_filter_in_place_of_the_note_number_is_refused(self):
