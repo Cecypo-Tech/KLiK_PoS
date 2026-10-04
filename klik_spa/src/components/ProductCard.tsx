@@ -129,6 +129,9 @@ function ProductCard({
             <img
               src={item.image}
               alt={item.name}
+              height={isMobile ? 96 : 128}
+              loading="lazy"
+              decoding="async"
               className={`w-full object-cover ${isMobile ? "h-24" : "h-32"}`}
               crossOrigin="anonymous"
             />
