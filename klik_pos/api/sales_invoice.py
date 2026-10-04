@@ -2537,6 +2537,11 @@ def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credi
 		# The cashier's shift was valid when this sale was queued; a worker running
 		# after midnight must not refuse it for a shift that is now stale.
 		frappe.flags.klik_processing_queued_invoice = True
+		# The checkout's in-memory voucher marker did not survive the queue: the vouchers
+		# it validated arrive here, and they pay the sale as they did at checkout.
+		credit_sum = flt(sum(flt(r.get("amount")) for r in customer_credit or []), 2)
+		if credit_sum and flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
+			doc._klik_customer_credit = credit_sum
 		try:
 			doc.submit()
 		finally:
@@ -4927,6 +4932,9 @@ class CustomSalesInvoice(SalesInvoice):
 		# Money that arrived as an advance from a Payment Entry - every M-Pesa receipt now -
 		# is paid, even though ERPNext keeps it out of paid_amount.
 		paid_amount = flt(flt(self.paid_amount) + flt(self.total_advance), precision)
+		# A voucher (customer credit) settles the sale right after submit, so it counts as
+		# paid here. Checkout sets the marker only for validated vouchers that cover the sale.
+		paid_amount = flt(paid_amount + flt(getattr(self, "_klik_customer_credit", 0)), precision)
 
 		# A credit sale takes no money at the till by design (loyalty points may still be
 		# redeemed on it) and always has a named customer. A till that allows credit sales

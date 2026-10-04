@@ -21,7 +21,7 @@ from klik_pos.api import customer_credit
 from klik_pos.api import sales_invoice as si
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.tests.credit_fixtures import make_credit_note
-from klik_pos.tests.pos_fixtures import payable_total
+from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode
 
 CUSTOMER = "TEST-CREDIT-ROUTER-CUSTOMER"
 ITEM = "TEST-CREDIT-ROUTER-ITEM"
@@ -66,10 +66,37 @@ def _totals(items):
 	return flt(doc.grand_total, 2), flt(doc.rounded_total, 2)
 
 
+def _ensure_open_shift(profile):
+	"""Checkout refuses a till with no shift open today. Open one inside the test
+	transaction when the site has none, so these tests do not depend on a live shift."""
+	if frappe.get_all(
+		"POS Opening Entry", filters={"pos_profile": profile.name, "docstatus": 1, "status": "Open"}
+	):
+		return
+	entry = frappe.new_doc("POS Opening Entry")
+	entry.period_start_date = frappe.utils.now()
+	entry.posting_date = frappe.utils.nowdate()
+	entry.company = profile.company
+	entry.pos_profile = profile.name
+	entry.user = "Administrator"
+	entry.append(
+		"balance_details",
+		{
+			"mode_of_payment": pick_payment_mode(profile.name),
+			"opening_amount": 0,
+			"custom_variance_reason": "test fixture: shift opened with an empty drawer",
+		},
+	)
+	entry.insert(ignore_permissions=True)
+	entry.submit()
+
+
 class TestCheckoutWithCredit(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		self.company = get_current_pos_profile().company
+		profile = get_current_pos_profile()
+		self.company = profile.company
+		_ensure_open_shift(profile)
 		_ensure_customer()
 		_ensure_service_item()
 		self.items = [{"id": ITEM, "quantity": 1, "price": 80, "uom": "Nos"}]
@@ -132,6 +159,61 @@ class TestCheckoutWithCredit(FrappeTestCase):
 			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
 			0.0,
 		)
+
+	def _no_partial_payment(self):
+		"""A till that refuses part payment and credit sales: only a fully paid sale submits."""
+		name = get_current_pos_profile().name
+		fields = ["allow_partial_payment", "custom_allow_credit_sales_as_pos"]
+		before = frappe.db.get_value("POS Profile", name, fields, as_dict=True)
+
+		def restore():
+			frappe.db.set_value("POS Profile", name, before)
+			frappe.clear_document_cache("POS Profile", name)
+
+		self.addCleanup(restore)
+		frappe.db.set_value("POS Profile", name, dict.fromkeys(fields, 0))
+		frappe.clear_document_cache("POS Profile", name)
+
+	def test_a_voucher_pays_the_whole_sale_on_a_till_without_part_payment(self):
+		self._no_partial_payment()
+		note = self._note(200)
+		result = self._checkout([{"invoice": note.name, "amount": self.total}])
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+
+	def test_a_queued_voucher_sale_submits_on_a_till_without_part_payment(self):
+		"""The worker loads the draft afresh, so the voucher it was handed must count as paid."""
+		self._no_partial_payment()
+		note = self._note(200)
+		rows = [{"invoice": note.name, "amount": self.total}]
+		with patch.object(si.frappe, "enqueue"):
+			queued = si.create_and_submit_invoice(
+				{
+					"customer": {"id": CUSTOMER},
+					"items": self.items,
+					"businessType": "B2C",
+					"amountPaid": 0,
+					"paymentMethods": [],
+					"customerCredit": rows,
+					"enable_background_invoice_submission": 1,
+				}
+			)
+		self.assertTrue(queued.get("success"), queued)
+		result = si.process_queued_sales_invoice(queued["invoice_name"], customer_credit=rows)
+		self.assertTrue(result.get("success"), result)
+		doc = frappe.get_doc("Sales Invoice", queued["invoice_name"])
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(flt(doc.outstanding_amount, 2), 0.0)
+
+	def test_a_voucher_short_of_the_sale_is_still_refused_without_part_payment(self):
+		self._no_partial_payment()
+		note = self._note(200)
+		result = self._checkout([{"invoice": note.name, "amount": flt(self.total - 10, 2)}])
+		self.assertFalse(result.get("success"), result)
+		self.assertIn("Partial Payment", result.get("message") or "")
 
 	def test_a_walkin_voucher_pays_with_its_original_number(self):
 		note = self._note(200)

@@ -393,13 +393,14 @@ export default function SingleInvoiceReturn({
                         <span>{formatCurrencyWithSymbol(totalReturnAmount, currency)}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span>Paid Amount:</span>
-                        <span>{formatCurrencyWithSymbol(returnAmount, currency)}</span>
+                        <span>Refund to customer:</span>
+                        <span>{formatCurrencyWithSymbol(cashRefundAmount, currency)}</span>
                       </div>
+                      {/* Nothing is written off: what is not refunded stays on the credit note. */}
                       <div className="flex justify-between items-center">
-                        <span className="text-orange-600 dark:text-red-400 font-semibold">Write-off:</span>
+                        <span className="text-orange-600 dark:text-red-400 font-semibold">Left as customer credit:</span>
                         <span className="text-orange-600 dark:text-red-400 font-semibold">
-                          {formatCurrencyWithSymbol(totalReturnAmount - returnAmount, currency)}
+                          {formatCurrencyWithSymbol(creditNoteAmount, currency)}
                         </span>
                       </div>
                     </div>
