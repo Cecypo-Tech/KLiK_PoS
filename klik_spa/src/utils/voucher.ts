@@ -155,11 +155,15 @@ export function vouchersBlockMpesaReason(appliedCount: number): string | null {
     : null;
 }
 
-/** A sale's vouchers belong to its customer: once the customer changes, they start over. */
+/**
+ * A sale's vouchers belong to its customer: once the customer changes, they start over. Not
+ * after submit - printing the receipt empties the cart, customer and all, behind it.
+ */
 export function customerChangeDropsVouchers(
   previousId: string | null,
   nextId: string | null,
   appliedCount: number,
+  submitted = false,
 ): boolean {
-  return appliedCount > 0 && previousId !== null && previousId !== nextId;
+  return !submitted && appliedCount > 0 && previousId !== null && previousId !== nextId;
 }

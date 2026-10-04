@@ -420,13 +420,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   useEffect(() => {
     const previous = voucherCustomerRef.current;
     voucherCustomerRef.current = saleCustomerId;
-    if (!customerChangeDropsVouchers(previous, saleCustomerId, appliedVouchers.length)) return;
+    if (!customerChangeDropsVouchers(previous, saleCustomerId, appliedVouchers.length, invoiceSubmitted)) return;
     setAppliedVouchers([]);
     setPaymentAmounts((prev) =>
       (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
     );
     toast.info("Vouchers removed: the sale's customer changed.");
-  }, [saleCustomerId, appliedVouchers.length]);
+  }, [saleCustomerId, appliedVouchers.length, invoiceSubmitted]);
 
   const isB2B = posDetails?.business_type === "B2B";
   const isB2C = posDetails?.business_type === "B2C";
@@ -2230,7 +2230,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
   // A non-cash overpay greys Submit while Change Due still reads green: say why by the button.
-  const submitHint = voucherOverpay > 0 ? submitBlockReason() : null;
+  const submitHint = !invoiceSubmitted && voucherOverpay > 0 ? submitBlockReason() : null;
 
   // A paid STK push submits the sale by itself - once per push request, and only when the
   // push alone settles the server's total (see stkAutoSubmitDecision).
@@ -3579,7 +3579,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   </span>
                 </div>
               </label>
-              {submitHint && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
               <div className="flex items-center gap-3">
                <ActionButtons
                   invoiceSubmitted={invoiceSubmitted}
@@ -3597,6 +3596,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             </div>
           </div>
+          {submitHint && <p className="mt-2 text-right text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
         </div>
 
     </div>

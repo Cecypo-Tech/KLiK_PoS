@@ -180,6 +180,10 @@ describe("customerChangeDropsVouchers", () => {
   it("has nothing to drop without vouchers", () => {
     expect(customerChangeDropsVouchers("A", "B", 0)).toBe(false);
   });
+
+  it("keeps a submitted sale's vouchers when printing empties the cart behind its receipt", () => {
+    expect(customerChangeDropsVouchers("A", null, 1, true)).toBe(false);
+  });
 });
 
 describe("netOfChange", () => {
