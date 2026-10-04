@@ -1589,6 +1589,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             return {
               id: code,
               quantity: item.quantity,
+              los_qty: item.los_qty ?? 0,
               price: getEffectiveItemRate(item),
               uom: item.uom || "Nos",
               discountPercentage: discountData.discountPercentage || 0,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useCartStore } from "../../stores/cartStore";
+import { isQtyUnchanged } from "../../utils/lossOfSale";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
 import { extractErrorFromException } from "../../utils/errorExtraction";
@@ -360,6 +361,7 @@ export default function OrderSummary({
   const cartWeight = getCartNetWeight(cartItems);
 
   const handleUpdateQuantity = (id: string, quantity: number) => {
+    if (isQtyUnchanged(cartItems.find((line) => line.id === id), quantity)) return;
     if (quantity <= 0) {
       removeItem(id);
     } else {

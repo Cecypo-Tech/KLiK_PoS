@@ -53,5 +53,10 @@ export function applyLosAdjustments<T extends { id: string; item_code?: string; 
   });
 }
 
+/** A qty box left without an edit reports the line's own quantity back. The store reads that as
+ * a fresh request, which would drop the line's Loss of Sale (or delete a 0-qty LoS line). */
+export const isQtyUnchanged = (line: { quantity: number } | undefined, quantity: number) =>
+  !!line && line.quantity === quantity;
+
 export const losToast = (name: string, uom: string | undefined, split: LineSplit) =>
   `Only ${split.quantity} ${uom || "units"} of ${name} in stock: ${split.los_qty} recorded as Loss of Sale`;
