@@ -6,6 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from klik_pos.tests.pos_fixtures import pos_profile_settings
 from klik_pos.setup.pos_profile_fields import install_los_qty_field, install_pos_profile_feature_fields
 
 ITEM_GROUP = "TEST-LOS-GROUP"
@@ -142,3 +143,51 @@ class TestLossOfSale(FrappeTestCase):
 		):
 			row = get_available_stock_map(keys)[(STOCKED, self.warehouse)]
 		self.assertEqual((row.actual_qty, row.reserved_qty, row.available_qty), (10, 4, 6))
+
+	# Task 2
+
+	def _cart(self, *lines):
+		return [
+			{"id": code, "quantity": qty, "los_qty": los, "uom": "Nos", "bundle_entries": []}
+			for code, qty, los in lines
+		]
+
+	def _split(self, cart, enabled=1):
+		from klik_pos.overrides.loss_of_sale import split_cart_items
+
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=enabled):
+			return split_cart_items(cart, frappe.get_doc("POS Profile", self.profile.name))
+
+	def test_the_till_sells_what_is_in_stock(self):
+		cart = self._cart((STOCKED, 16, 0))
+		changes = self._split(cart)
+		self.assertEqual((cart[0]["quantity"], cart[0]["los_qty"]), (10, 6))
+		self.assertEqual(changes, [{"index": 0, "item_code": STOCKED, "quantity": 10, "los_qty": 6}])
+
+	def test_with_loss_of_sale_off_nothing_changes(self):
+		cart = self._cart((STOCKED, 16, 0), (STOCKED, 2, 3))
+		self.assertEqual(self._split(cart, enabled=0), [])
+		self.assertEqual([(i["quantity"], i["los_qty"]) for i in cart], [(16, 0), (2, 0)])
+
+	def test_an_item_with_no_stock_stays_as_a_zero_line(self):
+		cart = self._cart((STOCKED, 4, 0), (EMPTY, 6, 0))
+		self._split(cart)
+		self.assertEqual([(i["quantity"], i["los_qty"]) for i in cart], [(4, 0), (0, 6)])
+
+	def test_a_sale_with_nothing_in_stock_is_refused(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "Nothing on this sale is in stock"):
+			self._split(self._cart((EMPTY, 6, 0)))
+
+	def test_reserved_stock_is_not_offered(self):
+		cart = self._cart((STOCKED, 16, 0))
+		with patch(
+			"klik_pos.api.sales_invoice.get_reserved_stock_map",
+			return_value={(STOCKED, self.warehouse): 4},
+		):
+			self._split(cart)
+		self.assertEqual((cart[0]["quantity"], cart[0]["los_qty"]), (6, 10))
+
+	def test_splitting_twice_changes_nothing_the_second_time(self):
+		cart = self._cart((STOCKED, 16, 0))
+		self._split(cart)
+		self.assertEqual(self._split(cart), [])
