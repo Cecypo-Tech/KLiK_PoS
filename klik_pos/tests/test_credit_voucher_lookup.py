@@ -113,3 +113,6 @@ class TestVoucherLookup(FrappeTestCase):
 		self.assertEqual(lookup_credit_voucher({"name": note.name}, note.return_against), NO_MATCH)
 		self.assertEqual(lookup_credit_voucher(note.name, ["x"]), NO_MATCH)
 		self.assertEqual(lookup_credit_voucher(note.name, {"x": 1}), NO_MATCH)
+
+	def test_the_lookup_answers_post_only(self):
+		self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[lookup_credit_voucher], ["POST"])

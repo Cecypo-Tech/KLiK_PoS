@@ -2,10 +2,15 @@ import type { Customer } from "../types/customer";
 import { transformCustomerInfo } from "../utils/transformCustomerInfo";
 import type { VoucherLookup } from "../utils/voucher";
 
-/** What a store-credit voucher holds, by its credit note number plus the original sale's. */
+const csrf = () => (window as { csrf_token?: string }).csrf_token as string;
+
+/** What a store-credit voucher holds, by its credit note number plus the original sale's.
+POST keeps both numbers out of the URL, and so out of proxy and edge access logs. */
 export async function lookupCreditVoucher(creditNote: string, originalInvoice: string): Promise<VoucherLookup> {
-  const params = new URLSearchParams({ credit_note: creditNote, original_invoice: originalInvoice });
-  const response = await fetch(`/api/method/klik_pos.api.customer_credit.lookup_credit_voucher?${params.toString()}`, {
+  const response = await fetch("/api/method/klik_pos.api.customer_credit.lookup_credit_voucher", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": csrf() },
+    body: JSON.stringify({ credit_note: creditNote, original_invoice: originalInvoice }),
     credentials: "include",
   });
   if (response.status === 429) {

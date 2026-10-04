@@ -59,7 +59,7 @@ def _same_number(typed, actual):
 	return bool(actual) and typed.strip().upper() == actual.strip().upper()
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 @rate_limit(limit=30, seconds=60)
 def lookup_credit_voucher(credit_note, original_invoice):
 	"""What a store-credit voucher holds: its credit note number plus the original sale's.
