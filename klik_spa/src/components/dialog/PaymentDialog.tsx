@@ -2339,7 +2339,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const mpesaReceiptsOpen =
     mpesaFlow?.source === "c2b" ? (mpesaFlow.c2bPayments ?? []).reduce((sum, payment) => sum + payment.amount, 0) : 0;
-  const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" ? Number(mpesaFlow.amount || 0) : 0;
+  const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" && mpesaFlow.transactionId ? Number(mpesaFlow.amount || 0) : 0;
   const mpesaUncovered = uncoveredMpesa(getActiveMpesaPayment()?.amount || 0, mpesaReceiptsOpen, mpesaStkDone);
 
   // An overpay with vouchers applied that no cash row can take as change would be booked
