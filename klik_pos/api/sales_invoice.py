@@ -499,6 +499,23 @@ def _negate_actual_charges(return_doc):
 			tax.tax_amount = -1 * flt(tax.tax_amount)
 
 
+def _negate_order_discount(return_doc, original_invoice):
+	"""Reverse the order discount on a credit note, the way ERPNext's make_return_doc does.
+
+	The mapper copies discount_amount positive, which calculate_taxes_and_totals subtracts
+	from the negative items: a sale of 560 discounted to 11.20 came back as a 1,108.80 credit.
+	A partial return takes the discount's share of the value it brings back. Call it once
+	the return's item quantities are final."""
+	original_total = flt(original_invoice.total)
+	if not flt(return_doc.discount_amount) or not original_total:
+		return
+	returned = sum(abs(flt(item.qty)) * flt(item.rate) for item in return_doc.items)
+	return_doc.discount_amount = -flt(
+		flt(original_invoice.discount_amount) * returned / original_total,
+		return_doc.precision("discount_amount"),
+	)
+
+
 def _returns_every_line(original_invoice, return_doc):
 	"""True when this return alone brings back every quantity on the original invoice."""
 	sold = {}
@@ -4660,6 +4677,7 @@ def return_sales_invoice(invoice_name):
 
 		for item in return_doc.items:
 			item.qty = -abs(item.qty)
+		_negate_order_discount(return_doc, original_invoice)
 
 		_stamp_return_with_refunding_shift(return_doc)
 
@@ -5346,6 +5364,7 @@ def create_partial_return(
 						break
 
 		return_doc.items = filtered_items
+		_negate_order_discount(return_doc, original_invoice)
 		if return_fixed_charges is None:
 			reverse_fee = _returns_every_line(original_invoice, return_doc) and not _reversed_fixed_charges(
 				[invoice_name]
@@ -5361,14 +5380,17 @@ def create_partial_return(
 		return_doc.payments = []
 
 		# Calculate total returned amount (baseline expected refund)
-		# Prefer client-provided expected amount; fallback to backend computation
+		# Prefer client-provided expected amount; fallback to the credit note's own total, which
+		# carries the discount and taxes a bare qty * rate would miss.
+		return_doc.calculate_taxes_and_totals()
+		credit_total = abs(flt(return_doc.rounded_total or return_doc.grand_total))
 		if expected_return_amount is not None:
 			try:
 				total_returned_amount = flt(expected_return_amount, return_doc.precision("grand_total") or 2)
 			except Exception:
-				total_returned_amount = sum(abs(item.qty * item.rate) for item in return_doc.items)
+				total_returned_amount = credit_total
 		else:
-			total_returned_amount = sum(abs(item.qty * item.rate) for item in return_doc.items)
+			total_returned_amount = credit_total
 
 		final_return_amount = return_amount if return_amount is not None else total_returned_amount
 
