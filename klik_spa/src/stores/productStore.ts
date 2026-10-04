@@ -4,6 +4,8 @@ import { toast } from 'react-toastify';
 import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
+import { applyStockUpdates, chunkCodes, stockRefreshCodes } from '../utils/stockRefresh';
+import { getCSRFToken } from '../utils/csrf';
 import { resolveNextOffset } from '../utils/pagination';
 import { expandTaxProfiles } from '../utils/productPayload';
 import { createKeyedDedupe, firstPageKey, listingIncludesGroups, pageAdvanced, SEARCH_PAGE_SIZE, type PageCursor } from '../utils/productLoading';
@@ -46,6 +48,7 @@ interface ProductStoreState {
   clearSearch: () => void;
   setCategory: (category: string) => void;
   refreshStockOnly: () => Promise<boolean>;
+  refreshStockNow: () => Promise<boolean>;
   updateStockOnly: (itemCode: string, newStock: number) => void;
   updateStockForItems: (itemCodes: string[]) => Promise<void>;
   searchCustomers: (query: string) => Promise<Customer[]>;
@@ -92,6 +95,7 @@ interface ProductStoreState {
 const PAGE_SIZE = 250;
 const LOAD_MORE_SIZE = 150;
 const CACHE_DURATION = 5 * 60 * 1000;
+const STOCK_REFRESH_CHUNK = 200;
 let currentPosName = '';
 let refreshTimers: Array<ReturnType<typeof setInterval>> = [];
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -102,6 +106,33 @@ type FirstPage = Awaited<ReturnType<ProductStoreState['fetchProductsFromAPI']>>;
 // Startup has several triggers (profile load, customer sync, price list); overlapping
 // loads of the same first page share one request.
 const dedupeFirstPage = createKeyedDedupe<FirstPage>();
+
+/** POST so a long list of item codes never outgrows a URL. */
+async function fetchStockFor(codes: string[]): Promise<Record<string, number>> {
+  const merged: Record<string, number> = {};
+  for (const chunk of chunkCodes(codes, STOCK_REFRESH_CHUNK)) {
+    try {
+      const response = await fetch('/api/method/klik_pos.api.item.item_stock.get_items_stock_batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': getCSRFToken() ?? '' },
+        credentials: 'include',
+        body: JSON.stringify({ item_codes: chunk.join(',') }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        Object.assign(merged, data?.message || {});
+      }
+    } catch (error) {
+      console.error('Stock update failed:', error);
+    }
+  }
+  return merged;
+}
+
+// Refreshes run one at a time; a call that arrives meanwhile shares one follow-up run (so the
+// post-sale refresh is never lost) and resolves after it.
+let stockRefreshRun: Promise<boolean> | null = null;
+let stockRefreshQueued: Promise<boolean> | null = null;
 
 export const useProductStore = create<ProductStoreState>()(
   persist(
@@ -263,24 +294,11 @@ export const useProductStore = create<ProductStoreState>()(
       },
 
       fetchStockUpdates: async () => {
-        const { products } = get();
-        if (products.length === 0) return {};
-        
-        try {
-          const itemCodes = products.slice(0, 100).map(p => p.id).join(',');
-          const response = await fetch(
-            `/api/method/klik_pos.api.item.item_stock.get_items_stock_batch?item_codes=${encodeURIComponent(itemCodes)}&pos_profile=${encodeURIComponent(currentPosName)}`
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            return data?.message || {};
-          }
-          return {};
-        } catch (error) {
-          console.error('Stock update failed:', error);
-          return {};
-        }
+        // Every loaded stock item, not just the first 100: pages loaded by scrolling used to
+        // keep their first stock figure until the next full reload.
+        const codes = stockRefreshCodes(get().products);
+        if (codes.length === 0) return {};
+        return fetchStockFor(codes);
       },
 
       initializePOS: async (posName: string, customerId = '') => {
@@ -702,24 +720,30 @@ export const useProductStore = create<ProductStoreState>()(
         }
       },
 
-      refreshStockOnly: async () => {
+      refreshStockOnly: () => {
+        if (!stockRefreshRun) {
+          stockRefreshRun = get().refreshStockNow().finally(() => { stockRefreshRun = null; });
+          return stockRefreshRun;
+        }
+        if (!stockRefreshQueued) {
+          stockRefreshQueued = stockRefreshRun.then(() => {
+            stockRefreshQueued = null;
+            return get().refreshStockOnly();
+          });
+        }
+        return stockRefreshQueued;
+      },
+
+      refreshStockNow: async () => {
         set({ isRefreshingStock: true });
-        
+
         try {
           const stockUpdates = await get().fetchStockUpdates();
-          
-          if (Object.keys(stockUpdates).length > 0) {
-            set(state => ({
-              products: state.products.map(product => ({
-                ...product,
-                available: stockUpdates[product.id] ?? product.available
-              })),
-              lastUpdated: new Date(),
-              isRefreshingStock: false,
-            }));
+          const products = applyStockUpdates(get().products, stockUpdates);
+          if (products !== get().products) {
+            set({ products, lastUpdated: new Date(), isRefreshingStock: false });
             return true;
           }
-          
           set({ isRefreshingStock: false });
           return false;
         } catch (error) {
@@ -739,27 +763,11 @@ export const useProductStore = create<ProductStoreState>()(
 
       updateStockForItems: async (itemCodes: string[]) => {
         if (itemCodes.length === 0) return;
-        
-        try {
-          const itemCodesString = itemCodes.join(',');
-          const response = await fetch(
-            `/api/method/klik_pos.api.item.item_stock.get_items_stock_batch?item_codes=${encodeURIComponent(itemCodesString)}&pos_profile=${encodeURIComponent(currentPosName)}`
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            const stockUpdates = data?.message || {};
-            
-            set(state => ({
-              products: state.products.map(product => ({
-                ...product,
-                available: stockUpdates[product.id] ?? product.available
-              }))
-            }));
-          }
-        } catch (error) {
-          console.error('Failed to update stock for items:', error);
-        }
+        const stockUpdates = await fetchStockFor(itemCodes);
+        set((state) => {
+          const products = applyStockUpdates(state.products, stockUpdates);
+          return products === state.products ? state : { products };
+        });
       },
 
       searchCustomers: async (query: string) => {
@@ -861,10 +869,12 @@ export const useProductStore = create<ProductStoreState>()(
           }
         }, 30000);
         
+        // No timed reload of the list: it threw the cashier back to page 1 and re-downloaded
+        // the first page every 5 minutes. Stock refreshes in place (above); the list itself
+        // reloads on real triggers - category, search, customer, price list, profile change.
+        // The category bar's counts are cheap to keep fresh.
         const fullRefreshInterval = setInterval(() => {
-          const { searchQuery, isLoading } = get();
-          if (document.visibilityState === 'visible' && !searchQuery && !isLoading) {
-            get().fetchProducts(true);
+          if (document.visibilityState === 'visible') {
             void get().fetchItemGroups();
           }
         }, CACHE_DURATION);
