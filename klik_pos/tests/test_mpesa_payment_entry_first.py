@@ -73,7 +73,9 @@ class MpesaFirstCase(FrappeTestCase):
 			posting_date=posting_date, do_not_save=True,
 		)
 		invoice.set_posting_time = 1
-		invoice.posting_time = "10:00:00"
+		# A sale dated today must not sit later than now: a return stamped now is refused
+		# ("Posting timestamp must be after ...") whenever the suite runs before 10:00.
+		invoice.posting_time = "00:00:00" if str(posting_date) == frappe.utils.nowdate() else "10:00:00"
 		invoice.set("payments", [])
 		invoice.insert(ignore_permissions=True)
 		return invoice
