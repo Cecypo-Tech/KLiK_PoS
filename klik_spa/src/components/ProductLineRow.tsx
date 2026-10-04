@@ -20,6 +20,7 @@ interface ProductLineRowProps {
   useItemCodeAsName: boolean
   hideImages: boolean
   stockUnavailable: boolean
+  lossOfSaleEnabled: boolean
   showCostColumn: boolean
   productColSpan: string
   onAddToCart: (item: MenuItem) => void
@@ -41,6 +42,7 @@ function ProductLineRow({
   useItemCodeAsName,
   hideImages,
   stockUnavailable,
+  lossOfSaleEnabled,
   showCostColumn,
   productColSpan,
   onAddToCart,
@@ -52,7 +54,7 @@ function ProductLineRow({
   const [showZoom, setShowZoom] = useState(false)
 
   const isServiceItem = item.is_stock_item === false
-  const isOutOfStock = isItemOutOfStock(item, stockUnavailable)
+  const isOutOfStock = isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled)
   const isDisabled = isOutOfStock || scannerOnly
   const expectedPrice = Number(item.price_with_vat ?? item.price)
   const basePrice = Number(item.price || 0)

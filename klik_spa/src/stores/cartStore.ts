@@ -8,6 +8,7 @@ import { clearDraftInvoiceCache } from '../utils/draftInvoiceCache'
 import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
+import { applyLosAdjustments, losToast, planLineQty, type LosAdjustment } from '../utils/lossOfSale'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
@@ -49,6 +50,16 @@ const hasFiniteAvailableStock = (item: { available?: number; is_stock_item?: boo
   }
   return typeof item.available === 'number' && Number.isFinite(item.available);
 };
+
+const losEnabledFor = (item: { has_serial_no?: boolean; is_product_bundle?: boolean }) =>
+  !!usePOSProfileStore.getState().posDetails?.custom_enable_loss_of_sale &&
+  !item.has_serial_no &&
+  !item.is_product_bundle;
+
+const sameItemQty = (items: CartItem[], code: string, exceptId?: string) =>
+  items
+    .filter((cartItem) => cartItem.id !== exceptId && (cartItem.item_code || cartItem.id) === code)
+    .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
 
 const fetchItemTaxDetails = async (
   itemCode: string,
@@ -138,6 +149,7 @@ interface CartState {
   ) => Promise<string | null>
   updateQuantity: (id: string, quantity: number) => Promise<void>
   adjustQuantity: (id: string, delta: number) => Promise<void>
+  applyCheckoutLosAdjustments: (adjustments: LosAdjustment[]) => Promise<void>
   updateUOM: (id: string, uom: string, price: number, conversionFactor?: number) => Promise<void>
   removeItem: (id: string) => void
   clearCart: () => void
@@ -313,23 +325,32 @@ export const useCartStore = create<CartState>()(
           .filter((cartItem) => (cartItem.item_code || cartItem.id) === incomingCode)
           .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
 
-        if (hasFiniteAvailableStock(item) && item.available <= 0) {
+        const limited = hasFiniteAvailableStock(item);
+        const losEnabled = losEnabledFor(item);
+        if (limited && item.available <= 0 && !losEnabled) {
           toast.error(`${item.name} is out of stock`);
           return;
         }
 
         if (existingItem) {
-          if (hasFiniteAvailableStock(item) && totalMatchingQty >= item.available) {
+          const plan = planLineQty({
+            limited,
+            available: item.available ?? 0,
+            requested: existingItem.quantity + (existingItem.los_qty ?? 0) + 1,
+            otherLinesQty: totalMatchingQty - existingItem.quantity,
+            losEnabled,
+          });
+          if (!plan) {
             toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
             return;
           }
+          if (plan.los_qty > (existingItem.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
 
           const targetId = existingItem.id;
-          const updatedQty = existingItem.quantity + 1;
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
             customerId,
-            updatedQty,
+            plan.quantity || 1,
             existingItem.uom || item.uom,
           );
 
@@ -338,7 +359,8 @@ export const useCartStore = create<CartState>()(
               cartItem.id === targetId
                 ? {
                     ...cartItem,
-                    quantity: updatedQty,
+                    quantity: plan.quantity,
+                    los_qty: plan.los_qty,
                     item_tax_template: taxDetails.item_tax_template,
                     item_tax_rate: taxDetails.item_tax_rate,
                     tax_templates: taxDetails.tax_templates,
@@ -353,6 +375,16 @@ export const useCartStore = create<CartState>()(
             };
           });
         } else {
+          const plan = planLineQty({
+            limited,
+            available: item.available ?? 0,
+            requested: 1,
+            otherLinesQty: totalMatchingQty,
+            losEnabled,
+          });
+          if (!plan) return;
+          if (plan.los_qty > 0) toast.warning(losToast(item.name, item.uom, plan));
+
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
             customerId,
@@ -361,8 +393,9 @@ export const useCartStore = create<CartState>()(
           );
 
           const newItem = {
-            ...item, 
-            quantity: 1,
+            ...item,
+            quantity: plan.quantity,
+            los_qty: plan.los_qty,
             bundle_entries: [],
             item_tax_template: taxDetails.item_tax_template,
             item_tax_rate: taxDetails.item_tax_rate,
@@ -403,25 +436,28 @@ export const useCartStore = create<CartState>()(
           .filter((cartItem) => (cartItem.item_code || cartItem.id) === incomingCode)
           .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
 
-        if (hasFiniteAvailableStock(item) && item.available < quantity) {
+        const plan = planLineQty({
+          limited: hasFiniteAvailableStock(item),
+          available: item.available ?? 0,
+          requested: existingItem ? existingItem.quantity + (existingItem.los_qty ?? 0) + quantity : quantity,
+          otherLinesQty: totalMatchingQty - (existingItem?.quantity ?? 0),
+          losEnabled: losEnabledFor(item),
+        });
+        if (!plan) {
           toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
           return null;
         }
+        if (plan.los_qty > (existingItem?.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
 
         let lineId: string;
         if (existingItem) {
-          if (hasFiniteAvailableStock(item) && (totalMatchingQty + quantity) > item.available) {
-            toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
-            return null;
-          }
-
           const targetId = existingItem.id;
           lineId = targetId;
-          const updatedQty = existingItem.quantity + quantity;
+          const updatedQty = plan.quantity;
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
             customerId,
-            updatedQty,
+            updatedQty || 1,
             existingItem.uom || item.uom,
           );
 
@@ -431,6 +467,7 @@ export const useCartStore = create<CartState>()(
                 ? {
                     ...cartItem,
                     quantity: updatedQty,
+                    los_qty: plan.los_qty,
                     item_tax_template: taxDetails.item_tax_template,
                     item_tax_rate: taxDetails.item_tax_rate,
                     tax_templates: taxDetails.tax_templates,
@@ -448,13 +485,14 @@ export const useCartStore = create<CartState>()(
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
             customerId,
-            quantity,
+            plan.quantity || 1,
             item.uom,
           );
 
           const newItem = {
-            ...item, 
-            quantity,
+            ...item,
+            quantity: plan.quantity,
+            los_qty: plan.los_qty,
             bundle_entries: [],
             item_tax_template: taxDetails.item_tax_template,
             item_tax_rate: taxDetails.item_tax_rate,
@@ -487,14 +525,23 @@ export const useCartStore = create<CartState>()(
         }
 
         const item = state.cartItems.find((cartItem) => cartItem.id === id);
-        if (item && hasFiniteAvailableStock(item) && quantity > item.available) {
+        if (!item) return;
+        const plan = planLineQty({
+          limited: hasFiniteAvailableStock(item),
+          available: item.available ?? 0,
+          requested: quantity,
+          otherLinesQty: sameItemQty(state.cartItems, item.item_code || item.id, id),
+          losEnabled: losEnabledFor(item),
+        });
+        if (!plan) {
           toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
           return;
         }
+        if (plan.los_qty > (item.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
 
         set({
-          cartItems: state.cartItems.map((item) =>
-            item.id === id ? { ...item, quantity } : item
+          cartItems: state.cartItems.map((cartItem) =>
+            cartItem.id === id ? { ...cartItem, quantity: plan.quantity, los_qty: plan.los_qty } : cartItem
           )
         });
 
@@ -510,26 +557,45 @@ export const useCartStore = create<CartState>()(
         const item = state.cartItems.find((cartItem) => cartItem.id === id);
         if (!item) return;
 
-        const newQuantity = item.quantity + delta;
+        const requested = item.quantity + (item.los_qty ?? 0) + delta;
 
-        if (newQuantity <= 0) {
+        if (requested <= 0) {
           get().removeItem(id);
           return;
         }
 
-        if (hasFiniteAvailableStock(item) && newQuantity > item.available) {
+        const plan = planLineQty({
+          limited: hasFiniteAvailableStock(item),
+          available: item.available ?? 0,
+          requested,
+          otherLinesQty: sameItemQty(state.cartItems, item.item_code || item.id, id),
+          losEnabled: losEnabledFor(item),
+        });
+        if (!plan) {
           toast.warning(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available.`);
           return;
         }
+        if (plan.los_qty > (item.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
 
         set((s) => ({
           cartItems: s.cartItems.map((cartItem) =>
-            cartItem.id === id ? { ...cartItem, quantity: newQuantity } : cartItem
+            cartItem.id === id ? { ...cartItem, quantity: plan.quantity, los_qty: plan.los_qty } : cartItem
           ),
           highlightItemId: id,
           highlightNonce: s.highlightNonce + 1,
         }));
 
+        await get().refreshCartPricing();
+      },
+
+      applyCheckoutLosAdjustments: async (adjustments) => {
+        if (!adjustments?.length) return;
+        set((s) => ({ cartItems: applyLosAdjustments(s.cartItems, adjustments) }));
+        toast.warning(
+          adjustments.length === 1
+            ? `Stock changed: 1 line shortened, the rest recorded as Loss of Sale`
+            : `Stock changed: ${adjustments.length} lines shortened, the rest recorded as Loss of Sale`,
+        );
         await get().refreshCartPricing();
       },
 

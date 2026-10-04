@@ -12,6 +12,7 @@ from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority
 from .loyalty import (
@@ -1030,6 +1031,36 @@ def get_reserved_qty_for_item_warehouse(item_code, warehouse, exclude_invoice=No
 	return flt(reserved_map.get((item_code, warehouse), 0))
 
 
+def get_available_stock_map(keys, exclude_invoice=None):
+	"""{(item_code, warehouse): actual_qty, reserved_qty, available_qty} for each key - available
+	being net of Stock Reservation Entries, the figure both the oversell refusal and Loss of Sale
+	measure against. A key with no Bin has none."""
+	keys = set(keys)
+	if not keys:
+		return {}
+	bins = frappe.get_all(
+		"Bin",
+		filters={
+			"item_code": ["in", list({key[0] for key in keys})],
+			"warehouse": ["in", list({key[1] for key in keys})],
+		},
+		fields=["item_code", "warehouse", "actual_qty"],
+	)
+	actual_map = {(row.item_code, row.warehouse): flt(row.actual_qty or 0) for row in bins}
+	reserved_map = get_reserved_stock_map(
+		item_codes=list({key[0] for key in keys}),
+		exclude_invoice=exclude_invoice,
+	)
+	stock = {}
+	for key in keys:
+		actual_qty = flt(actual_map.get(key, 0))
+		reserved_qty = flt(reserved_map.get(key, 0))
+		stock[key] = frappe._dict(
+			actual_qty=actual_qty, reserved_qty=reserved_qty, available_qty=flt(actual_qty - reserved_qty)
+		)
+	return stock
+
+
 def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 	"""Validate available stock, net of anything held by Stock Reservation Entries.
 
@@ -1061,8 +1092,6 @@ def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 		}
 
 	required_qty_map = {}
-	item_codes = set()
-	warehouses = set()
 
 	for row in doc.items:
 		if not row.item_code or not row.warehouse:
@@ -1082,29 +1111,17 @@ def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 
 		key = (row.item_code, row.warehouse)
 		required_qty_map[key] = flt(required_qty_map.get(key, 0) + required_qty)
-		item_codes.add(row.item_code)
-		warehouses.add(row.warehouse)
 
 	if not required_qty_map:
 		return
 
-	bins = frappe.get_all(
-		"Bin",
-		filters={"item_code": ["in", list(item_codes)], "warehouse": ["in", list(warehouses)]},
-		fields=["item_code", "warehouse", "actual_qty"],
-	)
-	actual_qty_map = {(row.item_code, row.warehouse): flt(row.actual_qty or 0) for row in bins}
-
-	reserved_map = get_reserved_stock_map(
-		item_codes=list(item_codes),
-		exclude_invoice=exclude_invoice,
-	)
+	stock = get_available_stock_map(required_qty_map.keys(), exclude_invoice=exclude_invoice)
 
 	insufficient = []
 	for key, required_qty in required_qty_map.items():
-		actual_qty = flt(actual_qty_map.get(key, 0))
-		reserved_qty = flt(reserved_map.get(key, 0))
-		available_qty = flt(actual_qty - reserved_qty)
+		actual_qty = stock[key].actual_qty
+		reserved_qty = stock[key].reserved_qty
+		available_qty = stock[key].available_qty
 
 		if required_qty > available_qty + 1e-9:
 			insufficient.append(
@@ -1963,6 +1980,9 @@ def validate_checkout_invoice(data):
 			loyalty_redemption,
 		) = parse_invoice_data(data)
 
+		# Before payment: shorten lines to the stock there is and tell the till what changed.
+		los_adjustments = split_cart_items(items, _get_active_pos_profile())
+
 		preview_doc = build_sales_invoice_doc(
 			customer,
 			items,
@@ -2024,6 +2044,7 @@ def validate_checkout_invoice(data):
 		result = {
 			"success": True,
 			"message": "Checkout validation passed",
+			"los_adjustments": los_adjustments,
 			"tax_preview": {
 				"tax_breakdown": tax_breakdown,
 				# The receipt renders lines from the cart and totals from this document.
@@ -2243,6 +2264,13 @@ def _queue_sales_invoice(data, source_order=None):
 			frappe.throw("Customer is required")
 		if not items or len(items) == 0:
 			frappe.throw("At least one item is required")
+
+		if not flt(amount_paid) and not loyalty_redemption and not data.get("customerCredit"):
+			# Nothing taken yet (a credit sale). The preview split the cart the cashier showed;
+			# if stock has moved since, billing a different split would go unseen - refuse it.
+			# A paid sale is not re-split at all: its money was taken against the preview.
+			if split_cart_items(items, _get_active_pos_profile()):
+				frappe.throw(_("Stock changed since checkout - review the cart."))
 
 		doc = build_sales_invoice_doc(
 			customer,
@@ -2883,6 +2911,8 @@ def parse_invoice_data(data):
 			"discountAmount": discount_amount,
 			# The cashier's own wording for this line, from the cart's pen dialog.
 			"description": (item.get("description") or "").strip(),
+			# Asked for but not in stock: Loss of Sale, recorded on the invoice line.
+			"los_qty": max(flt(item.get("los_qty") or 0), 0),
 		})
 
 		price = flt(item.get("price") or 0)
@@ -4213,6 +4243,11 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	# Only when the cashier wrote one: set_missing_values fills the Item's own otherwise.
 	if item.get("description"):
 		item_data["description"] = item.get("description")
+	if flt(item.get("los_qty")) > 0 and cint(pos_profile.get(LOS_PROFILE_FLAG)):
+		item_data["custom_los_qty"] = flt(item.get("los_qty"))
+		if not flt(item.get("quantity")):
+			# set_missing_values fills a missing stock_qty with 1, which stock checks would count.
+			item_data["stock_qty"] = 0
 
 	# Resolve per-item tax fields using ERPNext item selection logic.
 	item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(doc, item, pos_profile)

@@ -45,12 +45,11 @@ export default function ProductGrid({
   totalCount = 0,
   isSearching = false,
 }: ProductGridProps) {
-  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery } = useProduct();
+  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery, lossOfSaleEnabled } = useProduct();
   // Actions only: subscribing to the whole cart redrew the grid on every cart change.
   // Cart contents are read at keypress time (handleItemKeyDown) instead.
   const addToCartWithQuantity = useCartStore((s) => s.addToCartWithQuantity);
-  const updateQuantity = useCartStore((s) => s.updateQuantity);
-  const removeItem = useCartStore((s) => s.removeItem);
+  const adjustQuantity = useCartStore((s) => s.adjustQuantity);
   const toggleItemExpansion = useCartStore((s) => s.toggleItemExpansion);
   const requestCustomRate = useCartStore((s) => s.requestCustomRate);
   const { posDetails } = usePOSProfileStore();
@@ -113,10 +112,10 @@ export default function ProductGrid({
   const inStockItems = useMemo(
     () => (
       hideUnavailableItems && !stockUnavailable
-        ? filteredItems.filter((item) => !isItemOutOfStock(item, stockUnavailable))
+        ? filteredItems.filter((item) => !isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled))
         : filteredItems
     ),
-    [filteredItems, hideUnavailableItems, stockUnavailable],
+    [filteredItems, hideUnavailableItems, stockUnavailable, lossOfSaleEnabled],
   );
 
   // inStockItems is a fresh array identity every render — productStore's
@@ -185,7 +184,7 @@ export default function ProductGrid({
   }, [addConcreteItemToCart]);
 
   const handleAddToCart = useCallback(async (item: MenuItem, quantity = 1) => {
-    if (isItemOutOfStock(item, stockUnavailable)) return;
+    if (isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled)) return;
     if (scannerOnly) return;
 
     if (requiresSalespersonPin) {
@@ -208,7 +207,7 @@ export default function ProductGrid({
     }
 
     await addItemToCart(item, quantity);
-  }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable]);
+  }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable, lossOfSaleEnabled]);
 
   const openPricePopup = useCallback(async (rowIndex: number, item: MenuItem) => {
     const warehouse = posDetails?.warehouse || "";
@@ -412,11 +411,7 @@ export default function ProductGrid({
       setQuantityBuffer('');
       const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
       if (cartItem) {
-        if (cartItem.quantity <= step) {
-          removeItem(cartItem.id);
-        } else {
-          void updateQuantity(cartItem.id, cartItem.quantity - step);
-        }
+        void adjustQuantity(cartItem.id, -step);
       }
     } else if (e.key === '.') {
       const { cartItems, expandedCartItemId } = useCartStore.getState();
@@ -438,7 +433,7 @@ export default function ProductGrid({
       e.preventDefault();
       void openPricePopup(index, item);
     }
-  }, [handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, toggleItemExpansion, adjustQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
@@ -517,6 +512,7 @@ export default function ProductGrid({
         )}
         <ProductLineView
           stockUnavailable={stockUnavailable}
+          lossOfSaleEnabled={lossOfSaleEnabled}
           items={inStockItems}
           onAddToCart={handleCardAdd}
           isMobile={isMobile}
@@ -646,6 +642,7 @@ export default function ProductGrid({
         {inStockItems.map((item, i) => (
           <ProductCard
             stockUnavailable={stockUnavailable}
+            lossOfSaleEnabled={lossOfSaleEnabled}
             key={item.id}
             item={item}
             onAddToCart={handleCardAdd}

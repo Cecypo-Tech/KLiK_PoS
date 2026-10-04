@@ -136,6 +136,18 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "1",
         "module": "KLiK PoS",
     },
+    {
+        "fieldname": "custom_enable_loss_of_sale",
+        "label": "Record Loss of Sale",
+        "fieldtype": "Check",
+        "insert_after": "custom_use_item_code_as_display_name",
+        "description": (
+            "When a cashier asks for more than is in stock, sell what is in stock and record "
+            "the rest on the invoice line as LoS Qty (Loss of Sale) instead of refusing the line."
+        ),
+        "default": "0",
+        "module": "KLiK PoS",
+    },
 ]
 
 
@@ -564,6 +576,36 @@ def ensure_sales_order_remarks():
         frappe.log_error(frappe.get_traceback(), "klik_pos: Sales Order remarks field install failed")
 
 
+LOS_QTY_FIELD = {
+    "fieldname": "custom_los_qty",
+    "label": "LoS Qty",
+    "fieldtype": "Float",
+    "insert_after": "qty",
+    "read_only": 1,
+    "in_list_view": 1,
+    "columns": 1,
+    "no_copy": 1,
+    "print_hide": 1,
+    "description": "Asked for but not in stock: recorded as Loss of Sale.",
+    "module": "KLiK PoS",
+}
+
+
+def install_los_qty_field():
+    """LoS Qty on Sales Invoice Item. Returns True when created."""
+    if frappe.db.exists("Custom Field", {"dt": "Sales Invoice Item", "fieldname": LOS_QTY_FIELD["fieldname"]}):
+        return False
+    create_custom_fields({"Sales Invoice Item": [LOS_QTY_FIELD]}, update=True)
+    return True
+
+
+def ensure_los_qty_field():
+    try:
+        install_los_qty_field()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "klik_pos: LoS Qty field install failed")
+
+
 def ensure_pos_profile_feature_fields():
     """Hook entrypoint for after_migrate / after_install. Never abort on failure."""
     try:
@@ -575,3 +617,4 @@ def ensure_pos_profile_feature_fields():
     ensure_pos_closing_entry_invoice_table()
     ensure_opening_entry_variance_fields()
     ensure_sales_order_remarks()
+    ensure_los_qty_field()

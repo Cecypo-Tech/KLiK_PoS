@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { CartItem } from "../../../types";
+import { qtyToSend } from "../../utils/lossOfSale";
 
 interface QuantityInputProps {
   item: CartItem;
@@ -16,6 +17,7 @@ export const QuantityInput = ({
 }: QuantityInputProps) => {
   const [inputValue, setInputValue] = useState(item.quantity.toString());
   const [isEditing, setIsEditing] = useState(false);
+  const edited = useRef(false);
 
   useEffect(() => {
     if (!isEditing) {
@@ -25,12 +27,19 @@ export const QuantityInput = ({
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
+    edited.current = true;
     setInputValue(value);
   };
 
   const handleBlur = () => {
     setIsEditing(false);
-    const numValue = Number(inputValue);
+    const typed = qtyToSend(edited.current, Number(inputValue));
+    edited.current = false;
+    if (typed === null) {
+      setInputValue(item.quantity.toString());
+      return;
+    }
+    const numValue = typed;
 
     if (isNaN(numValue) || numValue <= 0) {
       setInputValue(item.quantity.toString());
@@ -44,6 +53,7 @@ export const QuantityInput = ({
   };
 
   const handleFocus = () => {
+    edited.current = false;
     setIsEditing(true);
   };
 

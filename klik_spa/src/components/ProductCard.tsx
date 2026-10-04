@@ -21,6 +21,7 @@ interface ProductCardProps {
   onFocused?: (index: number) => void;
   onKeyboardAction?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void;
   stockUnavailable?: boolean;
+  lossOfSaleEnabled?: boolean;
   quantityBuffer?: string;
 }
 
@@ -36,12 +37,13 @@ function ProductCard({
   onFocused,
   onKeyboardAction,
   stockUnavailable = false,
+  lossOfSaleEnabled = false,
   quantityBuffer = "",
 }: ProductCardProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const isServiceItem = item.is_stock_item === false;
-  const isOutOfStock = isItemOutOfStock(item, stockUnavailable);
+  const isOutOfStock = isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled);
   const isDisabled = isOutOfStock || scannerOnly;
   const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0;
   const variantCount = item.is_variant_template ? item.variant_count || 0 : 0;
