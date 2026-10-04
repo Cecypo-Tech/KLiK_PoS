@@ -96,6 +96,12 @@ export const useCustomerForm = (customer: Customer | null | undefined, prefilled
       try {
         const groupsData = await getCustomerGroups();
         setCustomerGroups(groupsData);
+        // The default must be a group the server accepts: a Group-type one is refused on save.
+        setFormData((prev: any) =>
+          groupsData.length && !groupsData.some((g: { name: string }) => g.name === prev.customer_group)
+            ? { ...prev, customer_group: groupsData[0].name }
+            : prev
+        );
         setLoadingGroups(false);
 
         const territoriesData = await getTerritories();
@@ -327,7 +333,11 @@ export const useCustomerForm = (customer: Customer | null | undefined, prefilled
       onClose();
     } catch (error) {
       console.error("Customer save error:", error);
-      setSubmitError(error instanceof Error ? error.message : "Failed to save customer. Please try again.");
+      const message = error instanceof Error ? error.message : "Failed to save customer. Please try again.";
+      setSubmitError(message);
+      // Outline the field the server named, so the cashier sees what to change.
+      const field = /customer group/i.test(message) ? "customer_group" : /territory/i.test(message) ? "territory" : null;
+      if (field) setErrors((prev) => ({ ...prev, [field]: message }));
     } finally {
       setIsSubmitting(false);
     }

@@ -156,8 +156,8 @@ export default function AddCustomerModal({
     <div className={isFullPage ? "h-full" : "fixed inset-0 bg-black/70 bg-opacity-50 flex items-center justify-center p-4 z-50"}>
       <div className={isFullPage ? "h-full bg-white dark:bg-gray-800 flex flex-col" : "bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto"}>
         {!isFullPage && (
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">
               {isEditing ? "Edit Customer" : "Add New Customer"}
             </h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
@@ -167,7 +167,7 @@ export default function AddCustomerModal({
         )}
 
         <form onSubmit={onSubmit} className={isFullPage ? "flex-1 flex flex-col" : "flex flex-col h-full"}>
-          <div className={isFullPage ? "flex-1 p-6 space-y-6 overflow-y-auto" : "flex-1 p-6 space-y-6 overflow-y-auto"}>
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto">
             {showCustomerTypeSelector ? (
               <CustomerTypeSelector
                 customerType={formData.customer_type}
@@ -175,8 +175,8 @@ export default function AddCustomerModal({
                 availableTypes={getAvailableCustomerTypes()}
               />
             ) : (
-              <div className="mb-3 sm:mb-6">
-                <div className="bg-beveren-50 dark:bg-beveren-900/20 border-2 border-beveren-500 rounded-lg p-2.5 sm:p-4">
+              <div>
+                <div className="bg-beveren-50 dark:bg-beveren-900/20 border-2 border-beveren-500 rounded-lg p-2 sm:p-2.5">
                   <div className="flex items-center">
                     {formData.customer_type === "company" ? <Building size={18} className="text-beveren-600 mr-3 sm:size-6" /> : <User size={18} className="text-beveren-600 mr-3 sm:size-6" />}
                     <div>
@@ -272,19 +272,19 @@ export default function AddCustomerModal({
               </div>
             )}
 
-            {submitError && (
-              <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-lg">
-                {submitError}
-              </div>
-            )}
           </div>
 
-          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-6">
-            <div className="flex justify-end">
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+            <div className="flex items-center justify-end gap-3">
+              {submitError && (
+                <p role="alert" className="mr-auto text-sm text-red-600 dark:text-red-400">
+                  {submitError}
+                </p>
+              )}
               <button
                 type="submit"
                 disabled={isSubmitting || !canSaveCustomer()}
-                className={`px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 ${
+                className={`flex-shrink-0 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 ${
                   isSubmitting || !canSaveCustomer() ? "opacity-50 cursor-not-allowed" : ""
                 }`}
               >

@@ -4,6 +4,7 @@ import frappe
 from erpnext.setup.utils import get_exchange_rate
 from erpnext.accounts.party import get_party_details
 from frappe import _
+from frappe.utils.nestedset import get_descendants_of
 
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.api.loyalty import get_customer_loyalty_summary
@@ -537,39 +538,23 @@ def get_customer_groups():
     try:
         pos_profile = get_current_pos_profile()
 
-        # Check if POS profile has customer groups configured
+        # Only leaf groups: ERPNext refuses to save a customer under a Group-type one. A
+        # profile that lists a group node offers the leaves beneath it.
+        filters = {"is_group": 0}
         if hasattr(pos_profile, "customer_groups") and pos_profile.customer_groups:
-            customer_group_names = [
-                d.customer_group
-                for d in pos_profile.customer_groups
-                if d.customer_group
-            ]
+            allowed = set()
+            for d in pos_profile.customer_groups:
+                if d.customer_group:
+                    allowed.add(d.customer_group)
+                    allowed.update(get_descendants_of("Customer Group", d.customer_group))
+            filters["name"] = ["in", list(allowed)]
 
-            customer_groups = frappe.get_all(
-                "Customer Group",
-                filters={"name": ["in", customer_group_names]},
-                fields=["name", "customer_group_name"],
-                order_by="customer_group_name asc",
-            )
-        else:
-            customer_groups = frappe.get_all(
-                "Customer Group",
-                fields=["name", "customer_group_name"],
-                order_by="customer_group_name asc",
-            )
-
-        # Check if "All Customer Groups" already exists, if not add it
-        has_all_groups = any(
-            group["name"] == "All Customer Groups" for group in customer_groups
+        customer_groups = frappe.get_all(
+            "Customer Group",
+            filters=filters,
+            fields=["name", "customer_group_name"],
+            order_by="customer_group_name asc",
         )
-        if not has_all_groups:
-            customer_groups.insert(
-                0,
-                {
-                    "name": "All Customer Groups",
-                    "customer_group_name": "All Customer Groups",
-                },
-            )
 
         return {"success": True, "data": customer_groups}
     except Exception as e:

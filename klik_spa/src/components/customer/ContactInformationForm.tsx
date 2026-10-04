@@ -29,26 +29,26 @@ export const ContactInformationForm: React.FC<ContactInformationFormProps> = ({
   const isCompany = customerType === "company";
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-        <Mail size={20} className="mr-2" />
+    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center">
+        <Mail size={16} className="mr-2" />
         Contact Information
         <span className="text-sm font-normal text-gray-500 ml-2">
           (At least one required)
         </span>
       </h3>
       
-      <div className="space-y-4">
+      <div className="space-y-2">
         {isCompany && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5">
               Contact Name <span className="text-red-500 ml-1">*</span>
             </label>
             <input
               type="text"
               value={formData.contactName}
               onChange={(e) => onChange("contactName", e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+              className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
                 errors.contactName ? "border-red-500" : "border-gray-300"
               }`}
               placeholder="Enter contact person name"
@@ -57,9 +57,9 @@ export const ContactInformationForm: React.FC<ContactInformationFormProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5">
               Email Address
               {isEmailRequired && <span className="text-red-500 ml-1">*</span>}
             </label>
@@ -67,7 +67,7 @@ export const ContactInformationForm: React.FC<ContactInformationFormProps> = ({
               type="email"
               value={formData.email}
               onChange={(e) => onChange("email", e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+              className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
                 errors.email || errors.contact ? "border-red-500" : "border-gray-300"
               }`}
               placeholder="customer@email.com"
@@ -76,7 +76,7 @@ export const ContactInformationForm: React.FC<ContactInformationFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5">
               Phone Number
               {isPhoneRequired && <span className="text-red-500 ml-1">*</span>}
             </label>
@@ -85,7 +85,7 @@ export const ContactInformationForm: React.FC<ContactInformationFormProps> = ({
               defaultCountry={(countryOptions.find(c => c.label === (formData.address.country || ""))?.value as any) || ""}
               value={formData.phone}
               onChange={(value: string | undefined) => onChange("phone", value || "")}
-              className={`w-full flex flex-row px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:text-white ${
+              className={`w-full flex flex-row px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:text-white ${
                 errors.phone ? "border-red-500" : "border-gray-300 dark:border-gray-600"
               }`}
             />

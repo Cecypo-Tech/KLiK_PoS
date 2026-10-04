@@ -29,7 +29,7 @@ export const MissingFieldsRenderer: React.FC<MissingFieldsRendererProps> = ({
 
   const renderField = (field: MissingField) => {
     const hasError = showError(field.fieldname);
-    const commonClasses = `w-full px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+    const commonClasses = `w-full px-3 py-1.5 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
       hasError ? 'border-red-500 border' : 'border border-gray-300 dark:border-gray-600'
     }`;
 
@@ -162,12 +162,12 @@ export const MissingFieldsRenderer: React.FC<MissingFieldsRendererProps> = ({
   };
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center">
         <span className="mr-2">📋</span>
         Additional Required Fields
       </h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2">
         {missingFields.map((field) => (
           <div 
             key={field.fieldname} 
@@ -177,7 +177,7 @@ export const MissingFieldsRenderer: React.FC<MissingFieldsRendererProps> = ({
                 : ''
             }
           >
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5">
               {field.label}
               <span className="text-red-500 ml-1">*</span>
             </label>

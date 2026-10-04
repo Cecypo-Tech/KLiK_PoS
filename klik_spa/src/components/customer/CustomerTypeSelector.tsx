@@ -19,14 +19,14 @@ export const CustomerTypeSelector: React.FC<CustomerTypeSelectorProps> = ({
   availableTypes,
 }) => {
   return (
-    <div className="mb-3 sm:mb-6">
-      <div className="grid grid-cols-2 gap-2 sm:gap-4">
+    <div>
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {availableTypes.map((type) => {
           const IconComponent = type.icon;
           return (
             <label
               key={type.value}
-              className={`relative flex items-center gap-2 p-2.5 sm:p-4 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-700 ${
+              className={`relative flex items-center gap-2 p-2 sm:p-2.5 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-700 ${
                 customerType === type.value
                   ? "border-beveren-500 bg-beveren-50 dark:bg-beveren-900/20"
                   : "border-gray-200 dark:border-gray-600"
