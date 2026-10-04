@@ -147,3 +147,19 @@ export function vouchersBlockedReason(state: {
   if (state.editingDraft) return "this sale is finishing an older draft";
   return null;
 }
+
+/** Vouchers and M-Pesa are not combined yet: the M-Pesa order and draft paths settle no credit. */
+export function vouchersBlockMpesaReason(appliedCount: number): string | null {
+  return appliedCount > 0
+    ? "Vouchers can't be combined with M-Pesa yet - remove them, or take the rest in cash or card."
+    : null;
+}
+
+/** A sale's vouchers belong to its customer: once the customer changes, they start over. */
+export function customerChangeDropsVouchers(
+  previousId: string | null,
+  nextId: string | null,
+  appliedCount: number,
+): boolean {
+  return appliedCount > 0 && previousId !== null && previousId !== nextId;
+}

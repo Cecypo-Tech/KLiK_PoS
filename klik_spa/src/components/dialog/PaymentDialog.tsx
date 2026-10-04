@@ -45,10 +45,12 @@ import {
   addVoucher,
   appliedTotal,
   capVouchers,
+  customerChangeDropsVouchers,
   labelVoucherAmounts,
   netOfChange,
   voucherApplyAmount,
   vouchersBlockedReason,
+  vouchersBlockMpesaReason,
   type AppliedVoucher,
 } from "../../utils/voucher";
 import { cashRefundModes } from "../../utils/returnModes";
@@ -410,6 +412,21 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     );
     toast.info(`Vouchers removed: ${vouchersBlocked}.`);
   }, [vouchersBlocked, appliedVouchers.length]);
+
+  // Applied vouchers belong to the sale's customer: a new customer starts them over rather than
+  // Submit refusing them. The panel keeps a looked-up voucher, so "Switch sale" then Apply works.
+  const saleCustomerId = selectedCustomer?.id || selectedCustomer?.name || null;
+  const voucherCustomerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = voucherCustomerRef.current;
+    voucherCustomerRef.current = saleCustomerId;
+    if (!customerChangeDropsVouchers(previous, saleCustomerId, appliedVouchers.length)) return;
+    setAppliedVouchers([]);
+    setPaymentAmounts((prev) =>
+      (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
+    );
+    toast.info("Vouchers removed: the sale's customer changed.");
+  }, [saleCustomerId, appliedVouchers.length]);
 
   const isB2B = posDetails?.business_type === "B2B";
   const isB2C = posDetails?.business_type === "B2C";
@@ -1116,6 +1133,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.error("Kindly select a customer");
       return false;
     }
+    // Checked before ensureMpesaOrder: an M-Pesa order drops the vouchers, and the customer
+    // would then owe what they covered on top of the push.
+    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
+    if (voucherReason) {
+      toast.error(voucherReason);
+      return false;
+    }
     if (!phoneNumber.trim()) {
       toast.error("Phone number is required for M-Pesa STK push");
       return false;
@@ -1223,6 +1247,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (stkLockedMethod) {
       // Receipts would replace the push's row and flow, orphaning money already asked for.
       toast.error("An M-Pesa push is pending or paid on this sale - receipts can't be added to it.");
+      return;
+    }
+    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
+    if (voucherReason) {
+      toast.error(voucherReason);
       return;
     }
     if (!selectedCustomer?.id && !selectedCustomer?.name) {
@@ -2170,14 +2199,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" ? Number(mpesaFlow.amount || 0) : 0;
   const mpesaUncovered = uncoveredMpesa(getActiveMpesaPayment()?.amount || 0, mpesaReceiptsOpen, mpesaStkDone);
 
+  // An overpay with vouchers applied that no cash row can take as change would be booked
+  // as paid: the cashier reduces the non-cash row instead.
+  const voucherOverpay = tenderNetOfChange(
+    vouchersBlocked ? 0 : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0)
+  ).unabsorbed;
+
   const submitBlockReason = () => {
     const originalHeldOrderId = getOriginalHeldOrderId();
     const heldOrderApproval = originalHeldOrderId ? getOriginalHeldOrderApproval() : null;
-    // An overpay with vouchers applied that no cash row can take as change would be booked
-    // as paid: the cashier reduces the non-cash row instead.
-    const voucherOverpay = tenderNetOfChange(
-      vouchersBlocked ? 0 : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0)
-    ).unabsorbed;
     return paymentBlockReason({
       invoiceSubmitted,
       isProcessingPayment,
@@ -2199,6 +2229,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   };
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
+  // A non-cash overpay greys Submit while Change Due still reads green: say why by the button.
+  const submitHint = voucherOverpay > 0 ? submitBlockReason() : null;
 
   // A paid STK push submits the sale by itself - once per push request, and only when the
   // push alone settles the server's total (see stkAutoSubmitDecision).
@@ -3192,6 +3224,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       <span>{getActionButtonText()}</span>
                     )}
                   </button>
+                  {submitHint && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
                   {hasActiveMpesaPayment && (
                     <button
                       type="button"
@@ -3546,6 +3579,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   </span>
                 </div>
               </label>
+              {submitHint && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
               <div className="flex items-center gap-3">
                <ActionButtons
                   invoiceSubmitted={invoiceSubmitted}

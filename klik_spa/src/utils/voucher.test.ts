@@ -3,6 +3,7 @@ import {
   addVoucher,
   appliedTotal,
   capVouchers,
+  customerChangeDropsVouchers,
   isUsable,
   labelVoucherAmounts,
   netOfChange,
@@ -10,6 +11,7 @@ import {
   voucherCustomerRule,
   voucherStatusLabel,
   vouchersBlockedReason,
+  vouchersBlockMpesaReason,
 } from "./voucher";
 
 const money = (value: number) => `KES ${value.toFixed(2)}`;
@@ -146,6 +148,37 @@ describe("vouchersBlockedReason", () => {
     expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toBe(
       "this sale is finishing an older draft",
     );
+  });
+});
+
+describe("vouchersBlockMpesaReason", () => {
+  it("lets M-Pesa go ahead without vouchers", () => {
+    expect(vouchersBlockMpesaReason(0)).toBeNull();
+  });
+
+  it("refuses M-Pesa while vouchers are applied, saying what to do instead", () => {
+    expect(vouchersBlockMpesaReason(2)).toBe(
+      "Vouchers can't be combined with M-Pesa yet - remove them, or take the rest in cash or card.",
+    );
+  });
+});
+
+describe("customerChangeDropsVouchers", () => {
+  it("keeps them for the first customer the sale has", () => {
+    expect(customerChangeDropsVouchers(null, "A", 1)).toBe(false);
+  });
+
+  it("keeps them while the customer stays the same", () => {
+    expect(customerChangeDropsVouchers("A", "A", 1)).toBe(false);
+  });
+
+  it("drops them when the customer changes or is cleared", () => {
+    expect(customerChangeDropsVouchers("A", "B", 1)).toBe(true);
+    expect(customerChangeDropsVouchers("A", null, 1)).toBe(true);
+  });
+
+  it("has nothing to drop without vouchers", () => {
+    expect(customerChangeDropsVouchers("A", "B", 0)).toBe(false);
   });
 });
 
