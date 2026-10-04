@@ -263,3 +263,80 @@ class TestLossOfSale(FrappeTestCase):
 				with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
 					before_validate(invoice)
 				self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
+
+	# Task 4 - these sell through the till, so they need an open shift.
+
+	def _require_shift(self):
+		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
+
+		if not get_current_pos_opening_entry():
+			self.skipTest("no open POS Opening Entry on this site")
+
+	def _sell(self, items, enabled=1):
+		from klik_pos.api.sales_invoice import CHECKOUT_REQUEST_DOCTYPE, queue_sales_invoice
+		from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode
+
+		mode = pick_payment_mode(self.profile.name)
+		total = payable_total(self.customer, items, mode)
+		request_id = frappe.generate_hash(length=24)
+		self.addCleanup(
+			lambda: frappe.db.exists(CHECKOUT_REQUEST_DOCTYPE, request_id)
+			and frappe.delete_doc(CHECKOUT_REQUEST_DOCTYPE, request_id, force=True, ignore_permissions=True)
+		)
+		payload = {
+			"checkout_request_id": request_id,
+			"customer": {"id": self.customer},
+			"items": items,
+			"amountPaid": total,
+			"paymentMethods": [{"method": mode, "amount": total}],
+			"businessType": "B2C",
+		}
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=enabled):
+			response = queue_sales_invoice(payload)
+		if response.get("invoice_name"):
+			self.addCleanup(self._drop_invoice, response["invoice_name"])
+			frappe.db.commit()
+		return response
+
+	def test_the_checkout_preview_returns_the_split(self):
+		self._require_shift()
+		from klik_pos.api.sales_invoice import validate_checkout_invoice
+
+		payload = {
+			"customer": {"id": self.customer},
+			"items": [{"id": STOCKED, "quantity": 16, "price": 100, "uom": "Nos"}],
+			"businessType": "B2C",
+		}
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			response = validate_checkout_invoice(payload)
+		self.assertTrue(response["success"], response.get("message"))
+		self.assertEqual(
+			response["los_adjustments"], [{"index": 0, "item_code": STOCKED, "quantity": 10, "los_qty": 6}]
+		)
+		self.assertEqual(response["tax_preview"]["items"][0]["qty"], 10)
+
+	def test_a_paid_sale_records_the_loss_on_its_line(self):
+		self._require_shift()
+		response = self._sell(
+			[
+				{"id": STOCKED, "quantity": 4, "los_qty": 0, "price": 100, "uom": "Nos"},
+				{"id": EMPTY, "quantity": 0, "los_qty": 6, "price": 100, "uom": "Nos"},
+			]
+		)
+		self.assertTrue(response["success"], response.get("message"))
+		rows = frappe.get_all(
+			"Sales Invoice Item",
+			filters={"parent": response["invoice_name"]},
+			fields=["item_code", "qty", "custom_los_qty"],
+			order_by="idx",
+		)
+		self.assertEqual([(r.item_code, r.qty, r.custom_los_qty) for r in rows], [(STOCKED, 4, 0), (EMPTY, 0, 6)])
+		self.assertFalse(
+			frappe.db.exists("Stock Ledger Entry", {"voucher_no": response["invoice_name"], "item_code": EMPTY})
+		)
+
+	def test_a_paid_oversell_is_still_refused(self):
+		self._require_shift()
+		response = self._sell([{"id": STOCKED, "quantity": 16, "los_qty": 0, "price": 100, "uom": "Nos"}])
+		self.assertFalse(response["success"])
+		self.assertIn("Insufficient stock", response["message"])

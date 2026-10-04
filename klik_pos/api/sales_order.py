@@ -19,6 +19,7 @@ from klik_pos.api.sales_invoice import (
     get_current_pos_opening_entry,
     parse_invoice_data,
 )
+from klik_pos.overrides.loss_of_sale import fold_los_into_quantity
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -490,6 +491,9 @@ def create_held_order(data):
             _enable_background_submission,
             _loyalty_redemption,
         ) = parse_invoice_data(data)
+
+        # A held order is a Sales Order, which refuses qty-0 lines: hold what was asked for.
+        fold_los_into_quantity(items)
 
         cart_meta = _build_cart_meta(
             data, items, business_type, salesperson, tax_id,

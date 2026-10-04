@@ -12,6 +12,7 @@ from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.overrides.loss_of_sale import split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority
 from .loyalty import (
@@ -1979,6 +1980,9 @@ def validate_checkout_invoice(data):
 			loyalty_redemption,
 		) = parse_invoice_data(data)
 
+		# Before payment: shorten lines to the stock there is and tell the till what changed.
+		los_adjustments = split_cart_items(items, _get_active_pos_profile())
+
 		preview_doc = build_sales_invoice_doc(
 			customer,
 			items,
@@ -2040,6 +2044,7 @@ def validate_checkout_invoice(data):
 		result = {
 			"success": True,
 			"message": "Checkout validation passed",
+			"los_adjustments": los_adjustments,
 			"tax_preview": {
 				"tax_breakdown": tax_breakdown,
 				# The receipt renders lines from the cart and totals from this document.
@@ -2259,6 +2264,11 @@ def _queue_sales_invoice(data, source_order=None):
 			frappe.throw("Customer is required")
 		if not items or len(items) == 0:
 			frappe.throw("At least one item is required")
+
+		if not flt(amount_paid) and not loyalty_redemption and not data.get("customerCredit"):
+			# Nothing taken yet (a credit sale), so it may still be shortened to the stock there
+			# is. A paid sale never is: the preview split it before the money was taken.
+			split_cart_items(items, _get_active_pos_profile())
 
 		doc = build_sales_invoice_doc(
 			customer,
@@ -2899,6 +2909,8 @@ def parse_invoice_data(data):
 			"discountAmount": discount_amount,
 			# The cashier's own wording for this line, from the cart's pen dialog.
 			"description": (item.get("description") or "").strip(),
+			# Asked for but not in stock: Loss of Sale, recorded on the invoice line.
+			"los_qty": max(flt(item.get("los_qty") or 0), 0),
 		})
 
 		price = flt(item.get("price") or 0)
@@ -4229,6 +4241,11 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	# Only when the cashier wrote one: set_missing_values fills the Item's own otherwise.
 	if item.get("description"):
 		item_data["description"] = item.get("description")
+	if flt(item.get("los_qty")) > 0:
+		item_data["custom_los_qty"] = flt(item.get("los_qty"))
+		if not flt(item.get("quantity")):
+			# set_missing_values fills a missing stock_qty with 1, which stock checks would count.
+			item_data["stock_qty"] = 0
 
 	# Resolve per-item tax fields using ERPNext item selection logic.
 	item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(doc, item, pos_profile)
