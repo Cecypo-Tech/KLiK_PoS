@@ -27,12 +27,20 @@ def get_items(
     warehouse: str | None = None,
     item_codes=None,
     include_groups: int = 1,
+    after_name: str | None = None,
+    after_code: str | None = None,
+    include_count: int = 1,
 ):
     """`item_codes` (a list, or its JSON) limits the list to exactly those items - quick
     entry's way to fetch the items it matched as the product list would offer them.
 
     `include_groups=0` skips the category bar's groups: the till loads those once from
-    get_item_groups and only asks the listing for them while a search is narrowing them."""
+    get_item_groups and only asks the listing for them while a search is narrowing them.
+
+    Paging: pass the previous page's `next_cursor` back as `after_name` / `after_code` to
+    continue after its last row (offset is then ignored); `include_count=0` skips the
+    total, which a till needs once per browse. Without these, paging by offset with a
+    count on every page works as before. A search page is ranked, so it pages by offset."""
     if isinstance(item_codes, str):
         item_codes = frappe.parse_json(item_codes)
     item_codes = [str(code) for code in (item_codes or []) if code]
@@ -86,27 +94,38 @@ def get_items(
         # pass raw search string to category-count helper so it applies the same logic
         search_term = search.strip() if search and search.strip() else None
 
-        count_sql = apply_sql_permissions(f"SELECT COUNT(*) AS total FROM `tabItem` i {where_sql}")
+        total_available_count = None
+        if cint(include_count):
+            count_sql = apply_sql_permissions(f"SELECT COUNT(*) AS total FROM `tabItem` i {where_sql}")
 
-        # Validate placeholder count matches params AFTER sql rewrite
-        placeholder_count = count_sql.count("%s")
-        if placeholder_count != len(where_params):
-            frappe.log_error(
-                message=f"Count query placeholder mismatch. placeholders={placeholder_count}, params={len(where_params)}\nSQL:\n{count_sql}",
-                title="Get Items Count Query Param Mismatch",
-            )
-            frappe.throw(_("Something went wrong while fetching item data."))
+            # Validate placeholder count matches params AFTER sql rewrite
+            placeholder_count = count_sql.count("%s")
+            if placeholder_count != len(where_params):
+                frappe.log_error(
+                    message=f"Count query placeholder mismatch. placeholders={placeholder_count}, params={len(where_params)}\nSQL:\n{count_sql}",
+                    title="Get Items Count Query Param Mismatch",
+                )
+                frappe.throw(_("Something went wrong while fetching item data."))
 
-        total_result = frappe.db.sql(count_sql, tuple(where_params), as_dict=True)
-        total_available_count = total_result[0]["total"] if total_result else 0
+            total_result = frappe.db.sql(count_sql, tuple(where_params), as_dict=True)
+            total_available_count = total_result[0]["total"] if total_result else 0
+
+        page_where = where_sql
+        page_params = list(where_params)
+        if after_code and not search_term:
+            # Continue right after the previous page's last row, on the name index.
+            page_where += "\nAND (i.item_name > %s OR (i.item_name = %s AND i.name > %s))"
+            page_params += [after_name or "", after_name or "", after_code]
+            offset = 0
 
         # The item code breaks ties between equal names, so a page boundary between two
         # items of the same name can neither repeat one nor skip one.
         main_sql = apply_sql_permissions(
-            f"SELECT {select_fields} FROM `tabItem` i {where_sql}"
+            f"SELECT {select_fields} FROM `tabItem` i {page_where}"
             " ORDER BY i.item_name ASC, i.name ASC LIMIT %s OFFSET %s"
         )
-        params_list = [*where_params, limit, offset]
+        # One row past the page answers has_more without a count.
+        params_list = [*page_params, limit + 1, offset]
 
         placeholder_count = main_sql.count("%s")
         if placeholder_count != len(params_list):
@@ -116,7 +135,15 @@ def get_items(
             )
             frappe.throw(_("Something went wrong while fetching item data."))
 
-        items = frappe.db.sql(main_sql, tuple(params_list), as_dict=True)
+        rows = frappe.db.sql(main_sql, tuple(params_list), as_dict=True)
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        last_row = items[-1] if items else None
+        next_cursor = (
+            {"after_name": last_row["item_name"], "after_code": last_row["name"]}
+            if has_more and last_row
+            else None
+        )
 
         # Rows the SQL window actually consumed. The caller's next offset must advance by
         # THIS, not by the number of items that survive the hide_unavailable filter below —
@@ -145,6 +172,7 @@ def get_items(
                 "total_count": total_available_count,
                 "page_count": 0,
                 "has_more": False,
+                "next_cursor": None,
                 "next_offset": offset,
                 "limit": limit,
                 "offset": offset,
@@ -312,7 +340,8 @@ def get_items(
             # drops rows, and conflating them is what made "Showing X of Y" meaningless.
             "total_count": total_available_count,
             "page_count": len(enriched_items),
-            "has_more": (offset + sql_row_count) < total_available_count,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
             "next_offset": offset + sql_row_count,
             "limit": limit,
             "offset": offset,
