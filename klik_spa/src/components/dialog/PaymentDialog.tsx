@@ -1517,6 +1517,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         return {
           id: code,
           quantity: Number(item.quantity || 0),
+          los_qty: Number(item.los_qty || 0),
           price: Number(getEffectiveItemRate(item) || 0),
           uom: item.uom || "Nos",
           discountPercentage: Number(discountData.discountPercentage || 0),
@@ -1635,10 +1636,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           if (response?.tax_preview) {
             setBackendTaxPreview(response.tax_preview);
             backendTaxPreviewRef.current = response.tax_preview;
-            taxPreviewCacheRef.current.set(previewCacheKey, {
-              taxPreview: response.tax_preview,
-              timestamp: Date.now(),
-            });
+            // A preview that split the cart describes the split cart, not this key's one;
+            // cached, it would come back (pre-split) when the cart returns to this key.
+            if (!response.los_adjustments?.length) {
+              taxPreviewCacheRef.current.set(previewCacheKey, {
+                taxPreview: response.tax_preview,
+                timestamp: Date.now(),
+              });
+            }
 
             if (taxPreviewCacheRef.current.size > TAX_PREVIEW_CACHE_MAX_ENTRIES) {
               for (const [key, entry] of taxPreviewCacheRef.current.entries()) {
