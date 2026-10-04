@@ -1627,6 +1627,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           pending = request;
         }
         const response = await pending;
+        if (response?.los_adjustments?.length) {
+          void useCartStore.getState().applyCheckoutLosAdjustments(response.los_adjustments);
+        }
         if (taxPreviewRequestIdRef.current === requestId) {
           if (response?.tax_preview) {
             setBackendTaxPreview(response.tax_preview);

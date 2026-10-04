@@ -454,6 +454,7 @@ export default function OrderSummary({
         items: cartItems.map(item => ({
           id: item.item_code || item.id,
           quantity: item.quantity,
+          los_qty: item.los_qty ?? 0,
           price: getDiscountedPrice(item),
           uom: item.uom || "Nos",
           serial_batch_bundle: item.bundle_entries,
@@ -461,7 +462,8 @@ export default function OrderSummary({
         itemDiscounts,
         businessType: posDetails?.business_type,
       };
-      await validateCheckoutInvoice(payload);
+      const result = await validateCheckoutInvoice(payload);
+      await useCartStore.getState().applyCheckoutLosAdjustments(result?.los_adjustments ?? []);
       setShowPaymentDialog(true);
     } catch (error) {
       toast.error(extractErrorFromException(error, "Checkout validation failed"));

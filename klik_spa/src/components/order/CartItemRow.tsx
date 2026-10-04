@@ -165,7 +165,7 @@ export const CartItemRow = ({
 
   useEffect(() => {
     setLocalQty(item.quantity);
-  }, [item.quantity]);
+  }, [item.quantity, item.los_qty]);
   const [localDiscountPct, setLocalDiscountPct] = useState<number>(() => {
     const amt = itemDiscount.discountAmount || 0;
     return item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0;
@@ -541,7 +541,7 @@ export const CartItemRow = ({
     <>
       <div
         data-cart-item-id={itemId}
-        className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/40 ${glowing ? "cart-item-glow" : ""}`}
+        className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/40 ${glowing ? "cart-item-glow" : ""} ${(item.los_qty ?? 0) > 0 ? "bg-amber-50/70 dark:bg-amber-900/10" : ""}`}
       >
         <div
           data-cart-item-id={itemId}
@@ -580,6 +580,14 @@ export const CartItemRow = ({
                 <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
                   {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
                 </p>
+              )}
+              {(item.los_qty ?? 0) > 0 && (
+                <span
+                  className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  title="Asked for but not in stock: recorded as Loss of Sale"
+                >
+                  LoS {item.los_qty}
+                </span>
               )}
             </div>
             <div className="flex-shrink-0 flex items-center gap-0.5">
@@ -667,12 +675,13 @@ export const CartItemRow = ({
                 onChange={(e) => setLocalQty(parseInt(e.target.value, 10) || 0)}
                 onBlur={() => {
                   const available = item.available;
-                  if (available > 0 && localQty > available && !item.allow_negative_stock) {
+                  if (!posDetails?.custom_enable_loss_of_sale && available > 0 && localQty > available && !item.allow_negative_stock) {
                     setLocalQty(available);
                     onUpdateQuantity(item.id, available);
                     toast.warning(`Only ${available} units available. Quantity set to ${available}.`);
                   } else {
                     onUpdateQuantity(item.id, localQty);
+                    setLocalQty(item.quantity);
                   }
                 }}
                 onKeyDown={(e) => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
