@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import {
   X,
   RotateCcw,
@@ -15,14 +14,10 @@ import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
-import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnItem } from "../services/returnService";
+import { createPartialReturn, getReturnedQty, type FixedCharge, type ReturnCredit, type ReturnItem } from "../services/returnService";
 import { fixedChargeReturned, returnedValue, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { getInvoiceDetails } from "../services/salesInvoice";
 import { returnNotice } from "../utils/returnNotice";
-import { creditChoices, fetchReturnCustomer, type CreditAction } from "../utils/creditAction";
-import { useProductStore } from "../stores/productStore";
-import type { Customer } from "../types/customer";
-import type { Customer as CartCustomer } from "../../types";
 import StepperInput, { NO_NATIVE_SPINNER } from "./common/StepperInput";
 
 interface SingleInvoiceReturnProps {
@@ -31,18 +26,14 @@ interface SingleInvoiceReturnProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (returnInvoice: string) => void;
-  /** The Closing Shift page turns this off: a cashier mid-close must not open new sales. */
-  allowExchange?: boolean;
 }
 
 export default function SingleInvoiceReturn({
   invoice,
   isOpen,
   onClose,
-  onSuccess,
-  allowExchange = true
+  onSuccess
 }: SingleInvoiceReturnProps) {
-  const navigate = useNavigate();
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [fixedCharges, setFixedCharges] = useState<FixedCharge[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -67,32 +58,14 @@ export default function SingleInvoiceReturn({
   // 0 for a credit sale, in which case the whole return becomes a credit note.
   const [refundableCash, setRefundableCash] = useState<number>(0);
 
-  // The credit router: who the non-cash value belongs to, and what the cashier chose.
-  const [returnCustomer, setReturnCustomer] = useState<Customer | null>(null);
-  const [creditAction, setCreditAction] = useState<CreditAction | null>(null);
+  // The voucher a return left, held on screen until the cashier presses Done. The return is
+  // already made by then, so every way out of that view still tells the host (onSuccess) first.
+  const [voucher, setVoucher] = useState<{ credit: ReturnCredit; returnInvoice: string } | null>(null);
 
+  // The dialog stays mounted between opens: each open, and each other invoice, starts clean.
   useEffect(() => {
-    let cancelled = false;
-    if (!isOpen || !invoice?.customer) {
-      setReturnCustomer(null);
-      return;
-    }
-    fetchReturnCustomer(String(invoice.customer)).then((found) => {
-      if (!cancelled) setReturnCustomer(found);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, invoice?.customer]);
-
-  const actionChoices = useMemo(
-    () => creditChoices(Boolean(returnCustomer?.isWalkin), false).filter((c) => allowExchange || c !== "exchange"),
-    [returnCustomer, allowExchange]
-  );
-
-  useEffect(() => {
-    setCreditAction(actionChoices[0] ?? null);
-  }, [actionChoices]);
+    setVoucher(null);
+  }, [isOpen, invoice?.name, invoice?.id]);
 
   useEffect(() => {
     if (isOpen && invoice) {
@@ -289,26 +262,21 @@ export default function SingleInvoiceReturn({
 
       const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
       const result = await createPartialReturn(
-        invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount, returnsAnyFixedCharge(returnBasis) ? 1 : 0,
-        creditAction ? { creditAction } : undefined
+        invoiceName, itemsToReturn, selectedPaymentMethod, returnAmount, returnsAnyFixedCharge(returnBasis) ? 1 : 0
       );
 
       if (result.success) {
         // Report what the backend actually did, not what was requested: a credit sale refunds
         // nothing regardless of the payment method that was picked.
         toast.success(result.message || 'Return created successfully');
-        onSuccess(result.returnInvoice!);
-        onClose();
-        if (result.credit?.action === "exchange" && returnCustomer) {
-          // Exchange now: hand the till a new sale for this customer. The payment
-          // dialog's credit fetch offers the fresh note by itself. The two Customer
-          // shapes are bridged the way heldOrderToCart already does it.
-          useProductStore.getState().setSelectedCustomer(returnCustomer as unknown as CartCustomer);
-          toast.info(
-            `Credit of ${formatCurrencyWithSymbol(result.credit.available, currency)} is ready in the payment dialog.`,
-            { autoClose: 8000 }
-          );
-          navigate('/pos');
+        if (result.credit) {
+          // The credit note is the customer's voucher: both numbers on the receipt pay with it.
+          // Host pages reload on success and would wipe a toast, so the dialog keeps the numbers
+          // on screen and tells the host only when the cashier is done with them.
+          setVoucher({ credit: result.credit, returnInvoice: result.returnInvoice! });
+        } else {
+          onSuccess(result.returnInvoice!);
+          onClose();
         }
       } else {
         toast.error(result.error || 'Failed to create return');
@@ -319,6 +287,14 @@ export default function SingleInvoiceReturn({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Done, and the header X while the voucher shows: the return exists, so the host is told.
+  const finishVoucher = () => {
+    if (!voucher) return;
+    onSuccess(voucher.returnInvoice);
+    onClose();
+    setVoucher(null);
   };
 
   const returnBasis = { items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal, paid_amount: originalInvoicePaidAmount };
@@ -346,7 +322,7 @@ export default function SingleInvoiceReturn({
               </div>
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Return Items
+                  {voucher ? "Return Created" : "Return Items"}
                 </h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   Invoice: {invoice?.name || invoice?.id} • Customer: {invoice?.customer}
@@ -354,7 +330,7 @@ export default function SingleInvoiceReturn({
               </div>
             </div>
             <button
-              onClick={onClose}
+              onClick={voucher ? finishVoucher : onClose}
               className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
             >
               <X className="w-6 h-6" />
@@ -364,7 +340,27 @@ export default function SingleInvoiceReturn({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {loadingReturnData ? (
+          {voucher ? (
+            <div className="flex flex-col items-center text-center py-6">
+              <CheckCircle className="w-14 h-14 text-green-500 mb-3" />
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Store credit voucher</h3>
+              <div className="mt-6 text-sm font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Credit note
+              </div>
+              <div className="text-3xl sm:text-4xl font-bold font-mono text-gray-900 dark:text-white select-all break-all">
+                {voucher.credit.note}
+              </div>
+              <div className="mt-4 text-xl text-gray-700 dark:text-gray-300">
+                Original sale: <span className="font-bold font-mono text-gray-900 dark:text-white select-all">{voucher.credit.original}</span>
+              </div>
+              <div className="mt-6 text-3xl font-bold text-orange-600 dark:text-orange-400">
+                {formatCurrencyWithSymbol(voucher.credit.available, currency)}
+              </div>
+              <p className="mt-6 max-w-md text-sm text-gray-600 dark:text-gray-400">
+                Both numbers are on the return receipt, and both are needed to use the voucher.
+              </p>
+            </div>
+          ) : loadingReturnData ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
@@ -618,8 +614,20 @@ export default function SingleInvoiceReturn({
           )}
         </div>
 
+        {/* The voucher view's footer: its only way on is Done */}
+        {voucher && (
+          <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 flex-shrink-0 flex justify-end">
+            <button
+              onClick={finishVoucher}
+              className="px-8 py-3 rounded-lg font-semibold text-base transition-colors shadow-lg bg-orange-600 text-white hover:bg-orange-700 hover:shadow-xl"
+            >
+              Done
+            </button>
+          </div>
+        )}
+
         {/* Fixed Footer with Payment Methods and Return Button */}
-        {hasItemsToReturn && (
+        {!voucher && hasItemsToReturn && (
           <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 flex-shrink-0">
             {/* Payment Method Selection - only when there is cash to hand back */}
             {refundableCash <= 0 ? (
@@ -700,33 +708,6 @@ export default function SingleInvoiceReturn({
                 </div>
               </div>
             </div>
-            )}
-
-            {/* The credit router: what happens to value that cannot go back as cash */}
-            {creditNoteAmount > 0 && (
-              <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-700 dark:text-gray-300">
-                <span className="font-medium">
-                  {formatCurrencyWithSymbol(creditNoteAmount, currency)} not refunded in cash:
-                </span>
-                {actionChoices.map((choice) => (
-                  <label key={choice} className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="credit-action"
-                      checked={creditAction === choice}
-                      onChange={() => setCreditAction(choice)}
-                      className="accent-beveren-600"
-                    />
-                    <span>{choice === "keep" ? "Keep as customer credit" : "Exchange now"}</span>
-                  </label>
-                ))}
-                {!actionChoices.length && (
-                  <span className="text-amber-700 dark:text-amber-400">
-                    Walk In credit cannot be kept or exchanged at the till yet - refund it via
-                    accounts, or have a manager handle it from desk.
-                  </span>
-                )}
-              </div>
             )}
 
             {/* Action Buttons */}

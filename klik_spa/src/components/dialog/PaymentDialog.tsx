@@ -40,7 +40,24 @@ import {
 import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
 import { creditSalesAllowed } from "../../utils/creditSales";
-import { allocateCredit, fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
+import { fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
+import {
+  addVoucher,
+  appliedTotal,
+  capVouchers,
+  customerChangeDropsVouchers,
+  labelVoucherAmounts,
+  netOfChange,
+  voucherApplyAmount,
+  vouchersBlockedReason,
+  vouchersBlockMpesaReason,
+  type AppliedVoucher,
+} from "../../utils/voucher";
+import { cashRefundModes } from "../../utils/returnModes";
+import { fetchCustomerRecord, lookupCreditVoucher } from "../../services/voucher";
+import { useProductStore } from "../../stores/productStore";
+import type { Customer as CartCustomer } from "../../../types";
+import VoucherPanel from "./VoucherPanel";
 import { nextAllocationTargets, stkAutoSubmitDecision } from "../../utils/stkAutoSubmit";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
@@ -193,10 +210,10 @@ async function discardAbandonedMpesaOrder(orderName: string) {
   }
 }
 
-/** The pseudo-tender that spends a customer's open credit notes (the credit router).
-It never becomes a payment row: buildPaymentData turns it into customerCredit
-allocations the server settles after submit. */
-const CUSTOMER_CREDIT_METHOD = "Customer Credit";
+/** The applied vouchers' total inside the payment amounts. It is never a payment row and
+never a real Mode of Payment name: buildPaymentData sends the vouchers themselves as
+customerCredit, which the server settles after submit. */
+const CUSTOMER_CREDIT_METHOD = "__klik_vouchers__";
 
 export default function PaymentDialog(props: PaymentDialogProps) {
   const {
@@ -217,6 +234,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [selectedSalesTaxCharges, setSelectedSalesTaxCharges] = useState("");
   const [paymentAmounts, setPaymentAmounts] = useState<PaymentAmount>({});
   const [customerCredit, setCustomerCredit] = useState<CustomerCredit | null>(null);
+  const [appliedVouchers, setAppliedVouchers] = useState<AppliedVoucher[]>([]);
+  const [voucherPanelOpen, setVoucherPanelOpen] = useState(false);
   const [activeMethodId, setActiveMethodId] = useState<string | null>(null);
   const [lastModifiedMethodId, setLastModifiedMethodId] = useState<string | null>(null);
   const [paymentReferences, setPaymentReferences] = useState<Record<string, string>>({});
@@ -376,14 +395,38 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
   }, [isOpen, selectedCustomer, posCompanyName, posDetails?.currency]);
 
-  // A draft/M-Pesa-order flow starting mid-dialog clears any credit already entered:
-  // those submit paths refuse the tender, so the figures must stop counting it.
+  // A credit sale, an M-Pesa order or an older draft carries no vouchers: those paths
+  // settle no credit, so the figures must stop counting them.
+  const vouchersBlocked = vouchersBlockedReason({
+    isCreditSale,
+    mpesaOrder: Boolean(mpesaOrderName || mpesaDraftInvoiceName),
+    editingDraft: Boolean(getOriginalDraftInvoiceId()),
+  });
   useEffect(() => {
-    if (!(mpesaOrderName || mpesaDraftInvoiceName)) return;
+    if (!vouchersBlocked || appliedVouchers.length === 0) return;
+    setAppliedVouchers([]);
+    // Only when the total is still there: Credit Sale has already emptied the amounts, and an
+    // empty set is what lets the till's opening amount come back when it is unticked.
     setPaymentAmounts((prev) =>
       (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
     );
-  }, [mpesaOrderName, mpesaDraftInvoiceName]);
+    toast.info(`Vouchers removed: ${vouchersBlocked}.`);
+  }, [vouchersBlocked, appliedVouchers.length]);
+
+  // Applied vouchers belong to the sale's customer: a new customer starts them over rather than
+  // Submit refusing them. The panel keeps a looked-up voucher, so "Switch sale" then Apply works.
+  const saleCustomerId = selectedCustomer?.id || selectedCustomer?.name || null;
+  const voucherCustomerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = voucherCustomerRef.current;
+    voucherCustomerRef.current = saleCustomerId;
+    if (!customerChangeDropsVouchers(previous, saleCustomerId, appliedVouchers.length, invoiceSubmitted)) return;
+    setAppliedVouchers([]);
+    setPaymentAmounts((prev) =>
+      (prev[CUSTOMER_CREDIT_METHOD] || 0) > 0 ? { ...prev, [CUSTOMER_CREDIT_METHOD]: 0 } : prev
+    );
+    toast.info("Vouchers removed: the sale's customer changed.");
+  }, [saleCustomerId, appliedVouchers.length, invoiceSubmitted]);
 
   const isB2B = posDetails?.business_type === "B2B";
   const isB2C = posDetails?.business_type === "B2C";
@@ -727,28 +770,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         idx: mode.idx,
       };
     });
-    // The credit router's pseudo-tender: offered only when the customer holds credit,
-    // this is not a credit sale (paying a credit sale with credit is a contradiction),
-    // no draft/M-Pesa-order flow is active (those submit paths have no credit wiring),
-    // and no REAL mode of payment shares the name (legacy store-credit setups).
-    const creditFlowActive = Boolean(mpesaOrderName || mpesaDraftInvoiceName);
-    const realModeCollision = modes.some((mode) => mode.mode_of_payment === CUSTOMER_CREDIT_METHOD);
-    if (customerCredit && customerCredit.total > 0 && !isCreditSale && !creditFlowActive && !realModeCollision) {
-      const creditLook = getIconAndColor("Default");
-      rows.push({
-        id: CUSTOMER_CREDIT_METHOD,
-        name: CUSTOMER_CREDIT_METHOD,
-        icon: creditLook.icon,
-        color: creditLook.color,
-        enabled: true,
-        amount: paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0,
-        type: "CustomerCredit",
-        isDefault: false,
-        idx: 9999,
-      });
-    }
     return rows;
-  }, [modes, paymentAmounts, customerCredit, isCreditSale, mpesaOrderName, mpesaDraftInvoiceName]);
+  }, [modes, paymentAmounts]);
 
   const orderedPaymentMethodIds = useMemo(() => {
     const sortedModes = [...modes].sort((a, b) => {
@@ -818,7 +841,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           .filter(([, amount]) => (amount || 0) > 0)
           .map(([methodId]) => methodId),
       ].filter((methodId, index, all): methodId is string => Boolean(methodId) && all.indexOf(methodId) === index);
-      return trimToPayable(prev, payableTotal, preferredIds, stkLockedMethod);
+      return trimToPayable(prev, payableTotal, preferredIds, [CUSTOMER_CREDIT_METHOD, ...(stkLockedMethod ? [stkLockedMethod] : [])]);
     });
   }, [activeMethodId, lastModifiedMethodId, stkLockedMethod]);
 
@@ -930,12 +953,30 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     [selectedMpesaPayments]
   );
 
+  // Cash the way ERPNext tells it when it books change: the Mode of Payment's type (the
+  // rule utils/returnModes applies to refunds).
+  const cashMethodIds = useMemo(
+    () => new Set(cashRefundModes(modes).map((mode) => mode.mode_of_payment)),
+    [modes]
+  );
+  // The real payment rows with vouchers applied: cash net of the change handed back, and
+  // any overpay no cash row can absorb (utils/voucher netOfChange).
+  const tenderNetOfChange = (vouchersTotal: number) =>
+    netOfChange(
+      Object.entries(paymentAmounts)
+        .filter(([method, amount]) => method !== CUSTOMER_CREDIT_METHOD && amount > 0)
+        .map(([method, amount]) => ({ method, amount })),
+      vouchersTotal,
+      checkoutPayableTotal,
+      (method) => cashMethodIds.has(method),
+      lastModifiedMethodId
+    );
+
   const buildPaymentData = (
     deliveryPersonnel: string | null = null,
     options?: { excludeActiveMpesa?: boolean }
   ) => {
     const activeMpesaPayment = options?.excludeActiveMpesa ? getActiveMpesaPayment() : null;
-    const adjustedPaymentMethods = Object.entries(paymentAmounts).filter(([, amount]) => amount > 0);
     // Customer credit is not a payment row: it leaves this list, leaves amountPaid,
     // and reaches the server as customerCredit allocations settled after submit.
     // Draft and M-Pesa-order submits have no credit wiring server-side, so those
@@ -946,6 +987,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const creditAmount = creditFlowBlocked
       ? 0
       : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
+    // With vouchers going to the server, cash goes net of the change handed back: ERPNext
+    // books change only when paid exceeds the total, which a voucher sale never does.
+    const tenderRows = tenderNetOfChange(creditAmount).rows.filter((row) => row.amount > 0);
 
     return {
       items: cartItems.map((item) => {
@@ -963,11 +1007,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         };
       }),
       customer: selectedCustomer,
-      paymentMethods: (adjustedPaymentMethods ?? []).filter(([method]) => {
-        if (method === CUSTOMER_CREDIT_METHOD) return false;
+      paymentMethods: tenderRows.filter(({ method }) => {
         if (!activeMpesaPayment) return true;
         return method !== activeMpesaPayment.method;
-      }).map(([method, amount]) => {
+      }).map(({ method, amount }) => {
         const paymentLine: Record<string, unknown> = {
           method,
           amount: parseFloat((Number(amount) || 0).toFixed(2)),
@@ -1004,9 +1047,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       remarks: remarks.trim(),
       shipping_rule: activeShippingRule || null,
       grandTotal: checkoutGrandTotal,
-      amountPaid: roundCurrency(Math.max(0, totalPaidAmount - creditAmount)),
-      customerCredit:
-        creditAmount > 0 && customerCredit ? allocateCredit(customerCredit.notes, creditAmount) : [],
+      amountPaid:
+        creditAmount > 0
+          ? calculateTotalPayments(tenderRows.map((row) => row.amount))
+          : roundCurrency(Math.max(0, totalPaidAmount - creditAmount)),
+      customerCredit: creditFlowBlocked
+        ? []
+        : appliedVouchers.map((voucher) => ({
+            invoice: voucher.note,
+            amount: voucher.amount,
+            ...(voucher.original ? { original: voucher.original } : {}),
+          })),
       outstandingAmount: outstandingAmount,
       appliedCoupons,
       businessType: posDetails?.business_type,
@@ -1080,6 +1131,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const initiateMpesaFlow = async (method: string, amount: number, phoneNumber: string): Promise<boolean> => {
     if (!selectedCustomer || !selectedCustomer.name) {
       toast.error("Kindly select a customer");
+      return false;
+    }
+    // Checked before ensureMpesaOrder: an M-Pesa order drops the vouchers, and the customer
+    // would then owe what they covered on top of the push.
+    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
+    if (voucherReason) {
+      toast.error(voucherReason);
       return false;
     }
     if (!phoneNumber.trim()) {
@@ -1189,6 +1247,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (stkLockedMethod) {
       // Receipts would replace the push's row and flow, orphaning money already asked for.
       toast.error("An M-Pesa push is pending or paid on this sale - receipts can't be added to it.");
+      return;
+    }
+    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
+    if (voucherReason) {
+      toast.error(voucherReason);
       return;
     }
     if (!selectedCustomer?.id && !selectedCustomer?.name) {
@@ -1313,17 +1376,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       // turn on: fill what is owed, or take over from a single row holding the whole sale
       const backedByMpesa =
         mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "completed") ? [mpesaFlow.modeOfPayment] : [];
-      setPaymentAmounts((amts) => {
-        const next = toggleOn(amts, methodId, checkoutPayableTotal, backedByMpesa);
-        if (methodId === CUSTOMER_CREDIT_METHOD) {
-          // The tender can never exceed what the customer's notes actually hold.
-          next[CUSTOMER_CREDIT_METHOD] = Math.min(
-            next[CUSTOMER_CREDIT_METHOD] || 0,
-            roundCurrency(customerCredit?.total ?? 0)
-          );
-        }
-        return next;
-      });
+      // Applied vouchers are money already held: a toggle never empties their total.
+      setPaymentAmounts((amts) => toggleOn(amts, methodId, checkoutPayableTotal, [...backedByMpesa, CUSTOMER_CREDIT_METHOD]));
       setLastModifiedMethodId(methodId);
       setActiveMethodId(methodId);
     }
@@ -1336,15 +1390,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const handleManualAmountChange = (methodId: string, amount: string) => {
     if (invoiceSubmitted || isProcessingPayment) return;
     if (methodId === stkLockedMethod) return;
-    let numericAmount = roundCurrency(parseFloat(amount) || 0);
-    if (methodId === CUSTOMER_CREDIT_METHOD) {
-      // The tender can never exceed what the notes hold, nor what the sale asks for.
-      numericAmount = Math.min(
-        numericAmount,
-        roundCurrency(customerCredit?.total ?? 0),
-        roundCurrency(Math.max(0, checkoutPayableTotal))
-      );
-    }
+    const numericAmount = roundCurrency(parseFloat(amount) || 0);
     setLastModifiedMethodId(methodId);
     setPaymentAmounts((prev) => {
       const baseAmounts = { ...prev, [methodId]: numericAmount };
@@ -2153,6 +2199,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" ? Number(mpesaFlow.amount || 0) : 0;
   const mpesaUncovered = uncoveredMpesa(getActiveMpesaPayment()?.amount || 0, mpesaReceiptsOpen, mpesaStkDone);
 
+  // An overpay with vouchers applied that no cash row can take as change would be booked
+  // as paid: the cashier reduces the non-cash row instead.
+  const voucherOverpay = tenderNetOfChange(
+    vouchersBlocked ? 0 : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0)
+  ).unabsorbed;
+
   const submitBlockReason = () => {
     const originalHeldOrderId = getOriginalHeldOrderId();
     const heldOrderApproval = originalHeldOrderId ? getOriginalHeldOrderApproval() : null;
@@ -2172,10 +2224,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
         : null,
       mpesaUncoveredLabel: mpesaUncovered > 0 ? formatCurrencyWithSymbol(mpesaUncovered, displayCurrencySymbol) : null,
+      overpaidNonCashLabel: voucherOverpay > 0 ? formatCurrencyWithSymbol(voucherOverpay, displayCurrencySymbol) : null,
     });
   };
 
   const isActionButtonDisabled = () => submitBlockReason() !== null;
+  // A non-cash overpay greys Submit while Change Due still reads green: say why by the button.
+  const submitHint = !invoiceSubmitted && voucherOverpay > 0 ? submitBlockReason() : null;
 
   // A paid STK push submits the sale by itself - once per push request, and only when the
   // push alone settles the server's total (see stkAutoSubmitDecision).
@@ -2487,7 +2542,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed")
         ? mpesaFlow.modeOfPayment
         : null;
-    setPaymentAmounts((prev) => followTotal(prev, previousTotal, checkoutPayableTotal, lockedMethod));
+    setPaymentAmounts((prev) => followTotal(prev, previousTotal, checkoutPayableTotal, [CUSTOMER_CREDIT_METHOD, ...(lockedMethod ? [lockedMethod] : [])]));
 
     previousCheckoutGrandTotalRef.current = checkoutPayableTotal;
   }, [checkoutPayableTotal, isOpen, invoiceSubmitted, isProcessingPayment, isCreditSale, mpesaFlow]);
@@ -2738,6 +2793,98 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     );
   };
 
+  // Applying puts the voucher's amount on the vouchers' total and takes the excess off the
+  // other rows (a till's pre-filled cash, say) - never off a push in flight.
+  const applyVoucher = (voucher: { note: string; original: string | null; available: number }) => {
+    if (vouchersBlocked) {
+      toast.error(`Vouchers unavailable: ${vouchersBlocked}.`);
+      return;
+    }
+    if (appliedVouchers.some((applied) => applied.note === voucher.note)) {
+      toast.info(`${voucher.note} is already applied.`);
+      return;
+    }
+    const amount = voucherApplyAmount(voucher.available, checkoutPayableTotal, appliedTotal(appliedVouchers));
+    if (amount <= 0) {
+      toast.info("Nothing left to pay with a voucher.");
+      return;
+    }
+    const next = addVoucher(appliedVouchers, { note: voucher.note, original: voucher.original, amount });
+    setAppliedVouchers(next);
+    setPaymentAmounts((prev) => {
+      const withVouchers: PaymentAmount = { ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) };
+      const preferred = Object.keys(withVouchers).filter(
+        (methodId) => methodId !== CUSTOMER_CREDIT_METHOD && (withVouchers[methodId] || 0) > 0
+      );
+      return trimToPayable(withVouchers, checkoutPayableTotal, preferred, [
+        CUSTOMER_CREDIT_METHOD,
+        ...(stkLockedMethod ? [stkLockedMethod] : []),
+      ]);
+    });
+  };
+
+  const removeVoucher = (note: string) => {
+    const next = appliedVouchers.filter((voucher) => voucher.note !== note);
+    setAppliedVouchers(next);
+    setPaymentAmounts((prev) => ({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) }));
+  };
+
+  // A Walk In sale paid with a named customer's voucher becomes that customer's sale -
+  // Payment Reconciliation settles only a customer's own invoices.
+  const switchSaleCustomer = async (customerName: string) => {
+    const customer = await fetchCustomerRecord(customerName);
+    if (!customer) {
+      toast.error(`Could not load ${customerName}.`);
+      return;
+    }
+    useProductStore.getState().setSelectedCustomer(customer as unknown as CartCustomer);
+    toast.info(`Sale switched to ${customer.customerName || customerName}.`);
+  };
+
+  // Vouchers never outgrow the sale: a removed item, a discount or loyalty shrinks them.
+  useEffect(() => {
+    if (appliedTotal(appliedVouchers) <= roundCurrency(checkoutPayableTotal)) return;
+    const capped = capVouchers(appliedVouchers, checkoutPayableTotal);
+    setAppliedVouchers(capped);
+    setPaymentAmounts((prev) => ({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(capped) }));
+  }, [checkoutPayableTotal, appliedVouchers]);
+
+  const renderVoucherButton = () => (
+    <button
+      type="button"
+      onClick={() => setVoucherPanelOpen((open) => !open)}
+      disabled={invoiceSubmitted || isProcessingPayment || Boolean(vouchersBlocked)}
+      title={vouchersBlocked ? `Vouchers unavailable: ${vouchersBlocked}` : "Pay with a store-credit voucher"}
+      className="px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      Voucher
+      {appliedVouchers.length > 0
+        ? ` · ${formatCurrencyWithSymbol(appliedTotal(appliedVouchers), displayCurrencySymbol)}`
+        : customerCredit && customerCredit.total > 0
+          ? ` · ${formatCurrencyWithSymbol(customerCredit.total, displayCurrencySymbol)} available`
+          : ""}
+    </button>
+  );
+
+  const renderVoucherPanel = () => (
+    <VoucherPanel
+      isOpen={voucherPanelOpen && !invoiceSubmitted}
+      currencySymbol={displayCurrencySymbol}
+      saleCustomer={{
+        customer: String(selectedCustomer?.id || selectedCustomer?.name || ""),
+        isWalkin: Boolean(selectedCustomer?.isWalkin),
+      }}
+      ownCredit={customerCredit}
+      applied={appliedVouchers}
+      disabled={isProcessingPayment || Boolean(vouchersBlocked)}
+      onLookup={lookupCreditVoucher}
+      onApply={applyVoucher}
+      onRemove={removeVoucher}
+      onSwitchCustomer={(customer) => void switchSaleCustomer(customer)}
+      onClose={() => setVoucherPanelOpen(false)}
+    />
+  );
+
   // Leaving a sale whose push is paid. "Stay" is the focused default, so Enter (or a
   // scanner's trailing Enter) does not abandon it.
   const renderLeaveConfirm = () => (
@@ -2936,7 +3083,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
                   headerMiddle={showMpesaPanel ? null : renderMpesaStatusNotice()}
                   headerRight={
-                    allowCreditSales ? (
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {renderVoucherButton()}
+                    {allowCreditSales ? (
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
@@ -2996,9 +3145,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       >
                         Is Credit Sale
                       </button>
-                    )
+                    )}
+                    </div>
                   }
                 />
+                {renderVoucherPanel()}
                 {/* Remarks is on every till, so this row always shows. */}
                 <div className="flex flex-wrap items-end gap-3">
                     {renderLoyaltyRedemption()}
@@ -3073,6 +3224,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       <span>{getActionButtonText()}</span>
                     )}
                   </button>
+                  {submitHint && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
                   {hasActiveMpesaPayment && (
                     <button
                       type="button"
@@ -3210,7 +3362,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   lockedMethodIds={stkLockedMethod ? [stkLockedMethod] : []}
                   headerMiddle={showMpesaPanel ? null : renderMpesaStatusNotice()}
                   headerRight={
-                    allowCreditSales ? (
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {renderVoucherButton()}
+                    {allowCreditSales ? (
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
                           {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
@@ -3270,9 +3424,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       >
                         Is Credit Sale
                       </button>
-                    )
+                    )}
+                    </div>
                   }
                 />
+
+                {renderVoucherPanel()}
 
                 <div ref={mpesaOptionsPanelRef}>
                   <MpesaOptionsModal
@@ -3375,7 +3532,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               displayDiscount={displayDiscount}
               displayTaxTotal={displayTaxTotal}
               checkoutGrandTotal={checkoutGrandTotal}
-              paymentAmounts={paymentAmounts}
+              paymentAmounts={labelVoucherAmounts(paymentAmounts, CUSTOMER_CREDIT_METHOD)}
               displayCurrencySymbol={displayCurrencySymbol}
               isB2B={isB2B}
               isB2C={isB2C}
@@ -3439,6 +3596,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             </div>
           </div>
+          {submitHint && <p className="mt-2 text-right text-xs text-red-600 dark:text-red-400">{submitHint}</p>}
         </div>
 
     </div>

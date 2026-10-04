@@ -17,6 +17,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
+from klik_pos.api import customer_credit
 from klik_pos.api import sales_invoice as si
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.tests.credit_fixtures import make_credit_note
@@ -54,6 +55,15 @@ def _ensure_service_item():
 			"is_sales_item": 1,
 		}
 	).insert(ignore_permissions=True)
+
+
+def _totals(items):
+	"""(grand_total, rounded_total) the checkout builds for `items`: the build
+	pos_fixtures.payable_total runs, keeping both figures instead of the payable alone."""
+	doc = si.build_sales_invoice_doc(CUSTOMER, items, 0, None, None, "B2C", include_payments=False)
+	doc.run_method("set_missing_values")
+	doc.run_method("calculate_taxes_and_totals")
+	return flt(doc.grand_total, 2), flt(doc.rounded_total, 2)
 
 
 class TestCheckoutWithCredit(FrappeTestCase):
@@ -115,6 +125,66 @@ class TestCheckoutWithCredit(FrappeTestCase):
 		)
 		try:
 			result = self._checkout([{"invoice": note.name, "amount": self.total}])
+		finally:
+			frappe.local.request = None
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+
+	def test_a_walkin_voucher_pays_with_its_original_number(self):
+		note = self._note(200)
+		with patch.object(customer_credit, "_is_walkin_customer", return_value=True):
+			result = self._checkout(
+				[{"invoice": note.name, "amount": self.total, "original": note.return_against}]
+			)
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+
+	def test_a_walkin_voucher_without_its_original_is_refused_at_checkout(self):
+		note = self._note(200)
+		with patch.object(customer_credit, "_is_walkin_customer", return_value=True):
+			result = self._checkout([{"invoice": note.name, "amount": self.total}])
+		self.assertFalse(result.get("success"), result)
+		self.assertIn("original sale number", result.get("message") or "")
+
+	def _sale_ending_in(self, cents):
+		"""A sale whose grand total ends in `cents` hundredths (60 rounds up, 40 down),
+		whatever tax the site's template adds: the price is scaled by what the checkout
+		makes of 100. Returns its (grand_total, rounded_total) for the caller's premise."""
+		grand_of_100, _ = _totals([{"id": ITEM, "quantity": 1, "price": 100, "uom": "Nos"}])
+		price = flt((450 + cents / 100) * 100 / grand_of_100, 2)
+		self.items = [{"id": ITEM, "quantity": 1, "price": price, "uom": "Nos"}]
+		return _totals(self.items)
+
+	def test_a_voucher_pays_a_total_that_rounds_up(self):
+		"""The till caps a voucher at the rounded total, and the invoice settles at it."""
+		grand, rounded = self._sale_ending_in(60)
+		self.assertGreater(rounded, grand, f"premise: {grand} should round up, got {rounded}")
+		note = self._note(600)
+		result = self._checkout([{"invoice": note.name, "amount": rounded}])
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+		self.assertEqual(flt(result["customer_credit"]["applied"], 2), rounded)
+
+	def test_a_voucher_pays_a_total_that_rounds_down_through_the_cash_gate(self):
+		"""Web-context submit: credit equal to the rounded total covers the sale, so the
+		cash gate's marker is set though the unrounded grand total is a few cents more."""
+		grand, rounded = self._sale_ending_in(40)
+		self.assertTrue(0 < rounded < grand, f"premise: {grand} should round down, got {rounded}")
+		note = self._note(600)
+		frappe.local.request = frappe._dict(
+			path="/api/method/klik_pos.api.sales_invoice.create_and_submit_invoice", method="POST"
+		)
+		try:
+			result = self._checkout([{"invoice": note.name, "amount": rounded}])
 		finally:
 			frappe.local.request = None
 		self.assertTrue(result.get("success"), result)

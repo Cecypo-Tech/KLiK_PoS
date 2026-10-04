@@ -41,12 +41,12 @@ export function followTotal(
   prev: Record<string, number>,
   previousTotal: number,
   newTotal: number,
-  locked?: string | null,
+  locked: string[] = [],
 ): Record<string, number> {
   const paying = Object.entries(prev).filter(([, amount]) => Number(amount) > 0);
   if (paying.length !== 1) return prev;
   const [method, amount] = paying[0] as [string, number];
-  if (method === locked) return prev;
+  if (locked.includes(method)) return prev;
   if (Math.abs(roundCurrency(Number(amount)) - roundCurrency(previousTotal)) > 0.01) return prev;
   return { ...prev, [method]: roundCurrency(newTotal) };
 }
@@ -66,14 +66,14 @@ export function trimToPayable(
   amounts: Record<string, number>,
   payable: number,
   preferredIds: string[],
-  lockedId: string | null,
+  lockedIds: string[],
 ): Record<string, number> {
   const updated = { ...amounts };
   let excess = roundCurrency(Object.values(updated).reduce((sum, value) => sum + (Number(value) || 0), 0) - payable);
   if (excess <= 0) return updated;
   for (const methodId of preferredIds) {
     if (excess <= 0) break;
-    if (methodId === lockedId) continue;
+    if (lockedIds.includes(methodId)) continue;
     const current = Number(updated[methodId] || 0);
     if (current <= 0) continue;
     const reduction = Math.min(current, excess);

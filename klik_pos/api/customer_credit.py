@@ -6,6 +6,7 @@ Payment Reconciliation books - ERPNext's own mechanism, nothing parallel to main
 """
 
 import frappe
+from frappe.rate_limiter import rate_limit
 from frappe.utils import flt
 
 
@@ -51,32 +52,138 @@ def get_customer_credit(customer, company, currency=None):
 	return {"total": flt(sum(n["available"] for n in notes), 2), "notes": notes}
 
 
+def _same_number(typed, actual):
+	"""A voucher number as a cashier types it: spaces and letter case do not matter."""
+	if not isinstance(typed, str) or not isinstance(actual, str):
+		return False
+	return bool(actual) and typed.strip().upper() == actual.strip().upper()
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=30, seconds=60)
+def lookup_credit_voucher(credit_note, original_invoice):
+	"""What a store-credit voucher holds: its credit note number plus the original sale's.
+
+	A credit note is the voucher and its outstanding is the balance (negative = usable).
+	Both numbers must match, and every failed lookup answers the same "no_match", so the
+	lookup cannot be used to find out which credit notes exist.
+	"""
+	frappe.has_permission("Sales Invoice", "read", throw=True)
+	no_match = {"status": "no_match"}
+	if not isinstance(credit_note, str) or not isinstance(original_invoice, str):
+		return no_match
+	credit_note = credit_note.strip()
+	if not credit_note or not original_invoice.strip():
+		return no_match
+
+	meta = frappe.get_meta("Sales Invoice")
+	walkin_fields = [f for f in ("custom_walkin_customer_name", "custom_walkin_phone") if meta.has_field(f)]
+	note = frappe.db.get_value(
+		"Sales Invoice",
+		credit_note,
+		[
+			"name",
+			"customer",
+			"customer_name",
+			"company",
+			"currency",
+			"docstatus",
+			"is_return",
+			"return_against",
+			"grand_total",
+			"rounded_total",
+			"paid_amount",
+			"outstanding_amount",
+			*walkin_fields,
+		],
+		as_dict=True,
+	)
+	if not note or not note.is_return or note.docstatus == 0:
+		return no_match
+	if not _same_number(original_invoice, note.return_against):
+		return no_match
+
+	available = max(flt(-note.outstanding_amount, 2), 0.0) if note.docstatus == 1 else 0.0
+	# What the voucher held when issued: the return's rounded total less the cash handed back
+	# with it - the figure the return announced. It never reads below the balance left.
+	issued = flt(abs(flt(note.rounded_total) or flt(note.grand_total)) - abs(flt(note.paid_amount)), 2)
+	total = max(issued, available)
+	if note.docstatus == 2:
+		status = "cancelled"
+	elif available <= 0:
+		status = "used"
+	elif available < total:
+		status = "partly_used"
+	else:
+		status = "open"
+	return {
+		"status": status,
+		"note": note.name,
+		"original": note.return_against,
+		"customer": note.customer,
+		"customer_name": note.customer_name,
+		"is_walkin": bool(_is_walkin_customer(note.customer)),
+		"company": note.company,
+		"currency": note.currency,
+		"total": total,
+		"available": available,
+		"walkin_name": note.get("custom_walkin_customer_name"),
+		"walkin_phone": note.get("custom_walkin_phone"),
+	}
+
+
 def validate_allocations(invoice_doc, allocations):
 	"""Check every row BEFORE the sale submits, so apply cannot fail for business reasons."""
 	normalized = []
 	total = 0.0
+	seen = set()
 	for row in allocations or []:
-		name, amount = row.get("invoice"), flt(row.get("amount"), 2)
+		# Rows come from the till's payload: a dict "invoice" would be read as a filter and
+		# pick a note by any field, so only plain text numbers are accepted.
+		if not isinstance(row, dict) or not isinstance(row.get("invoice"), str):
+			frappe.throw("A voucher row must name its credit note.")
+		original = row.get("original")
+		if original is not None and not isinstance(original, str):
+			frappe.throw(f"{row['invoice']}: the original sale number must be text.")
+		name, amount = row["invoice"], flt(row.get("amount"), 2)
 		if amount <= 0:
 			continue
 		note = frappe.db.get_value(
 			"Sales Invoice",
 			name,
-			["name", "customer", "company", "currency", "docstatus", "is_return", "outstanding_amount"],
+			[
+				"name",
+				"customer",
+				"company",
+				"currency",
+				"docstatus",
+				"is_return",
+				"outstanding_amount",
+				"return_against",
+			],
 			as_dict=True,
 		)
 		if not note or note.docstatus != 1 or not note.is_return:
 			frappe.throw(f"{name} is not a submitted credit note.")
+		if note.name in seen:
+			frappe.throw(f"{note.name} is listed twice - apply each voucher once.")
+		seen.add(note.name)
 		if note.customer != invoice_doc.customer:
 			frappe.throw(f"{name} belongs to another customer.")
 		if note.company != invoice_doc.company or note.currency != invoice_doc.currency:
 			frappe.throw(f"{name} is from another company or currency.")
+		# Walk In credit belongs to whoever holds the receipt, so both of its numbers are
+		# checked again here: a payload can never spend a Walk In note by its number alone.
+		if _is_walkin_customer(note.customer) and not _same_number(row.get("original"), note.return_against):
+			frappe.throw(f"{name} is a Walk In voucher - enter its original sale number to use it.")
 		available = flt(-note.outstanding_amount, 2)
 		if amount > available:
 			frappe.throw(f"{name} holds {available}, not {amount}.")
 		normalized.append({"invoice": note.name, "amount": amount})
 		total += amount
-	if total > flt(invoice_doc.grand_total, 2):
+	# The rounded total: the invoice's outstanding is built from it, and the till caps a
+	# voucher at it - a total that rounds up would refuse a voucher paying exactly that.
+	if total > flt(invoice_doc.rounded_total or invoice_doc.grand_total, 2):
 		frappe.throw("Credit exceeds the invoice total.")
 	return normalized
 
