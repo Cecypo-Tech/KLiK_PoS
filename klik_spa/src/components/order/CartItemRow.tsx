@@ -14,6 +14,7 @@ import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
+import { qtyToSend } from "../../utils/lossOfSale";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { getCostMargin, getInclusiveTaxRate } from "../../utils/costMargin";
 import PriceListPopup from "../PriceListPopup";
@@ -158,6 +159,7 @@ export const CartItemRow = ({
   const [modalEntries, setModalEntries] = useState<BundleEntry[]>([]);
   const [modalQty, setModalQty] = useState(item.quantity);
   const [localQty, setLocalQty] = useState(item.quantity);
+  const qtyEdited = useRef(false);
   const [linePricePopup, setLinePricePopup] = useState<{ selectedIndex: number; position: PricePopupPosition } | null>(null);
   const priceTriggerRef = useRef<HTMLButtonElement>(null);
   const [isRateEditing, setIsRateEditing] = useState(false);
@@ -672,15 +674,22 @@ export const CartItemRow = ({
                 type="number"
                 min="0"
                 value={localQty}
-                onChange={(e) => setLocalQty(parseInt(e.target.value, 10) || 0)}
+                onFocus={() => { qtyEdited.current = false; }}
+                onChange={(e) => { qtyEdited.current = true; setLocalQty(parseInt(e.target.value, 10) || 0); }}
                 onBlur={() => {
+                  const typed = qtyToSend(qtyEdited.current, localQty);
+                  qtyEdited.current = false;
+                  if (typed === null) {
+                    setLocalQty(item.quantity);
+                    return;
+                  }
                   const available = item.available;
-                  if (!posDetails?.custom_enable_loss_of_sale && available > 0 && localQty > available && !item.allow_negative_stock) {
+                  if (!posDetails?.custom_enable_loss_of_sale && available > 0 && typed > available && !item.allow_negative_stock) {
                     setLocalQty(available);
                     onUpdateQuantity(item.id, available);
                     toast.warning(`Only ${available} units available. Quantity set to ${available}.`);
                   } else {
-                    onUpdateQuantity(item.id, localQty);
+                    onUpdateQuantity(item.id, typed);
                     setLocalQty(item.quantity);
                   }
                 }}

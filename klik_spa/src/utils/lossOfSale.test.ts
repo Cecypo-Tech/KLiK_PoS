@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyLosAdjustments, isQtyUnchanged, losToast, planLineQty, splitForLoS } from "./lossOfSale";
+import { applyLosAdjustments, losToast, planLineQty, qtyToSend, splitForLoS } from "./lossOfSale";
 
 const plan = (over: Partial<Parameters<typeof planLineQty>[0]> = {}) =>
   planLineQty({ limited: true, available: 10, requested: 16, otherLinesQty: 0, losEnabled: true, ...over });
@@ -54,15 +54,12 @@ it("losToast names the split", () => {
   );
 });
 
-describe("isQtyUnchanged", () => {
-  it("is true when a 9 + LoS 6 line gets its own 9 back, so its LoS is kept", () => {
-    expect(isQtyUnchanged({ quantity: 9 }, 9)).toBe(true);
+describe("qtyToSend", () => {
+  it("sends a qty retyped to the same value: on 10 + LoS 6, typing 10 means just the 10", () => {
+    expect(qtyToSend(true, 10)).toBe(10);
   });
-  it("is true for a 0-qty LoS line left as 0, so it is not removed", () => {
-    expect(isQtyUnchanged({ quantity: 0 }, 0)).toBe(true);
-  });
-  it("is false for a real edit or a missing line", () => {
-    expect(isQtyUnchanged({ quantity: 9 }, 5)).toBe(false);
-    expect(isQtyUnchanged(undefined, 9)).toBe(false);
+  it("sends nothing for a box left without an edit, so its LoS (or 0-qty LoS line) is kept", () => {
+    expect(qtyToSend(false, 10)).toBeNull();
+    expect(qtyToSend(false, 0)).toBeNull();
   });
 });

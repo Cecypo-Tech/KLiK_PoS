@@ -53,10 +53,11 @@ export function applyLosAdjustments<T extends { id: string; item_code?: string; 
   });
 }
 
-/** A qty box left without an edit reports the line's own quantity back. The store reads that as
- * a fresh request, which would drop the line's Loss of Sale (or delete a 0-qty LoS line). */
-export const isQtyUnchanged = (line: { quantity: number } | undefined, quantity: number) =>
-  !!line && line.quantity === quantity;
+/** What a qty box sends on blur: nothing unless it was typed in since focus. Left untouched it
+ * would report the line's own quantity, which the store reads as a fresh request - dropping the
+ * line's Loss of Sale (or deleting a 0-qty LoS line). Retyped, even to the same number, it is a
+ * request: on 10 + LoS 6, typing 10 means "just the 10". */
+export const qtyToSend = (edited: boolean, typed: number): number | null => (edited ? typed : null);
 
 export const losToast = (name: string, uom: string | undefined, split: LineSplit) =>
   `Only ${split.quantity} ${uom || "units"} of ${name} in stock: ${split.los_qty} recorded as Loss of Sale`;
