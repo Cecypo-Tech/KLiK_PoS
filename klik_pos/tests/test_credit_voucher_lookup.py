@@ -107,3 +107,9 @@ class TestVoucherLookup(FrappeTestCase):
 
 	def test_blank_numbers_are_no_match(self):
 		self.assertEqual(lookup_credit_voucher("", ""), NO_MATCH)
+
+	def test_non_text_numbers_are_no_match(self):
+		note = make_credit_note(CUSTOMER, COMPANY, 50)
+		self.assertEqual(lookup_credit_voucher({"name": note.name}, note.return_against), NO_MATCH)
+		self.assertEqual(lookup_credit_voucher(note.name, ["x"]), NO_MATCH)
+		self.assertEqual(lookup_credit_voucher(note.name, {"x": 1}), NO_MATCH)

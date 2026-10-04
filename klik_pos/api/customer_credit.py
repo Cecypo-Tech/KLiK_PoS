@@ -54,7 +54,9 @@ def get_customer_credit(customer, company, currency=None):
 
 def _same_number(typed, actual):
 	"""A voucher number as a cashier types it: spaces and letter case do not matter."""
-	return bool(actual) and (typed or "").strip().upper() == actual.strip().upper()
+	if not isinstance(typed, str) or not isinstance(actual, str):
+		return False
+	return bool(actual) and typed.strip().upper() == actual.strip().upper()
 
 
 @frappe.whitelist()
@@ -68,8 +70,10 @@ def lookup_credit_voucher(credit_note, original_invoice):
 	"""
 	frappe.has_permission("Sales Invoice", "read", throw=True)
 	no_match = {"status": "no_match"}
-	credit_note = (credit_note or "").strip()
-	if not credit_note or not (original_invoice or "").strip():
+	if not isinstance(credit_note, str) or not isinstance(original_invoice, str):
+		return no_match
+	credit_note = credit_note.strip()
+	if not credit_note or not original_invoice.strip():
 		return no_match
 
 	meta = frappe.get_meta("Sales Invoice")
@@ -132,8 +136,16 @@ def validate_allocations(invoice_doc, allocations):
 	"""Check every row BEFORE the sale submits, so apply cannot fail for business reasons."""
 	normalized = []
 	total = 0.0
+	seen = set()
 	for row in allocations or []:
-		name, amount = row.get("invoice"), flt(row.get("amount"), 2)
+		# Rows come from the till's payload: a dict "invoice" would be read as a filter and
+		# pick a note by any field, so only plain text numbers are accepted.
+		if not isinstance(row, dict) or not isinstance(row.get("invoice"), str):
+			frappe.throw("A voucher row must name its credit note.")
+		original = row.get("original")
+		if original is not None and not isinstance(original, str):
+			frappe.throw(f"{row['invoice']}: the original sale number must be text.")
+		name, amount = row["invoice"], flt(row.get("amount"), 2)
 		if amount <= 0:
 			continue
 		note = frappe.db.get_value(
@@ -153,6 +165,9 @@ def validate_allocations(invoice_doc, allocations):
 		)
 		if not note or note.docstatus != 1 or not note.is_return:
 			frappe.throw(f"{name} is not a submitted credit note.")
+		if note.name in seen:
+			frappe.throw(f"{note.name} is listed twice - apply each voucher once.")
+		seen.add(note.name)
 		if note.customer != invoice_doc.customer:
 			frappe.throw(f"{name} belongs to another customer.")
 		if note.company != invoice_doc.company or note.currency != invoice_doc.currency:

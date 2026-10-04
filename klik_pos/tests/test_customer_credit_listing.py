@@ -2,7 +2,7 @@
 
 Credit = a submitted Sales Invoice return with negative outstanding, same company and
 currency as the till will sell in. Walk In credit is never listed - nobody can prove
-it is theirs later; the exchange-now flow is the only way to spend it.
+it is theirs later; it is spent at the till as a voucher, by both of its numbers.
 """
 
 import frappe

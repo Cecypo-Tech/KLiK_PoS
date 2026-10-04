@@ -139,15 +139,32 @@ class TestWalkInVoucher(FrappeTestCase):
 
 	def test_without_the_original_it_is_refused(self):
 		note = make_credit_note(CUSTOMER, self.company, 30)
-		with self._as_walkin(), self.assertRaises(frappe.ValidationError):
-			validate_allocations(self._unsaved_sale(note), [{"invoice": note.name, "amount": 10}])
+		sale = self._unsaved_sale(note)
+		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "original sale number"):
+			validate_allocations(sale, [{"invoice": note.name, "amount": 10}])
 
 	def test_with_a_wrong_original_it_is_refused(self):
 		note = make_credit_note(CUSTOMER, self.company, 30)
-		with self._as_walkin(), self.assertRaises(frappe.ValidationError):
-			validate_allocations(
-				self._unsaved_sale(note), [{"invoice": note.name, "amount": 10, "original": "POS-WRONG"}]
-			)
+		sale = self._unsaved_sale(note)
+		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "original sale number"):
+			validate_allocations(sale, [{"invoice": note.name, "amount": 10, "original": "POS-WRONG"}])
+
+	def test_a_filter_in_place_of_the_note_number_is_refused(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		sale = self._unsaved_sale(note)
+		row = {
+			"invoice": {"return_against": note.return_against},
+			"amount": 10,
+			"original": note.return_against,
+		}
+		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "must name its credit note"):
+			validate_allocations(sale, [row])
+
+	def test_a_non_text_original_is_refused(self):
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		sale = self._unsaved_sale(note)
+		with self._as_walkin(), self.assertRaisesRegex(frappe.ValidationError, "must be text"):
+			validate_allocations(sale, [{"invoice": note.name, "amount": 10, "original": ["x"]}])
 
 	def test_with_its_original_it_is_accepted_ignoring_case_and_spaces(self):
 		note = make_credit_note(CUSTOMER, self.company, 30)
@@ -162,3 +179,11 @@ class TestWalkInVoucher(FrappeTestCase):
 		note = make_credit_note(CUSTOMER, self.company, 30)
 		rows = validate_allocations(self._unsaved_sale(note), [{"invoice": note.name, "amount": 10}])
 		self.assertEqual(rows, [{"invoice": note.name, "amount": 10.0}])
+
+	def test_the_same_voucher_twice_is_refused(self):
+		# Each row fits the note's 30; together they would spend 40 of it.
+		note = make_credit_note(CUSTOMER, self.company, 30)
+		sale = self._unsaved_sale(note, 100)
+		rows = [{"invoice": note.name, "amount": 20}, {"invoice": note.name.lower(), "amount": 20}]
+		with self.assertRaisesRegex(frappe.ValidationError, "listed twice"):
+			validate_allocations(sale, rows)
