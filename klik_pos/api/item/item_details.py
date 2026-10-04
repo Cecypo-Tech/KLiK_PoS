@@ -220,26 +220,25 @@ def get_full_pricing_and_batch_details(
     today_date = getdate(today())
     to_datetime = get_datetime(str(today_date) + " 23:59:59")
 
-    global_stock_query = """
-        SELECT 
-            SUM(actual_qty) as total_qty,
-            SUM(stock_value) as total_value,
-            AVG(valuation_rate) as avg_valuation_rate
+    bins = frappe.db.sql(
+        """
+        SELECT warehouse, actual_qty, stock_value, valuation_rate
         FROM `tabBin`
         WHERE item_code = %s
-    """
-
-    global_stock = frappe.db.sql(
-        global_stock_query,
+        """,
         (item_code,),
         as_dict=True,
     )
 
     global_stock_total = {
-        "total_qty": flt(global_stock[0].total_qty) if global_stock else 0,
-        "total_value": flt(global_stock[0].total_value) if global_stock else 0,
-        "avg_valuation_rate": flt(global_stock[0].avg_valuation_rate) if global_stock else 0,
+        "total_qty": sum(flt(b.actual_qty) for b in bins),
+        "total_value": sum(flt(b.stock_value) for b in bins),
+        "avg_valuation_rate": sum(flt(b.valuation_rate) for b in bins) / len(bins) if bins else 0,
     }
+    stock_by_warehouse = sorted(
+        ({"warehouse": b.warehouse, "qty": flt(b.actual_qty)} for b in bins if flt(b.actual_qty)),
+        key=lambda row: -row["qty"],
+    )
 
     price_query = f"""
         SELECT price_list, price_list_rate AS rate, currency, uom, customer, valid_from, valid_upto, name
@@ -531,6 +530,7 @@ def get_full_pricing_and_batch_details(
         "has_batch_no": item_info.has_batch_no,
         "has_serial_no": item_info.has_serial_no,
         "global_stock_total": global_stock_total,
+        "stock_by_warehouse": stock_by_warehouse,
         "total_bal_qty": total_bal_qty,
         "total_bal_val": total_bal_val,
         "price_lists": active_prices,

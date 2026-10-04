@@ -14,12 +14,16 @@ stays held, to be finished from the Held tab.
 """
 
 import json
+import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, flt
+from frappe.utils import add_to_date, cint, flt, get_datetime, get_system_timezone, now_datetime
 
 from klik_pos.api import sales_order
+from klik_pos.api.mpesa import _klik_entry_for_transid, _refuse_if_used_meanwhile
 from klik_pos.api.sales_invoice import (
 	_keeping_naming_series,
 	_parse_extra_fields,
@@ -29,6 +33,7 @@ from klik_pos.api.sales_invoice import (
 )
 
 EXPRESS = "Mpesa Express Request"
+REGISTER = "Mpesa C2B Payment Register"
 # A push in either state may pay the order, or has: the order must not be lost.
 SAVEPOINT = "klik_submit_mpesa_order"
 # Safaricom drops an unanswered prompt after about a minute. A push still In Progress well
@@ -288,6 +293,15 @@ def _paid_push_refusal(order_id, data):
 			).format(", ".join(reversed(paid))),
 		)
 	push = paid[0]
+	used = _receipt_used(push)
+	if used:
+		return (
+			"mpesa_receipt_used",
+			_(
+				"M-Pesa receipt {0} of request {1} is already used by another sale. Finish this "
+				"sale from the desk."
+			).format(used, push),
+		)
 	recorded = sum(
 		flt(row.get("amount"))
 		for row in (data or {}).get("paymentMethods") or []
@@ -302,6 +316,33 @@ def _paid_push_refusal(order_id, data):
 				"Reopen the sale from Held orders so the payment is picked up in full."
 			).format(push, collected, recorded),
 		)
+	return None
+
+
+def _receipt_used(push_name):
+	"""The paid push's receipt number when its register row is already used by a sale, else None.
+
+	The row is locked by name (`transid` has no index, so a locked read by it would lock the whole
+	register): a till that turned it into a Payment Entry a moment ago is seen, and one about to
+	waits for this sale, then finds the row touched and refuses (mpesa._ensure_receipt_payment_entries).
+	"""
+	transid = frappe.db.get_value(EXPRESS, push_name, "transaction_id")
+	if not transid:
+		return None
+	names = frappe.get_all(REGISTER, filters={"transid": transid}, pluck="name")
+	rows = (
+		frappe.db.sql(
+			f"SELECT docstatus, payment_entry FROM `tab{REGISTER}` WHERE name IN %(names)s FOR UPDATE",
+			{"names": tuple(names)},
+			as_dict=True,
+		)
+		if names
+		else []
+	)
+	if any(row.docstatus != 0 or row.payment_entry for row in rows) or _klik_entry_for_transid(transid):
+		return transid
+	for name in names:
+		frappe.db.set_value(REGISTER, name, "modified", now_datetime(), update_modified=False)
 	return None
 
 
@@ -440,3 +481,239 @@ def discard_mpesa_order(order_id):
 
 	delete_order(so)
 	return {"success": True, "kept": False, "message": _("Order {0} discarded.").format(order_id)}
+
+
+#: Times one cashier may ask Safaricom about pushes in a minute.
+CHECKS_PER_MINUTE = 10
+#: What Safaricom's status query says while the customer is still on the prompt: the "being
+#: processed" error, and the "still under processing" result.
+STILL_PROCESSING = ("500.001.1001", "4999")
+#: At most one pull per shortcode in this many seconds, however many tills ask.
+PULL_EVERY_SECONDS = 30
+#: A pull for a push reaches back this far before the push was sent.
+PULL_LEAD_MINUTES = 5
+PULL_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+PUSH_FIELDS = [
+	"name",
+	"status",
+	"transaction_id",
+	"result_desc",
+	"reference_doctype",
+	"reference_name",
+	"account_reference",
+	"phone_number",
+	"amount",
+	"settings",
+	"creation",
+]
+
+
+def _push_for_caller(request_name):
+	"""The push, when it was sent from an M-Pesa order the caller may act on."""
+	push = frappe.db.get_value(EXPRESS, request_name, PUSH_FIELDS, as_dict=True)
+	if not push or push.reference_doctype != "Sales Order":
+		frappe.throw(_("M-Pesa request {0} is not for a checkout order.").format(request_name))
+	so = frappe.get_doc("Sales Order", push.reference_name)
+	if not so.get("custom_klik_mpesa_order") or not sales_order._may_act_on_held_order(so):
+		frappe.throw(_("You are not allowed to act on order {0}.").format(so.name))
+	return push
+
+
+def _request_pull(push):
+	"""Ask Safaricom for the shortcode's payments from a little before the push until now, so a
+	paid push's receipt reaches the register: a background job, at most once per
+	PULL_EVERY_SECONDS per shortcode, whoever asks."""
+	from frappe_mpsa_payments.frappe_mpsa_payments.api.m_pesa_api import pull_transactions
+
+	key = frappe.cache.make_key(f"klik_mpesa_pull:{push.settings}")
+	if not frappe.cache.set(key, 1, ex=PULL_EVERY_SECONDS, nx=True):
+		return
+	start = add_to_date(get_datetime(push.creation), minutes=-PULL_LEAD_MINUTES)
+	pull_transactions(
+		push.settings, start.strftime(PULL_TIME_FORMAT), now_datetime().strftime(PULL_TIME_FORMAT)
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def check_mpesa_push(request_name):
+	"""Ask Safaricom what became of a push whose confirmation has not arrived.
+
+	`paid`: the customer paid. Safaricom's answer carries no receipt number, so the push is
+	Completed with its receipt pending, and a pull is requested to bring the receipt in.
+	`not_paid` (with Safaricom's reason): the push failed. `waiting`: the customer is still on
+	the prompt. `no_answer`: Safaricom answered with an error, or not at all. Only an answer
+	changes the push (frappe_mpsa_payments' status handlers); a push already answered is
+	reported without asking again.
+	"""
+	push = _push_for_caller(request_name)
+	key = frappe.cache.make_key(f"klik_mpesa_checks:{frappe.session.user}")
+	pipe = frappe.cache.pipeline()
+	pipe.set(key, 0, ex=60, nx=True)
+	pipe.incr(key)
+	if pipe.execute()[1] > CHECKS_PER_MINUTE:
+		frappe.throw(
+			_("Too many M-Pesa checks - wait a minute, then check again."), frappe.RateLimitExceededError
+		)
+
+	reply = None
+	if push.status == "In Progress":
+		from frappe_mpsa_payments.frappe_mpsa_payments.api.m_pesa_api import check_transaction_status
+
+		reply = check_transaction_status(push.name)
+		push.update(
+			frappe.db.get_value(EXPRESS, push.name, ["status", "transaction_id", "result_desc"], as_dict=True)
+		)
+
+	if push.status == "Completed":
+		if not push.transaction_id:
+			_request_pull(push)
+		return {"outcome": "paid", "transaction_id": push.transaction_id}
+	if push.status == "Failed":
+		return {"outcome": "not_paid", "reason": push.result_desc}
+	reply = reply if isinstance(reply, dict) else {}
+	code = str(reply.get("errorCode") or reply.get("ResultCode") or "")
+	return {"outcome": "waiting" if code in STILL_PROCESSING else "no_answer"}
+
+
+#: Safaricom's own times are East Africa Time; one without an offset is read as that.
+SAFARICOM_TZ = ZoneInfo("Africa/Nairobi")
+RECEIPT_FIELDS = [
+	"name",
+	"transid",
+	"transtime",
+	"transamount",
+	"msisdn",
+	"full_name",
+	"billrefnumber",
+	"businessshortcode",
+	"posting_date",
+	"docstatus",
+	"payment_entry",
+	"creation",
+]
+
+
+def _received_at(row):
+	"""When the money arrived, in site time: Safaricom's own time when the row has one we can
+	read - a pulled row's carries its offset, a webhook or statement row's is East Africa Time -
+	else when the register stored the row."""
+	raw = (row.transtime or "").strip()
+	try:
+		at = datetime.strptime(raw, "%Y%m%d%H%M%S") if raw.isdigit() else datetime.fromisoformat(raw)
+	except ValueError:
+		return get_datetime(row.creation)
+	if not at.tzinfo:
+		at = at.replace(tzinfo=SAFARICOM_TZ)
+	return at.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
+
+
+def _same_payer(msisdn, phone):
+	"""The receipt was paid from the push's phone. Safaricom may mask digits with *: every digit
+	it shows must be the push phone's in that place, and it must show at least six of them."""
+	shown = re.sub(r"[^0-9*]", "", msisdn or "")
+	phone = re.sub(r"\D", "", phone or "")
+	return (
+		len(shown) == len(phone)
+		and sum(c.isdigit() for c in shown) >= 6
+		and all(s in ("*", p) for s, p in zip(shown, phone, strict=True))
+	)
+
+
+def _why_not_receipt(push, row):
+	"""Why a register row cannot be the push's receipt, or None when it can.
+
+	All must hold: the push's own shortcode; the push's amount; received after the push was sent; unused - not taken
+	by a sale's Payment Entry, nor another push's receipt; and paid from the push's phone or
+	against its order's number.
+	"""
+	if not row.transid:
+		return _("it has no M-Pesa receipt number")
+	if row.businessshortcode != frappe.db.get_value("Mpesa Settings", push.settings, "business_shortcode"):
+		return _("it was paid to another M-Pesa number")
+	if flt(row.transamount, 2) != flt(push.amount, 2):
+		return _("it is for {0}, not {1}").format(flt(row.transamount, 2), flt(push.amount, 2))
+	if _received_at(row) < get_datetime(push.creation):
+		return _("it was paid before the M-Pesa request was sent")
+	reference = (push.account_reference or "").strip().upper()
+	by_reference = bool(reference) and (row.billrefnumber or "").strip().upper() == reference
+	if not (by_reference or _same_payer(row.msisdn, push.phone_number)):
+		return _("it was paid from another phone, against another account")
+	if row.docstatus != 0 or row.payment_entry or _klik_entry_for_transid(row.transid):
+		return _("it is already used by a sale")
+	other = frappe.db.get_value(EXPRESS, {"transaction_id": row.transid, "name": ["!=", push.name]}, "name")
+	if other:
+		return _("it is already M-Pesa request {0}'s receipt").format(other)
+	return None
+
+
+def _push_receipts(push):
+	"""The register rows that can be the push's receipt, newest first. Looked for on its own
+	shortcode, for its amount, among rows stored since it was sent - a payment is stored after
+	it is made."""
+	rows = frappe.get_all(
+		REGISTER,
+		filters={
+			"businessshortcode": frappe.db.get_value("Mpesa Settings", push.settings, "business_shortcode"),
+			"docstatus": 0,
+			"transamount": flt(push.amount),
+			"creation": [">=", push.creation],
+		},
+		fields=RECEIPT_FIELDS,
+		order_by="creation desc",
+	)
+	return [row for row in rows if not _why_not_receipt(push, row)]
+
+
+@frappe.whitelist(methods=["POST"])
+def find_push_receipts(request_name, pull=0):
+	"""The register receipts that can be a paid push's, for the cashier to pick.
+
+	Safaricom's paid answer to a status check carries no receipt number: the push is paid, its
+	receipt pending, until one is attached (attach_push_receipt). `pull` also asks Safaricom for
+	the shortcode's recent payments (throttled, see _request_pull). A push that has its receipt
+	number, or is not paid, answers with no receipts.
+	"""
+	push = _push_for_caller(request_name)
+	if push.status != "Completed" or push.transaction_id:
+		return {"status": push.status, "transaction_id": push.transaction_id, "receipts": []}
+	if cint(pull):
+		_request_pull(push)
+	return {"status": push.status, "transaction_id": None, "receipts": _push_receipts(push)}
+
+
+@frappe.whitelist(methods=["POST"])
+def attach_push_receipt(request_name, register):
+	"""Make a register receipt a paid push's own - the receipt number Safaricom's paid answer
+	left out. The push then looks exactly like a confirmed one: the sale submits with it, and
+	once it has, the receipt is no longer offered to other sales (mpesa._stk_used_transids).
+
+	Checked again under locks - the order, the receipt, then the push - so a push gets one
+	receipt and a receipt one push: attaching touches the receipt's row, and a till attaching
+	the same receipt at the same moment then finds it changed and is refused. If Safaricom's own
+	confirmation still comes, it writes its receipt number over this one (stk_push_callback);
+	the used checks follow the push's number, so a receipt attached here is free again when the
+	two differ.
+	"""
+	push = _push_for_caller(request_name)
+	_load(push.reference_name)
+	row = frappe.db.get_value(
+		REGISTER, register, [*RECEIPT_FIELDS, "modified"], as_dict=True, for_update=True
+	)
+	if not row:
+		frappe.throw(_("M-Pesa receipt {0} was not found.").format(register))
+	_refuse_if_used_meanwhile(REGISTER, register, "modified", row.modified, row.transid)
+	push = frappe.db.get_value(EXPRESS, request_name, PUSH_FIELDS, as_dict=True, for_update=True)
+	if push.status != "Completed" or push.transaction_id:
+		frappe.throw(_("M-Pesa request {0} is not waiting for its receipt.").format(request_name))
+	reason = _why_not_receipt(push, row)
+	if reason:
+		frappe.throw(_("Receipt {0} cannot be this payment's: {1}.").format(row.transid or register, reason))
+	frappe.db.set_value(EXPRESS, push.name, "transaction_id", row.transid)
+	frappe.db.set_value(REGISTER, register, "modified", now_datetime(), update_modified=False)
+	frappe.get_doc(EXPRESS, push.name).add_comment(
+		"Comment",
+		_(
+			"{0} attached M-Pesa receipt {1}: Safaricom confirmed the payment without its receipt number."
+		).format(frappe.utils.get_fullname(), row.transid),
+	)
+	return {"transaction_id": row.transid}

@@ -25,11 +25,19 @@ export function mpesaDraftToDiscard({ draftName, workInFlight, stkSentFrom }: Mp
 
 /** Why the order cannot be held now, or null. */
 export function holdBlockedByMpesa(
-  flow: { source: "stk" | "c2b"; status: "idle" | "in_progress" | "completed" | "failed" } | null,
+  flow: {
+    source: "stk" | "c2b";
+    status: "idle" | "in_progress" | "completed" | "failed";
+    transactionId?: string;
+  } | null,
 ): string | null {
   if (flow?.source !== "stk") return null;
   if (flow.status === "in_progress") {
     return "An M-Pesa request is waiting on the customer. Wait for it to finish before holding this order.";
+  }
+  if (flow.status === "completed" && !flow.transactionId) {
+    // Paid with its receipt pending (utils/stkPushCheck): the order is on the Held tab already.
+    return "The customer has paid, but the M-Pesa receipt has not arrived. Close checkout: the sale stays on Held with its payment.";
   }
   if (flow.status === "completed") {
     return "The customer has paid by M-Pesa. Submit the sale instead of holding it.";

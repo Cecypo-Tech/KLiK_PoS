@@ -28,8 +28,36 @@ interface ItemFullData {
   valuation_rate: number;
   price_lists: PriceListEntry[];
   batches: Batch[];
+  stock_by_warehouse?: { warehouse: string; qty: number }[];
   uom: string;
   brand?: string;
+}
+
+const OTHER_WAREHOUSES_SHOWN = 6;
+
+function OtherWarehouses({ rows }: { rows: { warehouse: string; qty: number }[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">
+        Other Warehouses
+      </p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+        {rows.slice(0, OTHER_WAREHOUSES_SHOWN).map((row) => (
+          <div key={row.warehouse} className="flex justify-between gap-2 text-[11px]" title={row.warehouse}>
+            {/* ERPNext warehouse names end in " - <company abbr>" */}
+            <span className="truncate text-gray-600 dark:text-gray-400">{row.warehouse.replace(/ - [^-]+$/, "")}</span>
+            <span className="shrink-0 font-semibold text-gray-900 dark:text-white">{row.qty}</span>
+          </div>
+        ))}
+      </div>
+      {rows.length > OTHER_WAREHOUSES_SHOWN && (
+        <div className="text-[10px] text-gray-400 pt-0.5">
+          +{rows.length - OTHER_WAREHOUSES_SHOWN} more
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface ProductTooltipProps {
@@ -48,7 +76,7 @@ export default function ProductTooltip({
   const [isLoading, setIsLoading] = useState(true);
   const [position, setPosition] = useState({ top: true, left: true });
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const { posDetails, loading, hideUnavailableItems, useScannerOnly, scalePrefix, defaultView } = usePOSProfileStore();
+  const { posDetails, loading, warehouse: selectedWarehouse } = usePOSProfileStore();
 
   const warehouse = useMemo(() => {
     if (loading) return null;
@@ -116,6 +144,8 @@ export default function ProductTooltip({
   const marginPercentage = costInclTax > 0 && item.price > 0 ? (margin / item.price) * 100 : 0;
   const isLoss = margin < 0;
   const bundleComponents = item.bundle_items ?? [];
+  const activeWarehouse = selectedWarehouse || warehouse;
+  const otherWarehouses = (data?.stock_by_warehouse ?? []).filter((row) => row.warehouse !== activeWarehouse);
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -133,9 +163,9 @@ export default function ProductTooltip({
       <div
         ref={tooltipRef}
         onClick={handleClick}
-        className={`absolute z-[100] w-80 !opacity-100 bg-white dark:bg-gray-800 shadow-2xl rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${verticalClass} ${horizontalClass} text-left cursor-pointer`}
+        className={`absolute z-[100] w-80 !opacity-100 bg-white dark:bg-gray-800 shadow-2xl rounded-lg p-3 border border-gray-200 dark:border-gray-700 ${verticalClass} ${horizontalClass} text-left cursor-pointer`}
       >
-        <div className="border-b border-gray-100 dark:border-gray-700 pb-2 mb-3">
+        <div className="border-b border-gray-100 dark:border-gray-700 pb-1.5 mb-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="font-bold text-gray-900 dark:text-white leading-tight truncate">
@@ -166,12 +196,12 @@ export default function ProductTooltip({
             </span>
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-4 rounded-lg">
+          <div className="space-y-2.5">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-2.5 rounded-lg">
               <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase font-semibold tracking-wide">
                 {item.is_product_bundle ? "Bundle Sale Price" : "Sale Price"}
               </p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">
+              <p className="text-xl font-bold text-gray-900 dark:text-white">
                 {formatCurrencyWithSymbol(item.price, item.currency_symbol)}
               </p>
             </div>
@@ -204,9 +234,11 @@ export default function ProductTooltip({
               </div>
             )}
 
+            <OtherWarehouses rows={otherWarehouses} />
+
             {data?.batches && data.batches.length > 0 && (
               <div>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
                   <span>📦</span> Batch Stock
                 </p>
                 <div className="space-y-1">
@@ -237,7 +269,7 @@ export default function ProductTooltip({
               </div>
             )}
 
-            <div className="text-center pt-2">
+            <div className="text-center">
               <span className="text-[10px] text-blue-500 dark:text-blue-400 font-medium">
                 Click to view full details →
               </span>
@@ -252,9 +284,9 @@ export default function ProductTooltip({
     <div
       ref={tooltipRef}
       onClick={handleClick}
-      className={`absolute z-[100] w-80 bg-white dark:bg-gray-800 shadow-2xl rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${verticalClass} ${horizontalClass} text-left cursor-pointer`}
+      className={`absolute z-[100] w-80 bg-white dark:bg-gray-800 shadow-2xl rounded-lg p-3 border border-gray-200 dark:border-gray-700 ${verticalClass} ${horizontalClass} text-left cursor-pointer`}
     >
-      <div className="border-b border-gray-100 dark:border-gray-700 pb-2 mb-3">
+      <div className="border-b border-gray-100 dark:border-gray-700 pb-1.5 mb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="font-bold text-gray-900 dark:text-white leading-tight truncate">
@@ -285,22 +317,22 @@ export default function ProductTooltip({
           </span>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2.5">
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg">
+            <div className="bg-gray-50 dark:bg-gray-900/50 p-2.5 rounded-lg">
               <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">
                 {item.is_product_bundle ? "Bundle Price" : "Sale Price"}
               </p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">
+              <p className="text-lg font-bold text-gray-900 dark:text-white">
                 {formatCurrencyWithSymbol(item.price, item.currency_symbol)}
               </p>
             </div>
 
-            <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg">
+            <div className="bg-gray-50 dark:bg-gray-900/50 p-2.5 rounded-lg">
               <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">
                 Our Cost{isInclusiveTax ? " (incl. VAT)" : ""}
               </p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">
+              <p className="text-lg font-bold text-gray-900 dark:text-white">
                 {formatCurrencyWithSymbol(costInclTax, item.currency_symbol)}
               </p>
               {isInclusiveTax && (
@@ -340,7 +372,7 @@ export default function ProductTooltip({
           )}
 
           <div
-            className={`p-3 rounded-lg bg-gradient-to-r ${
+            className={`p-2.5 rounded-lg bg-gradient-to-r ${
               isLoss
                 ? "from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20"
                 : "from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20"
@@ -351,7 +383,7 @@ export default function ProductTooltip({
                 <p className={`text-[10px] uppercase font-semibold tracking-wide ${isLoss ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                   {isLoss ? "Loss" : "Profit Margin"}
                 </p>
-                <p className={`text-2xl font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                <p className={`text-lg font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
                   {formatCurrencyWithSymbol(margin, item.currency_symbol)}
                 </p>
               </div>
@@ -359,12 +391,12 @@ export default function ProductTooltip({
                 <p className={`text-[10px] uppercase font-semibold tracking-wide ${isLoss ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                   Markup
                 </p>
-                <p className={`text-lg font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                <p className={`text-sm font-bold ${isLoss ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}>
                   {marginPercentage.toFixed(1)}%
                 </p>
               </div>
             </div>
-            <div className={`mt-2 h-1.5 rounded-full overflow-hidden ${isLoss ? "bg-red-200 dark:bg-red-800" : "bg-emerald-200 dark:bg-emerald-800"}`}>
+            <div className={`mt-1.5 h-1 rounded-full overflow-hidden ${isLoss ? "bg-red-200 dark:bg-red-800" : "bg-emerald-200 dark:bg-emerald-800"}`}>
               <div
                 className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full"
                 style={{ width: `${Math.max(0, Math.min(marginPercentage, 100))}%` }}
@@ -374,19 +406,19 @@ export default function ProductTooltip({
 
           {data?.price_lists && data.price_lists.length > 0 && (
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
                 <span>📋</span> Alternative Prices
               </p>
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
                 {data.price_lists.slice(0, 3).map((pl, i) => (
                   <div
                     key={i}
-                    className="flex justify-between items-center text-xs p-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded"
+                    className="flex justify-between items-center text-[11px] px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded"
                   >
                     <span className="text-gray-600 dark:text-gray-400 truncate max-w-[150px] font-medium">
                       {pl.price_list}
                     </span>
-                    <span className="font-bold text-gray-900 dark:text-white">
+                    <span className="font-semibold text-gray-900 dark:text-white">
                       {formatCurrencyWithSymbol(pl.rate, item.currency_symbol)}
                     </span>
                   </div>
@@ -400,9 +432,11 @@ export default function ProductTooltip({
             </div>
           )}
 
+          <OtherWarehouses rows={otherWarehouses} />
+
           {data?.batches && data.batches.length > 0 && (
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+            <div className="pt-1.5 border-t border-gray-100 dark:border-gray-700">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
                 <span>📦</span> Batch Stock
               </p>
               <div className="space-y-1">
@@ -433,7 +467,7 @@ export default function ProductTooltip({
             </div>
           )}
 
-          <div className="text-center pt-2">
+          <div className="text-center">
             <span className="text-[10px] text-blue-500 dark:text-blue-400 font-medium">
               Click to view full details →
             </span>
