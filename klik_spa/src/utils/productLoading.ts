@@ -59,3 +59,60 @@ export function searchFooterLabel(shown: number, total: number): string {
   }
   return `${shown} ${shown === 1 ? "match" : "matches"}`;
 }
+
+/** Where the next page starts: the previous page's last row (see get_items' next_cursor). */
+export interface PageCursor {
+  after_name: string;
+  after_code: string;
+}
+
+export interface PagePosition {
+  cursor: PageCursor | null;
+  offset: number;
+}
+
+/**
+ * Whether a load-more actually moved forward. The grid's sentinel keeps firing while
+ * hasMore is true, so a page that moved nothing must stop paging (see pagination.ts).
+ * A server without cursors still advances by offset.
+ */
+export function pageAdvanced(before: PagePosition, after: PagePosition): boolean {
+  if (after.cursor) {
+    return (
+      !before.cursor ||
+      after.cursor.after_code !== before.cursor.after_code ||
+      after.cursor.after_name !== before.cursor.after_name
+    );
+  }
+  return after.offset > before.offset;
+}
+
+export interface ScrollNode {
+  parentElement: ScrollNode | null;
+}
+
+/**
+ * The element that actually scrolls the grid. The product list scrolls inside a container,
+ * not the page; an IntersectionObserver rooted on the viewport sees the sentinel only once
+ * the container shows it, so its margin could never prefetch. Null means the page scrolls.
+ */
+export function findScrollParent<T extends ScrollNode>(node: T, overflowY: (el: T) => string): T | null {
+  let current = node.parentElement as T | null;
+  while (current) {
+    const value = overflowY(current);
+    if (value === "auto" || value === "scroll") return current;
+    current = current.parentElement as T | null;
+  }
+  return null;
+}
+
+/** Ask for the next page while the cashier is still two screens away from the end. */
+export function prefetchRootMargin(viewportHeight: number): string {
+  return `0px 0px ${Math.round(Math.max(viewportHeight, 400) * 2)}px 0px`;
+}
+
+/** Placeholder cards while a page loads: one grid row, or a few list rows. */
+export function loadMoreSkeletonCount(isMobile: boolean, view: "grid" | "list"): number {
+  if (view === "list") return 3;
+  return isMobile ? 2 : 4;
+}

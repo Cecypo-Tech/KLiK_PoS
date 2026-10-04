@@ -4,9 +4,9 @@ import { toast } from 'react-toastify';
 import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
-import { resolveNextOffset, shouldKeepPaginating } from '../utils/pagination';
+import { resolveNextOffset } from '../utils/pagination';
 import { expandTaxProfiles } from '../utils/productPayload';
-import { createKeyedDedupe, firstPageKey, listingIncludesGroups, SEARCH_PAGE_SIZE } from '../utils/productLoading';
+import { createKeyedDedupe, firstPageKey, listingIncludesGroups, pageAdvanced, SEARCH_PAGE_SIZE, type PageCursor } from '../utils/productLoading';
 
 interface ProductStoreState {
   products: MenuItem[];
@@ -21,6 +21,7 @@ interface ProductStoreState {
   totalCount: number;
   hasMore: boolean;
   currentOffset: number;
+  currentCursor: PageCursor | null;
   isLoading: boolean;
   isLoadingMore: boolean;
   isSearching: boolean;
@@ -56,13 +57,22 @@ interface ProductStoreState {
   executeSearch: (query: string) => Promise<void>;
   attemptIdentifierLookup: (query: string) => Promise<boolean>;
   fetchItemByIdentifier: (code: string) => Promise<MenuItem | null>;
-  fetchProductsFromAPI: (limit: number, offset: number, search: string, category: string, customerId: string, priceList?: string) => Promise<{
+  fetchProductsFromAPI: (
+    limit: number,
+    offset: number,
+    search: string,
+    category: string,
+    customerId: string,
+    priceList?: string,
+    options?: { cursor?: PageCursor | null; includeCount?: boolean },
+  ) => Promise<{
     items: MenuItem[];
     item_groups: ItemGroup[];
-    total_count: number;
+    total_count: number | null;
     page_count: number;
     has_more: boolean;
     next_offset: number | null;
+    next_cursor: PageCursor | null;
     degraded: boolean;
     degraded_reason: string | null;
     stock_unavailable: boolean;
@@ -80,7 +90,7 @@ interface ProductStoreState {
 }
 
 const PAGE_SIZE = 250;
-const LOAD_MORE_SIZE = 500;
+const LOAD_MORE_SIZE = 150;
 const CACHE_DURATION = 5 * 60 * 1000;
 let currentPosName = '';
 let refreshTimers: Array<ReturnType<typeof setInterval>> = [];
@@ -109,6 +119,7 @@ export const useProductStore = create<ProductStoreState>()(
       degradedReason: null,
       stockUnavailable: false,
       currentOffset: 0,
+      currentCursor: null,
       isLoading: false,
       isLoadingMore: false,
       isSearching: false,
@@ -186,7 +197,7 @@ export const useProductStore = create<ProductStoreState>()(
         }
       },
 
-      fetchProductsFromAPI: async (limit, offset, search, category, customerId, priceList) => {
+      fetchProductsFromAPI: async (limit, offset, search, category, customerId, priceList, options) => {
         try {
           const params = new URLSearchParams({
             limit: limit.toString(),
@@ -213,6 +224,13 @@ export const useProductStore = create<ProductStoreState>()(
           // only while a search narrows their counts.
           params.append('include_groups', listingIncludesGroups(search || '') ? '1' : '0');
           params.append('compact_tax', '1');
+          // Later pages skip the count (the till keeps the first page's) and continue
+          // after the previous page's last row.
+          if (options?.includeCount === false) params.append('include_count', '0');
+          if (options?.cursor) {
+            params.append('after_name', options.cursor.after_name);
+            params.append('after_code', options.cursor.after_code);
+          }
 
           const response = await fetch(`/api/method/klik_pos.api.item.item_listing.get_items?${params.toString()}`);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -223,13 +241,14 @@ export const useProductStore = create<ProductStoreState>()(
           return {
             items: expandTaxProfiles(message.items || [], message.tax_profiles),
             item_groups: message.item_groups || [],
-            total_count: message.total_count || 0,
+            total_count: typeof message.total_count === 'number' ? message.total_count : null,
             page_count: message.page_count ?? (message.items || []).length,
             has_more: message.has_more || false,
             // Advances by SQL rows consumed, which is not the same as items received once
             // hide_unavailable_items filters a page. null on an older backend that does
             // not send it - callers fall back to counting items.
             next_offset: typeof message.next_offset === 'number' ? message.next_offset : null,
+            next_cursor: message.next_cursor ?? null,
             degraded: !!message.degraded,
             degraded_reason: message.degraded_reason ?? null,
             stock_unavailable: !!message.stock_unavailable,
@@ -237,8 +256,8 @@ export const useProductStore = create<ProductStoreState>()(
         } catch (err) {
           console.error('fetchProductsFromAPI error:', err);
           return {
-            items: [], item_groups: [], total_count: 0, page_count: 0, has_more: false,
-            next_offset: null, degraded: false, degraded_reason: null, stock_unavailable: false,
+            items: [], item_groups: [], total_count: null, page_count: 0, has_more: false,
+            next_offset: null, next_cursor: null, degraded: false, degraded_reason: null, stock_unavailable: false,
           };
         }
       },
@@ -300,17 +319,18 @@ export const useProductStore = create<ProductStoreState>()(
               category: 'all',
               search: '',
             }),
-            () => get().fetchProductsFromAPI(PAGE_SIZE, 0, '', 'all', effectiveCustomerId, effectivePriceList)
+            () => get().fetchProductsFromAPI(PAGE_SIZE, 0, '', 'all', effectiveCustomerId, effectivePriceList, { includeCount: true })
           );
 
           set({
             products: result.items,
-            totalCount: result.total_count,
+            totalCount: result.total_count ?? 0,
             hasMore: result.has_more,
             degraded: result.degraded,
             degradedReason: result.degraded_reason,
             stockUnavailable: result.stock_unavailable,
             currentOffset: resolveNextOffset(result.next_offset, result.items.length),
+            currentCursor: result.next_cursor,
             isLoading: false,
             lastFullRefresh: Date.now(),
             lastUpdated: new Date(),
@@ -355,7 +375,8 @@ export const useProductStore = create<ProductStoreState>()(
               requestSearchQuery,
               requestCategory,
               customerId,
-              priceList
+              priceList,
+              reset ? { includeCount: true } : { includeCount: false, cursor: get().currentCursor },
             );
           const result = reset
             ? await dedupeFirstPage(
@@ -396,7 +417,7 @@ export const useProductStore = create<ProductStoreState>()(
                 : get().baseItemGroups.length
                   ? get().baseItemGroups
                   : get().itemGroups,
-            totalCount: result.total_count,
+            totalCount: result.total_count ?? get().totalCount,
             hasMore: result.has_more,
             degraded: result.degraded,
             degradedReason: result.degraded_reason,
@@ -405,6 +426,7 @@ export const useProductStore = create<ProductStoreState>()(
               result.next_offset,
               reset ? result.items.length : get().currentOffset + result.items.length,
             ),
+            currentCursor: result.next_cursor,
             isLoading: false,
             lastFullRefresh: Date.now(),
             lastUpdated: new Date(),
@@ -419,19 +441,19 @@ export const useProductStore = create<ProductStoreState>()(
         const { isLoadingMore, hasMore, searchQuery, fetchProducts } = get();
         if (isLoadingMore || !hasMore || searchQuery) return;
 
-        const offsetBefore = get().currentOffset;
+        const before = { cursor: get().currentCursor, offset: get().currentOffset };
 
         set({ isLoadingMore: true });
         await fetchProducts(false);
 
         // Backstop: the grid's infinite-scroll sentinel re-fires for as long as hasMore is
-        // true, so a page that leaves the cursor where it was loops forever. Require real
+        // true, so a page that leaves the position where it was loops forever. Require real
         // forward progress rather than trusting the server's has_more. A context change
-        // mid-flight also lands here (the stale-response guard above returns without moving
-        // the cursor) and stopping is the right outcome there too - the reset fetch that
-        // follows the change repopulates hasMore.
+        // mid-flight also lands here (the stale-response guard returns without moving the
+        // position) and stopping is the right outcome there too.
         const state = get();
-        const keepGoing = shouldKeepPaginating(state.hasMore, offsetBefore, state.currentOffset);
+        const keepGoing =
+          state.hasMore && pageAdvanced(before, { cursor: state.currentCursor, offset: state.currentOffset });
         set({ isLoadingMore: false, ...(keepGoing ? {} : { hasMore: false }) });
       },
 
@@ -538,12 +560,13 @@ export const useProductStore = create<ProductStoreState>()(
             set({
               products: result.items,
               itemGroups: result.item_groups,
-              totalCount: result.total_count,
+              totalCount: result.total_count ?? 0,
               hasMore: false,
               degraded: result.degraded,
               degradedReason: result.degraded_reason,
               stockUnavailable: result.stock_unavailable,
               currentOffset: resolveNextOffset(result.next_offset, result.items.length),
+              currentCursor: null,
               isSearching: false,
             });
           }
@@ -790,6 +813,7 @@ export const useProductStore = create<ProductStoreState>()(
           totalCount: 0,
           hasMore: false,
           currentOffset: 0,
+          currentCursor: null,
           isLoading: false,
           isLoadingMore: false,
           isSearching: false,

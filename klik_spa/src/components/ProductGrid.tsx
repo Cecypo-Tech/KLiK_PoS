@@ -1,6 +1,6 @@
 "use client";
 
-import { searchFooterLabel } from "../utils/productLoading";
+import { findScrollParent, loadMoreSkeletonCount, prefetchRootMargin, searchFooterLabel } from "../utils/productLoading";
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import type { MenuItem } from "../../types";
 import { useProduct } from "../providers/ProductProvider";
@@ -459,25 +459,19 @@ export default function ProductGrid({
   );
 
   useEffect(() => {
-    const option = {
-      root: null,
-      rootMargin: "200px",
+    const target = loadMoreRef.current;
+    if (!target) return;
+    // Observe against the element that really scrolls the list, two screens ahead, so the
+    // next page arrives before the cashier reaches the end.
+    const root = findScrollParent<HTMLElement>(target, (el) => getComputedStyle(el).overflowY);
+    const observer = new IntersectionObserver(handleObserver, {
+      root,
+      rootMargin: prefetchRootMargin(root ? root.clientHeight : window.innerHeight),
       threshold: 0,
-    };
-
-    const observer = new IntersectionObserver(handleObserver, option);
-    const currentLoadMoreRef = loadMoreRef.current;
-
-    if (currentLoadMoreRef) {
-      observer.observe(currentLoadMoreRef);
-    }
-
-    return () => {
-      if (currentLoadMoreRef) {
-        observer.unobserve(currentLoadMoreRef);
-      }
-    };
-  }, [handleObserver]);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [handleObserver, viewMode]);
 
   // Same amber treatment as CustomerReceivablesTable, so a degraded response reads as one
   // system wherever it appears. Rendered in every branch below - including the empty state,
@@ -520,11 +514,10 @@ export default function ProductGrid({
         {onLoadMore && (
           <div ref={loadMoreRef} className="py-4 flex justify-center">
             {isLoadingMore && (
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-beveren-600"></div>
-                <span className="text-gray-500 dark:text-gray-400 text-sm">
-                  Loading more items...
-                </span>
+              <div className="w-full space-y-2 px-1" aria-hidden="true">
+                {Array.from({ length: loadMoreSkeletonCount(isMobile, "list") }, (_, k) => (
+                  <div key={`load-more-row-${k}`} className="h-10 rounded-md bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                ))}
               </div>
             )}
             {!isLoadingMore && hasMore && (
@@ -648,18 +641,18 @@ export default function ProductGrid({
             quantityBuffer={focusedIndex === i ? displayQuantityBuffer : ""}
           />
         ))}
+        {isLoadingMore &&
+          Array.from({ length: loadMoreSkeletonCount(isMobile, "grid") }, (_, k) => (
+            <div
+              key={`load-more-skeleton-${k}`}
+              aria-hidden="true"
+              className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 animate-pulse ${isMobile ? "h-48" : "h-56"}`}
+            />
+          ))}
       </div>
 
       {onLoadMore && (
         <div ref={loadMoreRef} className="py-6 flex justify-center">
-          {isLoadingMore && (
-            <div className="flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-beveren-600"></div>
-              <span className="text-gray-500 dark:text-gray-400 text-sm">
-                Loading more items...
-              </span>
-            </div>
-          )}
           {!isLoadingMore && hasMore && (
             <span className="text-gray-400 dark:text-gray-500 text-sm">
               Showing {inStockItems.length} of {totalCount} items • Scroll for more
