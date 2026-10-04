@@ -102,8 +102,9 @@ def _receipt_balance(register: str) -> frappe._dict:
 
 
 def _stk_used_transids(transids: list[str]) -> set[str]:
-	"""Receipt numbers that already paid a live sale through a completed STK push. The same
-	money often lands in the register as a C2B row too; offering that row again would let
+	"""Receipt numbers that already paid a live sale through a completed STK push, or belong to
+	a completed push whose klik M-Pesa order is still a draft (its sale not yet submitted). The
+	same money often lands in the register as a C2B row too; offering that row again would let
 	one payment pay twice."""
 	if not transids:
 		return set()
@@ -114,6 +115,12 @@ def _stk_used_transids(transids: list[str]) -> set[str]:
 		INNER JOIN `tabSales Invoice Payment` sip ON sip.custom_reference_text = req.name
 		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
 		WHERE req.status = 'Completed' AND req.transaction_id IN %(ids)s AND si.docstatus = 1
+		UNION
+		SELECT req.transaction_id
+		FROM `tabMpesa Express Request` req
+		INNER JOIN `tabSales Order` so ON so.name = req.reference_name
+		WHERE req.reference_doctype = 'Sales Order' AND req.status = 'Completed'
+			AND req.transaction_id IN %(ids)s AND so.docstatus = 0 AND so.custom_klik_mpesa_order = 1
 		""",
 		{"ids": tuple(transids)},
 	)

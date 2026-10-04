@@ -33,6 +33,7 @@ from klik_pos.api.sales_invoice import (
 )
 
 EXPRESS = "Mpesa Express Request"
+REGISTER = "Mpesa C2B Payment Register"
 # A push in either state may pay the order, or has: the order must not be lost.
 SAVEPOINT = "klik_submit_mpesa_order"
 # Safaricom drops an unanswered prompt after about a minute. A push still In Progress well
@@ -292,6 +293,15 @@ def _paid_push_refusal(order_id, data):
 			).format(", ".join(reversed(paid))),
 		)
 	push = paid[0]
+	used = _receipt_used(push)
+	if used:
+		return (
+			"mpesa_receipt_used",
+			_(
+				"M-Pesa receipt {0} of request {1} is already used by another sale. Finish this "
+				"sale from the desk."
+			).format(used, push),
+		)
 	recorded = sum(
 		flt(row.get("amount"))
 		for row in (data or {}).get("paymentMethods") or []
@@ -306,6 +316,31 @@ def _paid_push_refusal(order_id, data):
 				"Reopen the sale from Held orders so the payment is picked up in full."
 			).format(push, collected, recorded),
 		)
+	return None
+
+
+def _receipt_used(push_name):
+	"""The paid push's receipt number when its register row is already used by a sale, else None.
+
+	The row is locked by name (`transid` has no index, so a locked read by it would lock the whole
+	register): a till that turned it into a Payment Entry a moment ago is seen, and one about to
+	waits for this sale.
+	"""
+	transid = frappe.db.get_value(EXPRESS, push_name, "transaction_id")
+	if not transid:
+		return None
+	names = frappe.get_all(REGISTER, filters={"transid": transid}, pluck="name")
+	rows = (
+		frappe.db.sql(
+			f"SELECT docstatus, payment_entry FROM `tab{REGISTER}` WHERE name IN %(names)s FOR UPDATE",
+			{"names": tuple(names)},
+			as_dict=True,
+		)
+		if names
+		else []
+	)
+	if any(row.docstatus != 0 or row.payment_entry for row in rows) or _klik_entry_for_transid(transid):
+		return transid
 	return None
 
 
@@ -538,7 +573,6 @@ def check_mpesa_push(request_name):
 	return {"outcome": "waiting" if code in STILL_PROCESSING else "no_answer"}
 
 
-REGISTER = "Mpesa C2B Payment Register"
 #: Safaricom's own times are East Africa Time; one without an offset is read as that.
 SAFARICOM_TZ = ZoneInfo("Africa/Nairobi")
 RECEIPT_FIELDS = [
@@ -586,12 +620,14 @@ def _same_payer(msisdn, phone):
 def _why_not_receipt(push, row):
 	"""Why a register row cannot be the push's receipt, or None when it can.
 
-	All four must hold: the push's amount; received after the push was sent; unused - not taken
+	All must hold: the push's own shortcode; the push's amount; received after the push was sent; unused - not taken
 	by a sale's Payment Entry, nor another push's receipt; and paid from the push's phone or
 	against its order's number.
 	"""
 	if not row.transid:
 		return _("it has no M-Pesa receipt number")
+	if row.businessshortcode != frappe.db.get_value("Mpesa Settings", push.settings, "business_shortcode"):
+		return _("it was paid to another M-Pesa number")
 	if flt(row.transamount, 2) != flt(push.amount, 2):
 		return _("it is for {0}, not {1}").format(flt(row.transamount, 2), flt(push.amount, 2))
 	if _received_at(row) < get_datetime(push.creation):

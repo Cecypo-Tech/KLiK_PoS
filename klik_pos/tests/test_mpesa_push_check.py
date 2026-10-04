@@ -262,6 +262,7 @@ class TestThePushReceipt(PushCase):
 		refusals = {
 			"not 450": self._receipt(amount=400),
 			"another phone": self._receipt(msisdn="254711111111"),
+			"another M-Pesa number": make_c2b_payment(COMPANY, f"{self.shortcode}9", 450, PHONE).name,
 			"before the M-Pesa request": self._receipt(transtime=_safaricom_time(-10)),
 			"used by a sale": used,
 			"already M-Pesa request": taken,
@@ -278,3 +279,43 @@ class TestThePushReceipt(PushCase):
 
 		with self.assertRaisesRegex(frappe.ValidationError, "not waiting for its receipt"):
 			self._attach(self._receipt())
+
+	def test_an_attached_receipt_is_not_offered_to_other_sales(self):
+		"""Its order is not submitted yet, but the receipt is the push's: another till must not
+		pick it."""
+		receipt = self._receipt()
+		transid = self._transid(receipt)
+
+		def listed():
+			found = mpesa.get_mpesa_payments(COMPANY, search=transid)["payments"]
+			return [r["name"] for r in found]
+
+		self.assertIn(receipt, listed())
+		self._attach(receipt)
+		self.assertNotIn(receipt, listed())
+
+	def test_a_receipt_used_since_its_attach_stops_the_sale(self):
+		"""Another till turned the attached receipt into its own Payment Entry first: this sale
+		would be paid by money already spent."""
+		receipt = self._receipt()
+		transid = self._transid(receipt)
+		self._attach(receipt)
+		data = {
+			"paymentMethods": [{"method": "Mpesa-Test", "amount": 450, "custom_reference_text": self.push}]
+		}
+
+		for field, used in (("docstatus", 1), ("payment_entry", "_Test PE used elsewhere")):
+			with self.subTest(field=field):
+				frappe.db.set_value(REGISTER, receipt, field, used)
+				with (
+					_at_till(),
+					patch.object(
+						mpesa_order, "_create_invoice_draft", side_effect=AssertionError("rang up the sale")
+					),
+				):
+					result = mpesa_order.submit_mpesa_order(self.order, data=data)
+				frappe.db.set_value(REGISTER, receipt, field, None if field == "payment_entry" else 0)
+
+				self.assertFalse(result["success"])
+				self.assertEqual(result.get("code"), "mpesa_receipt_used", result)
+				self.assertIn(transid, result["error"])
