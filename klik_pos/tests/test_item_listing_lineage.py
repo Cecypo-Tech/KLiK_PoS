@@ -83,3 +83,16 @@ class TestGroupLineage(FrappeTestCase):
 			(ITEM, 3, self.template),
 			[(row["parent"], row["level"], row["item_tax_template"]) for row in rows],
 		)
+
+	def test_a_damaged_tree_cannot_cross_wire_tax_lineage(self):
+		# Groups never put through the nested-set rebuild sit at lft = rgt = 0. Ancestry is strict,
+		# as in get_ancestors_of, so such a group is nobody's parent; with <= / >= two of them
+		# became each other's, and ITEM in LEAF was taxed with ROOT's template.
+		self.addCleanup(frappe.db.rollback)
+		frappe.db.sql("UPDATE `tabItem Group` SET lft = 0, rgt = 0 WHERE name IN (%s, %s)", (ROOT, LEAF))
+
+		lineages = item_listing._item_group_lineages([ROOT, LEAF])
+		self.assertEqual(lineages, {ROOT: [ROOT], LEAF: [LEAF]})
+		self.assertEqual(lineages, {g: [g, *get_ancestors_of("Item Group", g)] for g in (ROOT, LEAF)})
+		rows = item_listing._fetch_item_group_tax_rows([ITEM], group_by_item={ITEM: LEAF})
+		self.assertNotIn(self.template, [row["item_tax_template"] for row in rows])

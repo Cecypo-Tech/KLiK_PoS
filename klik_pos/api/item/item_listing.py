@@ -549,19 +549,19 @@ def _item_group_lineages(groups):
         f"""
         SELECT child.name AS grp, anc.name AS ancestor
         FROM `tabItem Group` child
-        INNER JOIN `tabItem Group` anc ON anc.lft <= child.lft AND anc.rgt >= child.rgt
+        INNER JOIN `tabItem Group` anc ON anc.lft < child.lft AND anc.rgt > child.rgt
         WHERE child.name IN ({placeholders})
         ORDER BY child.name, anc.lft DESC
         """,
         tuple(groups),
         as_dict=True,
     )
-    # A group heads its own lineage even when its lft/rgt are broken, as
-    # [group, *get_ancestors_of(...)] always did.
+    # Ancestry is strict, as in get_ancestors_of: a group is not its own ancestor, and on a
+    # damaged tree (groups left at lft = rgt = 0) none is another's. Each group heads its own
+    # lineage whatever its lft/rgt, as [group, *get_ancestors_of(...)] always did.
     lineages = {group: [group] for group in groups}
     for row in rows:
-        if row.ancestor != row.grp:
-            lineages.setdefault(row.grp, [row.grp]).append(row.ancestor)
+        lineages.setdefault(row.grp, [row.grp]).append(row.ancestor)
     return lineages
 
 
