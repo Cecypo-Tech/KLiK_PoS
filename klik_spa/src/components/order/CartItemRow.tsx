@@ -583,16 +583,16 @@ export const CartItemRow = ({
                   {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
                 </p>
               )}
+            </div>
+            <div className="flex-shrink-0 flex items-center gap-0.5">
               {(item.los_qty ?? 0) > 0 && (
                 <span
-                  className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  className="mr-0.5 rounded whitespace-nowrap bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                   title="Asked for but not in stock: recorded as Loss of Sale"
                 >
                   LoS {item.los_qty}
                 </span>
               )}
-            </div>
-            <div className="flex-shrink-0 flex items-center gap-0.5">
               <button
                 onClick={(e) => { e.stopPropagation(); setShowDescriptionDialog(true); }}
                 className={`${isMobile ? "w-7 h-7" : "w-5 h-5"} rounded flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors`}
