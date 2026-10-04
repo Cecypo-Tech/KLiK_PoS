@@ -1,5 +1,6 @@
 import { createContext, useContext, ReactNode, useEffect } from 'react';
 import { useProductStore } from '../stores/productStore';
+import { usePOSProfileStore } from '../stores/posProfileStore';
 import type { MenuItem, POSProfile, Customer, ItemGroup } from '../../types';
 
 interface ProductContextType {
@@ -18,6 +19,7 @@ interface ProductContextType {
   degraded: boolean;
   degradedReason: string | null;
   stockUnavailable: boolean;
+  lossOfSaleEnabled: boolean;
   
   isLoading: boolean;
   isLoadingMore: boolean;
@@ -70,6 +72,7 @@ export function ProductProvider({ children, posName, initialCustomerId }: Produc
   
   const filteredItems = store.getFilteredItems();
   const useScannerOnly = store.getUseScannerOnly();
+  const lossOfSaleEnabled = !!usePOSProfileStore((s) => s.posDetails?.custom_enable_loss_of_sale);
   const hideUnavailableItems = store.getHideUnavailableItems();
   const scalePrefix = store.getScalePrefix();
   const defaultView = store.getDefaultView();
@@ -89,6 +92,7 @@ export function ProductProvider({ children, posName, initialCustomerId }: Produc
     degraded: store.degraded,
     degradedReason: store.degradedReason,
     stockUnavailable: store.stockUnavailable,
+    lossOfSaleEnabled,
     
     isLoading: store.isLoading,
     isLoadingMore: store.isLoadingMore,

@@ -43,7 +43,7 @@ export default function ProductGrid({
   totalCount = 0,
   isSearching = false,
 }: ProductGridProps) {
-  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
+  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, lossOfSaleEnabled } = useProduct();
   const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
@@ -105,10 +105,10 @@ export default function ProductGrid({
   const inStockItems = useMemo(
     () => (
       hideUnavailableItems && !stockUnavailable
-        ? filteredItems.filter((item) => !isItemOutOfStock(item, stockUnavailable))
+        ? filteredItems.filter((item) => !isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled))
         : filteredItems
     ),
-    [filteredItems, hideUnavailableItems, stockUnavailable],
+    [filteredItems, hideUnavailableItems, stockUnavailable, lossOfSaleEnabled],
   );
 
   // inStockItems is a fresh array identity every render — productStore's
@@ -177,7 +177,7 @@ export default function ProductGrid({
   }, [addConcreteItemToCart]);
 
   const handleAddToCart = useCallback(async (item: MenuItem, quantity = 1) => {
-    if (isItemOutOfStock(item, stockUnavailable)) return;
+    if (isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled)) return;
     if (scannerOnly) return;
 
     if (requiresSalespersonPin) {
@@ -200,7 +200,7 @@ export default function ProductGrid({
     }
 
     await addItemToCart(item, quantity);
-  }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable]);
+  }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable, lossOfSaleEnabled]);
 
   const openPricePopup = useCallback(async (rowIndex: number, item: MenuItem) => {
     const warehouse = posDetails?.warehouse || "";
@@ -503,6 +503,7 @@ export default function ProductGrid({
         )}
         <ProductLineView
           stockUnavailable={stockUnavailable}
+          lossOfSaleEnabled={lossOfSaleEnabled}
           items={inStockItems}
           onAddToCart={handleAddToCart}
           isMobile={isMobile}
@@ -631,6 +632,7 @@ export default function ProductGrid({
         {inStockItems.map((item, i) => (
           <ProductCard
             stockUnavailable={stockUnavailable}
+          lossOfSaleEnabled={lossOfSaleEnabled}
             key={item.id}
             item={item}
             onAddToCart={handleAddToCart}

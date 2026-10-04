@@ -24,6 +24,7 @@ interface ProductLineViewProps {
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
   stockUnavailable?: boolean
+  lossOfSaleEnabled?: boolean
   quantityBuffer?: string
 }
 
@@ -39,6 +40,7 @@ export default function ProductLineView({
   onItemFocus,
   onItemKeyDown,
   stockUnavailable = false,
+  lossOfSaleEnabled = false,
   quantityBuffer = "",
 }: ProductLineViewProps) {
   const [hoveredItemId, setHoveredItemId] = useState<string | number | null>(null)
@@ -98,7 +100,7 @@ export default function ProductLineView({
           <div className="divide-y divide-gray-200 dark:divide-gray-600">
             {items.map((item, rowIndex) => {
               const isServiceItem = item.is_stock_item === false
-              const isOutOfStock = isItemOutOfStock(item, stockUnavailable)
+              const isOutOfStock = isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled)
               const isDisabled = isOutOfStock || scannerOnly
               const expectedPrice = Number(item.price_with_vat ?? item.price)
               const basePrice = Number(item.price || 0)

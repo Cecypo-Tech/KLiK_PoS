@@ -127,6 +127,7 @@ export interface MenuItem {
   price_lists?: PriceListRate[]
   item_group?: string // Item group reference
   is_product_bundle?: boolean
+  has_serial_no?: boolean
   bundle_items?: BundleComponent[]
   is_variant_template?: boolean
   has_variants?: boolean

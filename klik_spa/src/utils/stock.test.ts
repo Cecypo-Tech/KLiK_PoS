@@ -40,4 +40,19 @@ describe("isItemOutOfStock", () => {
       );
     });
   });
+
+  describe("Loss of Sale", () => {
+    it("lets an out-of-stock stock item be added when on", () => {
+      expect(isItemOutOfStock(stockItem(0), false, true)).toBe(false);
+    });
+
+    it("still blocks serial-numbered items and bundles when on", () => {
+      expect(isItemOutOfStock({ ...stockItem(0), has_serial_no: true }, false, true)).toBe(true);
+      expect(isItemOutOfStock({ ...stockItem(0), is_product_bundle: true }, false, true)).toBe(true);
+    });
+
+    it("changes nothing when off", () => {
+      expect(isItemOutOfStock(stockItem(0), false, false)).toBe(true);
+    });
+  });
 });
