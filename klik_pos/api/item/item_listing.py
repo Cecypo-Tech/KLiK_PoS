@@ -16,7 +16,7 @@ from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balanc
 from .search_utils import build_item_search_conditions
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_items(
     limit: int = 1000,
     offset: int = 0,
@@ -197,7 +197,14 @@ def get_items(
         stock_map = _fetch_batch_stock(item_codes, warehouse)
         # "Hide Cost Price" keeps the figure off the wire, not just off the screen.
         hide_cost_price = cint(getattr(pos_doc, "restrict_cost_visibility_in_tooltip", 0) or 0) == 1
-        cost_price_map = {} if hide_cost_price else _fetch_batch_cost_price(item_codes, warehouse)
+        if hide_cost_price:
+            cost_price_map = {}
+        else:
+            # The stock read carries the valuation rates; a stock map without them (a test
+            # double, or the per-item fallback) still gets the cost from its own query.
+            cost_price_map = getattr(stock_map, "valuation_rates", None)
+            if cost_price_map is None:
+                cost_price_map = _fetch_batch_cost_price(item_codes, warehouse)
         product_bundle_map = _fetch_product_bundle_map(item_codes, warehouse)
         variant_count_map = _fetch_variant_count_map(item_codes)
 
@@ -998,22 +1005,18 @@ def _build_degradation(stock_unavailable):
 def _get_priority_price_list(customer=None, pos_profile=None, default_price_list=None):
     try:
         if customer:
-            try:
-                customer_doc = frappe.get_doc("Customer", customer)
-                if customer_doc.default_price_list and is_enabled_price_list(customer_doc.default_price_list):
-                    return customer_doc.default_price_list
-            except Exception:
-                pass
-            
-            try:
-                customer_doc = frappe.get_doc("Customer", customer)
-                if customer_doc.customer_group:
-                    customer_group_doc = frappe.get_doc("Customer Group", customer_doc.customer_group)
-                    group_list = getattr(customer_group_doc, "default_price_list", None)
+            row = frappe.db.get_value(
+                "Customer", customer, ["default_price_list", "customer_group"], as_dict=True
+            )
+            if row:
+                if row.default_price_list and is_enabled_price_list(row.default_price_list):
+                    return row.default_price_list
+                if row.customer_group:
+                    group_list = frappe.db.get_value(
+                        "Customer Group", row.customer_group, "default_price_list"
+                    )
                     if group_list and is_enabled_price_list(group_list):
-                        return customer_group_doc.default_price_list
-            except Exception:
-                pass
+                        return group_list
     except Exception as e:
         frappe.logger().warning(f"Error getting customer-based price list: {e}")
     
@@ -1119,17 +1122,27 @@ def _fetch_bundle_codes(item_codes):
     )
 
 
+class _StockMap(dict):
+    """Stock per item code, carrying the Bin valuation rates the same query read
+    (`valuation_rates`; None when that read failed), so the cost column needs no second
+    trip to tabBin."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.valuation_rates = {}
+
+
 def _fetch_batch_stock(item_codes, warehouse):
     if not item_codes or not warehouse:
-        return {}
+        return _StockMap()
 
-    stock_map = {code: 0 for code in item_codes}
+    stock_map = _StockMap({code: 0 for code in item_codes})
 
     try:
         placeholders = ", ".join(["%s"] * len(item_codes))
 
         stock_sql = f"""
-            SELECT item_code, actual_qty
+            SELECT item_code, actual_qty, valuation_rate
             FROM `tabBin`
             WHERE item_code IN ({placeholders}) AND warehouse = %s
         """
@@ -1143,12 +1156,14 @@ def _fetch_batch_stock(item_codes, warehouse):
 
         for row in results:
             stock_map[row["item_code"]] = flt(row["actual_qty"])
+            stock_map.valuation_rates[row["item_code"]] = flt(row["valuation_rate"])
 
         apply_queue_reservations_to_stock_map(stock_map, warehouse)
 
     except Exception:
         for code in item_codes:
             stock_map[code] = fetch_item_balance(code, warehouse)
+        stock_map.valuation_rates = None
 
     return stock_map
 
