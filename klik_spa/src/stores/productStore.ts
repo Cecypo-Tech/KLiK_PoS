@@ -6,6 +6,7 @@ import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
 import { applyStockUpdates, chunkCodes, stockRefreshCodes } from '../utils/stockRefresh';
 import { getCSRFToken } from '../utils/csrf';
+import { filterAvailableProducts } from '../utils/productFilter';
 import { resolveNextOffset } from '../utils/pagination';
 import { expandTaxProfiles } from '../utils/productPayload';
 import { createKeyedDedupe, firstPageKey, listingIncludesGroups, pageAdvanced, SEARCH_PAGE_SIZE, type PageCursor } from '../utils/productLoading';
@@ -162,20 +163,8 @@ export const useProductStore = create<ProductStoreState>()(
       isInitialized: false,
       posName: null,
 
-      getFilteredItems: () => {
-        const { products } = get();
-        const hideUnavailable = usePOSProfileStore.getState().hideUnavailableItems;
-        if (hideUnavailable) {
-          return products.filter((p) => {
-            const isStockItem = p.is_stock_item !== false;
-            if (!isStockItem || p.allow_negative_stock) {
-              return true;
-            }
-            return (p.available || 0) > 0;
-          });
-        }
-        return products;
-      },
+      getFilteredItems: () =>
+        filterAvailableProducts(get().products, usePOSProfileStore.getState().hideUnavailableItems),
       
       getUseScannerOnly: () => usePOSProfileStore.getState().useScannerOnly,
       getHideUnavailableItems: () => usePOSProfileStore.getState().hideUnavailableItems,

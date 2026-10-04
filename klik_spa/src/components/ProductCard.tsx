@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { MenuItem } from "../../types";
 import ProductTooltip from "./ProductTooltip";
 import ProductDetailsModal from "./ProductDetailsModal";
@@ -18,13 +18,13 @@ interface ProductCardProps {
   useItemCodeAsName?: boolean;
   productIndex?: number;
   isFocused?: boolean;
-  onFocused?: () => void;
-  onKeyboardAction?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  onFocused?: (index: number) => void;
+  onKeyboardAction?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void;
   stockUnavailable?: boolean;
   quantityBuffer?: string;
 }
 
-export default function ProductCard({
+function ProductCard({
   item,
   onAddToCart,
   isMobile = false,
@@ -80,8 +80,8 @@ export default function ProductCard({
       <div
         tabIndex={productIndex !== undefined ? 0 : undefined}
         data-product-index={productIndex}
-        onFocus={onFocused}
-        onKeyDown={onKeyboardAction}
+        onFocus={productIndex !== undefined ? () => onFocused?.(productIndex) : undefined}
+        onKeyDown={productIndex !== undefined ? (e) => onKeyboardAction?.(productIndex, item, e) : undefined}
         className={`bg-white dark:bg-gray-800 rounded-xl border overflow-visible transition-all duration-200 relative flex flex-col outline-none ${
           isFocused ? "border-beveren-500 ring-2 ring-beveren-400/50 dark:ring-beveren-500/40" : "border-gray-200 dark:border-gray-700"
         } ${
@@ -259,3 +259,7 @@ export default function ProductCard({
     </>
   );
 }
+
+// Redrawn only when its own item, focus or flags change: the grid passes stable handlers
+// and the store keeps unchanged items' identities across stock refreshes.
+export default memo(ProductCard);

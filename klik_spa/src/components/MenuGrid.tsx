@@ -44,7 +44,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
     defaultView,
     stockUnavailable,
   } = useProduct();
-  const { addToCart } = useCartStore();
+  const addToCart = useCartStore((s) => s.addToCart);
   
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, rememberLocked, ensureInitialized } = useSalespersonStore();

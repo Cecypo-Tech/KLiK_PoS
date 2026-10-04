@@ -11,6 +11,7 @@ import VariantPickerModal from "./VariantPickerModal";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
 import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, seedCustomPrice, typeCustomPrice } from "../utils/priceOptions";
@@ -45,7 +46,13 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
+  // Actions only: subscribing to the whole cart redrew the grid on every cart change.
+  // Cart contents are read at keypress time (handleItemKeyDown) instead.
+  const addToCartWithQuantity = useCartStore((s) => s.addToCartWithQuantity);
+  const updateQuantity = useCartStore((s) => s.updateQuantity);
+  const removeItem = useCartStore((s) => s.removeItem);
+  const toggleItemExpansion = useCartStore((s) => s.toggleItemExpansion);
+  const requestCustomRate = useCartStore((s) => s.requestCustomRate);
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -399,6 +406,7 @@ export default function ProductGrid({
       setQuantityBuffer('');
       void handleAddToCart(item, quantity);
     } else if (e.key === '-') {
+      const { cartItems } = useCartStore.getState();
       e.preventDefault();
       const step = bufferToQuantity(quantityBuffer);
       setQuantityBuffer('');
@@ -411,6 +419,7 @@ export default function ProductGrid({
         }
       }
     } else if (e.key === '.') {
+      const { cartItems, expandedCartItemId } = useCartStore.getState();
       // No match: leave the key unbound (no preventDefault) rather than swallow it.
       const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
       if (!cartItem) return;
@@ -429,7 +438,7 @@ export default function ProductGrid({
       e.preventDefault();
       void openPricePopup(index, item);
     }
-  }, [cartItems, expandedCartItemId, handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
@@ -442,6 +451,16 @@ export default function ProductGrid({
 
     void addItemToCart(itemToAdd.item, itemToAdd.quantity);
   }, [addItemToCart, pendingCartItem]);
+
+  // Stable identities for the memoized cards and rows: the underlying handlers change with
+  // the quantity buffer, popup and cart, which would otherwise redraw every card.
+  const handleCardAdd = useStableCallback((item: MenuItem) => {
+    void handleAddToCart(item);
+  });
+  const handleCardFocus = useStableCallback((index: number) => setFocusedIndex(index));
+  const handleCardKeyDown = useStableCallback(
+    (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => handleItemKeyDown(index, item, e),
+  );
 
   const handleVariantSelected = useCallback(async (variant: MenuItem) => {
     await addConcreteItemToCart(variant);
@@ -499,15 +518,15 @@ export default function ProductGrid({
         <ProductLineView
           stockUnavailable={stockUnavailable}
           items={inStockItems}
-          onAddToCart={handleAddToCart}
+          onAddToCart={handleCardAdd}
           isMobile={isMobile}
           showItemCode={showItemCode}
           useItemCodeAsName={useItemCodeAsName}
           scannerOnly={scannerOnly}
           hideImages={hideImages}
           focusedIndex={focusedIndex}
-          onItemFocus={setFocusedIndex}
-          onItemKeyDown={handleItemKeyDown}
+          onItemFocus={handleCardFocus}
+          onItemKeyDown={handleCardKeyDown}
           quantityBuffer={displayQuantityBuffer}
         />
 
@@ -629,15 +648,15 @@ export default function ProductGrid({
             stockUnavailable={stockUnavailable}
             key={item.id}
             item={item}
-            onAddToCart={handleAddToCart}
+            onAddToCart={handleCardAdd}
             isMobile={isMobile}
             showItemCode={showItemCode}
             useItemCodeAsName={useItemCodeAsName}
             scannerOnly={scannerOnly}
             productIndex={i}
             isFocused={focusedIndex === i}
-            onFocused={() => setFocusedIndex(i)}
-            onKeyboardAction={(e) => handleItemKeyDown(i, item, e)}
+            onFocused={handleCardFocus}
+            onKeyboardAction={handleCardKeyDown}
             quantityBuffer={focusedIndex === i ? displayQuantityBuffer : ""}
           />
         ))}
