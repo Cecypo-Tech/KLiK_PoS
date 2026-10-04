@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 import { toast } from "react-toastify";
-import { formatQueueFailure, type QueueFailureEvent } from "../utils/queueFailure";
+import { formatQueueFailure, QUEUE_FAILURE_EVENT, type QueueFailureEvent } from "../utils/queueFailure";
 
-/** Matches the backend's QUEUE_FAILURE_EVENT in klik_pos/api/sales_invoice.py. */
-export const QUEUE_FAILURE_EVENT = "klik_pos_invoice_queue_failed";
+export { QUEUE_FAILURE_EVENT };
 
 interface FrappeRealtimeClient {
   on?: (event: string, handler: (data: QueueFailureEvent) => void) => void;
@@ -20,17 +19,20 @@ interface FrappeRealtimeClient {
  */
 export function useQueueFailureAlerts() {
   useEffect(() => {
-    const realtime = (window as typeof window & { frappe?: { realtime?: FrappeRealtimeClient } })
-      ?.frappe?.realtime;
-    if (!realtime?.on) return;
-
     const handler = (data: QueueFailureEvent) => {
       toast.error(formatQueueFailure(data), { autoClose: false });
     };
+    // The till page has no realtime client: the checkout's own status poll announces a
+    // failure as a window event instead (see watchQueuedCheckout).
+    const onWindowEvent = (event: Event) => handler((event as CustomEvent<QueueFailureEvent>).detail);
+    window.addEventListener(QUEUE_FAILURE_EVENT, onWindowEvent);
 
-    realtime.on(QUEUE_FAILURE_EVENT, handler);
+    const realtime = (window as typeof window & { frappe?: { realtime?: FrappeRealtimeClient } })
+      ?.frappe?.realtime;
+    realtime?.on?.(QUEUE_FAILURE_EVENT, handler);
     return () => {
-      realtime.off?.(QUEUE_FAILURE_EVENT, handler);
+      window.removeEventListener(QUEUE_FAILURE_EVENT, onWindowEvent);
+      realtime?.off?.(QUEUE_FAILURE_EVENT, handler);
     };
   }, []);
 }

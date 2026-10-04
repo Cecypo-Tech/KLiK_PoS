@@ -13,6 +13,39 @@ export interface QueueFailureEvent {
   error?: string;
 }
 
+/** Matches the backend's QUEUE_FAILURE_EVENT in klik_pos/api/sales_invoice.py. */
+export const QUEUE_FAILURE_EVENT = "klik_pos_invoice_queue_failed";
+
+interface CheckoutStatus {
+  checkout_status?: string;
+  invoice_name?: string;
+  invoice?: { customer?: string };
+  message?: string;
+}
+
+/**
+ * Follow a queued checkout until the worker posts or fails it.
+ *
+ * The till page has no Frappe realtime client, so the worker's failure event never reaches
+ * it; without this the cashier learns of a failed sale only from the banner after a reload.
+ * Resolves with the failure, or null once the sale posts or the tries run out.
+ */
+export async function watchQueuedCheckout(
+  requestId: string,
+  getStatus: (requestId: string) => Promise<CheckoutStatus>,
+  { tries = 20, wait = () => new Promise<void>((resolve) => setTimeout(resolve, 3000)) } = {},
+): Promise<QueueFailureEvent | null> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    if (attempt) await wait();
+    const status = await getStatus(requestId).catch(() => null);
+    if (status?.checkout_status === "submitted") return null;
+    if (status?.checkout_status === "failed") {
+      return { invoice_name: status.invoice_name, customer: status.invoice?.customer, error: status.message };
+    }
+  }
+  return null;
+}
+
 /**
  * Plain text from a message that may carry markup.
  *

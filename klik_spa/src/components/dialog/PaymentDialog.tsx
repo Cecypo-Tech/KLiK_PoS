@@ -19,6 +19,7 @@ import {
   createSalesInvoice,
   discardMpesaDraft,
   DraftNoLongerDraftError,
+  getCheckoutRequestStatus,
   previewLoyaltyRedemption,
   submitDraftInvoice,
   validateCheckoutInvoice,
@@ -44,6 +45,7 @@ import { fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCr
 import {
   addVoucher,
   appliedTotal,
+  resizeVoucher,
   capVouchers,
   customerChangeDropsVouchers,
   labelVoucherAmounts,
@@ -53,6 +55,7 @@ import {
   vouchersBlockMpesaReason,
   type AppliedVoucher,
 } from "../../utils/voucher";
+import { QUEUE_FAILURE_EVENT, watchQueuedCheckout } from "../../utils/queueFailure";
 import { cashRefundModes } from "../../utils/returnModes";
 import { fetchCustomerRecord, lookupCreditVoucher } from "../../services/voucher";
 import { useProductStore } from "../../stores/productStore";
@@ -2050,6 +2053,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaOrderName(null);
       toast.success(queued ? "Invoice queued for background submission!" : "Invoice submitted successfully!");
 
+      // Follow a queued sale until it posts, so a failure is told now, not after a reload.
+      // Inside Desk the realtime event already does this.
+      const queuedRequestId = response?.checkout_request_id || activeCheckoutRequestId;
+      const hasRealtime = Boolean((window as typeof window & { frappe?: { realtime?: unknown } }).frappe?.realtime);
+      if (queued && queuedRequestId && !hasRealtime) {
+        void watchQueuedCheckout(queuedRequestId, getCheckoutRequestStatus).then((failure) => {
+          if (failure) window.dispatchEvent(new CustomEvent(QUEUE_FAILURE_EVENT, { detail: failure }));
+        });
+      }
+
       // A stale credit allocation never undoes the sale; the server says so here.
       const creditWarning = response?.customer_credit?.warning;
       if (creditWarning) {
@@ -2964,7 +2977,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.info("Nothing left to pay with a voucher.");
       return;
     }
-    const next = addVoucher(appliedVouchers, { note: voucher.note, original: voucher.original, amount });
+    commitVouchers(
+      addVoucher(appliedVouchers, { note: voucher.note, original: voucher.original, amount, available: voucher.available }),
+    );
+  };
+
+  // The cashier spends part of an applied voucher; a larger amount trims the other rows.
+  const resizeAppliedVoucher = (note: string, amount: number) => {
+    commitVouchers(resizeVoucher(appliedVouchers, note, amount, checkoutPayableTotal));
+  };
+
+  const commitVouchers = (next: AppliedVoucher[]) => {
     setAppliedVouchers(next);
     setPaymentAmounts((prev) => {
       const withVouchers: PaymentAmount = { ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) };
@@ -3035,6 +3058,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       onLookup={lookupCreditVoucher}
       onApply={applyVoucher}
       onRemove={removeVoucher}
+      onResize={resizeAppliedVoucher}
       onSwitchCustomer={(customer) => void switchSaleCustomer(customer)}
       onClose={() => setVoucherPanelOpen(false)}
     />

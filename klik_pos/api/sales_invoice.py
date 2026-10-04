@@ -5504,17 +5504,23 @@ def create_partial_return(
 			abs(flt(return_doc.rounded_total or return_doc.grand_total)) - flt(refunded_cash), precision
 		)
 
+		# Credit kept on the note is the customer's voucher; otherwise it paid down the invoice.
+		credit_went = (
+			_("left as store credit on {0}").format(return_doc.name)
+			if cint(return_doc.update_outstanding_for_self)
+			else _("credited to the invoice")
+		)
 		if refunded_cash > 0 and credited_amount > 0:
-			message = _("Return created: {0} (refunded {1} via {2}, {3} credited to the invoice)").format(
-				return_doc.name, flt(refunded_cash, precision), final_payment_method, credited_amount
+			message = _("Return created: {0} (refunded {1} via {2}, {3} {4})").format(
+				return_doc.name, flt(refunded_cash, precision), final_payment_method, credited_amount, credit_went
 			)
 		elif refunded_cash > 0:
 			message = _("Return created: {0} (refunded {1} via {2})").format(
 				return_doc.name, flt(refunded_cash, precision), final_payment_method
 			)
 		else:
-			message = _("Return created: {0} ({1} credited to the invoice, no cash refunded)").format(
-				return_doc.name, credited_amount
+			message = _("Return created: {0} ({1} {2}, no cash refunded)").format(
+				return_doc.name, credited_amount, credit_went
 			)
 
 		return {

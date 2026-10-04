@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { UnresolvedQueueFailure } from "../utils/queueFailure";
-import { QUEUE_FAILURE_EVENT } from "./useQueueFailureAlerts";
+import { QUEUE_FAILURE_EVENT, type UnresolvedQueueFailure } from "../utils/queueFailure";
 
 interface FrappeRealtimeClient {
   on?: (event: string, handler: () => void) => void;
@@ -42,16 +41,17 @@ export function useUnresolvedQueueFailures() {
   useEffect(() => {
     void refresh();
 
-    const realtime = (window as typeof window & { frappe?: { realtime?: FrappeRealtimeClient } })
-      ?.frappe?.realtime;
-    if (!realtime?.on) return;
-
     const handler = () => {
       void refresh();
     };
-    realtime.on(QUEUE_FAILURE_EVENT, handler);
+    // The window event is the till's own status poll; realtime only exists inside Desk.
+    window.addEventListener(QUEUE_FAILURE_EVENT, handler);
+    const realtime = (window as typeof window & { frappe?: { realtime?: FrappeRealtimeClient } })
+      ?.frappe?.realtime;
+    realtime?.on?.(QUEUE_FAILURE_EVENT, handler);
     return () => {
-      realtime.off?.(QUEUE_FAILURE_EVENT, handler);
+      window.removeEventListener(QUEUE_FAILURE_EVENT, handler);
+      realtime?.off?.(QUEUE_FAILURE_EVENT, handler);
     };
   }, [refresh]);
 

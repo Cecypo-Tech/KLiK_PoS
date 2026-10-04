@@ -12,6 +12,7 @@ import {
   voucherStatusLabel,
   vouchersBlockedReason,
   vouchersBlockMpesaReason,
+  resizeVoucher,
 } from "./voucher";
 
 const money = (value: number) => `KES ${value.toFixed(2)}`;
@@ -270,5 +271,33 @@ describe("labelVoucherAmounts", () => {
       Vouchers: 50,
       "Vouchers (store credit)": 300,
     });
+  });
+});
+
+describe("resizeVoucher", () => {
+  const applied = [
+    { note: "CN-1", original: null, amount: 300, available: 2100 },
+    { note: "CN-2", original: null, amount: 200, available: 200 },
+  ];
+
+  it("spends part of a voucher", () => {
+    expect(resizeVoucher(applied, "CN-1", 100, 1000)[0].amount).toBe(100);
+  });
+
+  it("never spends more than the voucher holds", () => {
+    expect(resizeVoucher(applied, "CN-2", 500, 5000)[1].amount).toBe(200);
+  });
+
+  it("never pays more than the sale still owes after the other vouchers", () => {
+    expect(resizeVoucher(applied, "CN-1", 2000, 1000)[0].amount).toBe(800);
+  });
+
+  it("drops a voucher set to nothing, and leaves the others alone", () => {
+    expect(resizeVoucher(applied, "CN-1", 0, 1000)).toEqual([applied[1]]);
+  });
+
+  it("caps at the amount first applied when the balance is unknown", () => {
+    const old = [{ note: "CN-3", original: null, amount: 50 }];
+    expect(resizeVoucher(old, "CN-3", 80, 1000)[0].amount).toBe(50);
   });
 });

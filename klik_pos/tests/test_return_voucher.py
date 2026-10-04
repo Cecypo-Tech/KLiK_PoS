@@ -51,3 +51,10 @@ class TestReturnVoucher(CashOnlyReturnCase):
 		result = return_sales_invoice(self._sale(600, cash=650).name)
 		self.assertTrue(result.get("success"), result)
 		self.assertIsNone(result["credit"])
+
+	def test_the_message_names_the_voucher_not_the_invoice(self):
+		"""Credit left on the note is a voucher, not a credit to the (already paid) invoice."""
+		invoice = self._sale(500, card=500)
+		result = self._partial(invoice)
+		self.assertIn(f"left as store credit on {result['return_invoice']}", result["message"])
+		self.assertNotIn("credited to the invoice", result["message"])

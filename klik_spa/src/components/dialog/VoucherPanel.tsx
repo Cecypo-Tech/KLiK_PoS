@@ -24,6 +24,8 @@ interface VoucherPanelProps {
   onLookup: (creditNote: string, originalInvoice: string) => Promise<VoucherLookup>;
   onApply: (voucher: { note: string; original: string | null; available: number }) => void;
   onRemove: (note: string) => void;
+  /** Spend part of an applied voucher - the dialog caps it at the balance and the sale. */
+  onResize: (note: string, amount: number) => void;
   onSwitchCustomer: (customer: string) => void;
   onClose: () => void;
 }
@@ -40,6 +42,7 @@ export default function VoucherPanel({
   onLookup,
   onApply,
   onRemove,
+  onResize,
   onSwitchCustomer,
   onClose,
 }: VoucherPanelProps) {
@@ -216,7 +219,24 @@ export default function VoucherPanel({
               applied.map((voucher) => (
                 <div key={voucher.note} className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate text-gray-700 dark:text-gray-300">{voucher.note}</span>
-                  <span className="whitespace-nowrap font-medium text-gray-900 dark:text-white">{money(voucher.amount)}</span>
+                  {/* Keyed on the amount so a capped value shows once the dialog settles it. */}
+                  <input
+                    key={`${voucher.note}-${voucher.amount}`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    defaultValue={voucher.amount}
+                    disabled={disabled}
+                    aria-label={`Amount from ${voucher.note}`}
+                    onBlur={(event) => {
+                      const value = Number(event.currentTarget.value);
+                      if (Number.isFinite(value) && value !== voucher.amount) onResize(voucher.note, value);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    className="w-28 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-right font-medium text-gray-900 dark:text-white disabled:opacity-50"
+                  />
                   <button
                     type="button"
                     disabled={disabled}

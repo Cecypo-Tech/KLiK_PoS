@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   describeUnresolvedFailure,
   formatQueueFailure,
   stripHtml,
   summariseUnresolvedFailures,
+  watchQueuedCheckout,
 } from "./queueFailure";
 
 describe("formatQueueFailure", () => {
@@ -128,5 +129,42 @@ describe("summariseUnresolvedFailures with a capped list", () => {
     expect(
       summariseUnresolvedFailures([{ invoice_name: "INV-1" }, { invoice_name: "INV-2" }], 0),
     ).toBe("2 sales did not post and are not recorded yet.");
+  });
+});
+
+describe("watchQueuedCheckout", () => {
+  const noWait = () => Promise.resolve();
+
+  it("reports the failure once the worker fails the sale", async () => {
+    const getStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ checkout_status: "queued" })
+      .mockResolvedValueOnce({
+        checkout_status: "failed",
+        invoice_name: "POS-1",
+        invoice: { customer: "CRN TEST" },
+        message: "At least one mode of payment is required for POS invoice.",
+      });
+    await expect(watchQueuedCheckout("REQ-1", getStatus, { tries: 5, wait: noWait })).resolves.toEqual({
+      invoice_name: "POS-1",
+      customer: "CRN TEST",
+      error: "At least one mode of payment is required for POS invoice.",
+    });
+    expect(getStatus).toHaveBeenCalledWith("REQ-1");
+  });
+
+  it("stops quietly once the sale posts", async () => {
+    const getStatus = vi.fn().mockResolvedValue({ checkout_status: "submitted" });
+    await expect(watchQueuedCheckout("REQ-1", getStatus, { tries: 5, wait: noWait })).resolves.toBeNull();
+    expect(getStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after its tries, and shrugs off a failed lookup", async () => {
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({ checkout_status: "queued" });
+    await expect(watchQueuedCheckout("REQ-1", getStatus, { tries: 3, wait: noWait })).resolves.toBeNull();
+    expect(getStatus).toHaveBeenCalledTimes(3);
   });
 });

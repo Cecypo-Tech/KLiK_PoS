@@ -26,6 +26,8 @@ export interface AppliedVoucher {
   /** The original sale number - the server requires it for a Walk In voucher. */
   original: string | null;
   amount: number;
+  /** What the voucher held when applied - the most it can pay. */
+  available?: number;
 }
 
 export type VoucherCustomerRule = "apply" | "switch" | "refuse_named" | "refuse_walkin";
@@ -76,6 +78,19 @@ export function voucherApplyAmount(available: number, payable: number, alreadyAp
 export function addVoucher(applied: AppliedVoucher[], next: AppliedVoucher): AppliedVoucher[] {
   if (next.amount <= 0 || applied.some((voucher) => voucher.note === next.note)) return applied;
   return [...applied, next];
+}
+
+/** The cashier's own amount for an applied voucher: no more than it holds, nor than the sale
+still owes after the other vouchers. Nothing drops it. */
+export function resizeVoucher(applied: AppliedVoucher[], note: string, amount: number, payable: number): AppliedVoucher[] {
+  const others = appliedTotal(applied.filter((voucher) => voucher.note !== note));
+  return applied
+    .map((voucher) => {
+      if (voucher.note !== note) return voucher;
+      const most = Math.min(voucher.available ?? voucher.amount, payable - others);
+      return { ...voucher, amount: round2(Math.max(0, Math.min(amount, most))) };
+    })
+    .filter((voucher) => voucher.amount > 0);
 }
 
 /** Vouchers never outgrow the sale: the last applied shrinks first, and one shrunk to
