@@ -1030,6 +1030,36 @@ def get_reserved_qty_for_item_warehouse(item_code, warehouse, exclude_invoice=No
 	return flt(reserved_map.get((item_code, warehouse), 0))
 
 
+def get_available_stock_map(keys, exclude_invoice=None):
+	"""{(item_code, warehouse): actual_qty, reserved_qty, available_qty} for each key - available
+	being net of Stock Reservation Entries, the figure both the oversell refusal and Loss of Sale
+	measure against. A key with no Bin has none."""
+	keys = set(keys)
+	if not keys:
+		return {}
+	bins = frappe.get_all(
+		"Bin",
+		filters={
+			"item_code": ["in", list({key[0] for key in keys})],
+			"warehouse": ["in", list({key[1] for key in keys})],
+		},
+		fields=["item_code", "warehouse", "actual_qty"],
+	)
+	actual_map = {(row.item_code, row.warehouse): flt(row.actual_qty or 0) for row in bins}
+	reserved_map = get_reserved_stock_map(
+		item_codes=list({key[0] for key in keys}),
+		exclude_invoice=exclude_invoice,
+	)
+	stock = {}
+	for key in keys:
+		actual_qty = flt(actual_map.get(key, 0))
+		reserved_qty = flt(reserved_map.get(key, 0))
+		stock[key] = frappe._dict(
+			actual_qty=actual_qty, reserved_qty=reserved_qty, available_qty=flt(actual_qty - reserved_qty)
+		)
+	return stock
+
+
 def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 	"""Validate available stock, net of anything held by Stock Reservation Entries.
 
@@ -1061,8 +1091,6 @@ def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 		}
 
 	required_qty_map = {}
-	item_codes = set()
-	warehouses = set()
 
 	for row in doc.items:
 		if not row.item_code or not row.warehouse:
@@ -1082,29 +1110,17 @@ def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 
 		key = (row.item_code, row.warehouse)
 		required_qty_map[key] = flt(required_qty_map.get(key, 0) + required_qty)
-		item_codes.add(row.item_code)
-		warehouses.add(row.warehouse)
 
 	if not required_qty_map:
 		return
 
-	bins = frappe.get_all(
-		"Bin",
-		filters={"item_code": ["in", list(item_codes)], "warehouse": ["in", list(warehouses)]},
-		fields=["item_code", "warehouse", "actual_qty"],
-	)
-	actual_qty_map = {(row.item_code, row.warehouse): flt(row.actual_qty or 0) for row in bins}
-
-	reserved_map = get_reserved_stock_map(
-		item_codes=list(item_codes),
-		exclude_invoice=exclude_invoice,
-	)
+	stock = get_available_stock_map(required_qty_map.keys(), exclude_invoice=exclude_invoice)
 
 	insufficient = []
 	for key, required_qty in required_qty_map.items():
-		actual_qty = flt(actual_qty_map.get(key, 0))
-		reserved_qty = flt(reserved_map.get(key, 0))
-		available_qty = flt(actual_qty - reserved_qty)
+		actual_qty = stock[key].actual_qty
+		reserved_qty = stock[key].reserved_qty
+		available_qty = stock[key].available_qty
 
 		if required_qty > available_qty + 1e-9:
 			insufficient.append(
