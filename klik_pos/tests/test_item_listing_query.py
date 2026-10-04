@@ -129,5 +129,15 @@ class TestListingIndexes(FrappeTestCase):
 		from klik_pos.patches.v16_0 import add_item_listing_indexes
 
 		add_item_listing_indexes.execute()
-		self.assertTrue(frappe.db.has_index("tabProduct Bundle", "klik_pos_bundle_item_code"))
+		# Two columns, in this order: Frappe's schema sync drops a single-column index on a field
+		# the DocType does not mark search_index, and leaves a composite alone.
+		bundle_index = frappe.db.sql(
+			"SHOW INDEX FROM `tabProduct Bundle` WHERE Key_name = %s",
+			("klik_pos_bundle_item_disabled",),
+			as_dict=True,
+		)
+		self.assertEqual(
+			[row.Column_name for row in sorted(bundle_index, key=lambda row: row.Seq_in_index)],
+			["new_item_code", "disabled"],
+		)
 		self.assertTrue(frappe.db.has_index("tabItem", "klik_pos_item_group_name"))
