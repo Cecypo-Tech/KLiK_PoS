@@ -46,7 +46,13 @@ describe("holdBlockedByMpesa", () => {
   });
 
   it("refuses once the customer has paid by STK - holding would charge them twice", () => {
-    expect(holdBlockedByMpesa({ source: "stk", status: "completed" })).toMatch(/paid/i);
+    expect(holdBlockedByMpesa({ source: "stk", status: "completed", transactionId: "UJ1TEST" })).toMatch(
+      /Submit the sale/,
+    );
+  });
+
+  it("sends a paid push still missing its receipt to Held by closing checkout", () => {
+    expect(holdBlockedByMpesa({ source: "stk", status: "completed" })).toMatch(/Close checkout/);
   });
 
   it("lets the order be held after the push failed", () => {
