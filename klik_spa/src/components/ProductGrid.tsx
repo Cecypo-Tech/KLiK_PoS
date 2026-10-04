@@ -44,7 +44,7 @@ export default function ProductGrid({
   isSearching = false,
 }: ProductGridProps) {
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, lossOfSaleEnabled } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
+  const { addToCartWithQuantity, cartItems, adjustQuantity, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -403,11 +403,7 @@ export default function ProductGrid({
       setQuantityBuffer('');
       const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
       if (cartItem) {
-        if (cartItem.quantity <= step) {
-          removeItem(cartItem.id);
-        } else {
-          void updateQuantity(cartItem.id, cartItem.quantity - step);
-        }
+        void adjustQuantity(cartItem.id, -step);
       }
     } else if (e.key === '.') {
       // No match: leave the key unbound (no preventDefault) rather than swallow it.
@@ -428,7 +424,7 @@ export default function ProductGrid({
       e.preventDefault();
       void openPricePopup(index, item);
     }
-  }, [cartItems, expandedCartItemId, handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [cartItems, expandedCartItemId, handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, toggleItemExpansion, adjustQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
