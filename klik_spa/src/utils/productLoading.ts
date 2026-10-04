@@ -48,3 +48,14 @@ export function createKeyedDedupe<T>() {
     return request;
   };
 }
+
+/** A typed search asks for one short page: 50 rows are plenty to pick from while typing. */
+export const SEARCH_PAGE_SIZE = 50;
+
+/** The footer under a search's results - a search shows one page, so say when there are more. */
+export function searchFooterLabel(shown: number, total: number): string {
+  if (total > shown) {
+    return `Showing the first ${shown} of ${total} matches - keep typing to narrow it down`;
+  }
+  return `${shown} ${shown === 1 ? "match" : "matches"}`;
+}

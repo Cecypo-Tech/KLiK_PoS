@@ -118,14 +118,25 @@ def get_items(
             page_params += [after_name or "", after_name or "", after_code]
             offset = 0
 
+        order_sql = " ORDER BY i.item_name ASC, i.name ASC"
+        order_params = []
+        if search_term:
+            # A typed part number or scanned barcode first, then codes starting with it,
+            # then everything else by name.
+            order_sql = (
+                " ORDER BY (i.name = %s OR EXISTS (SELECT 1 FROM `tabItem Barcode` ibx"
+                " WHERE ibx.parent = i.name AND ibx.barcode = %s)) DESC,"
+                " (i.name LIKE %s) DESC, i.item_name ASC, i.name ASC"
+            )
+            order_params = [search_term, search_term, f"{search_term}%"]
+
         # The item code breaks ties between equal names, so a page boundary between two
         # items of the same name can neither repeat one nor skip one.
         main_sql = apply_sql_permissions(
-            f"SELECT {select_fields} FROM `tabItem` i {page_where}"
-            " ORDER BY i.item_name ASC, i.name ASC LIMIT %s OFFSET %s"
+            f"SELECT {select_fields} FROM `tabItem` i {page_where}{order_sql} LIMIT %s OFFSET %s"
         )
         # One row past the page answers has_more without a count.
-        params_list = [*page_params, limit + 1, offset]
+        params_list = [*page_params, *order_params, limit + 1, offset]
 
         placeholder_count = main_sql.count("%s")
         if placeholder_count != len(params_list):

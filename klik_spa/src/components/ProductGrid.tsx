@@ -1,5 +1,6 @@
 "use client";
 
+import { searchFooterLabel } from "../utils/productLoading";
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import type { MenuItem } from "../../types";
 import { useProduct } from "../providers/ProductProvider";
@@ -43,7 +44,7 @@ export default function ProductGrid({
   totalCount = 0,
   isSearching = false,
 }: ProductGridProps) {
-  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
+  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery } = useProduct();
   const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
@@ -533,7 +534,9 @@ export default function ProductGrid({
             )}
             {!hasMore && inStockItems.length > 0 && (
               <span className="text-gray-400 dark:text-gray-500 text-sm">
-                All {inStockItems.length} items loaded
+                {searchQuery.trim()
+                  ? searchFooterLabel(filteredItems.length, totalCount)
+                  : `All ${inStockItems.length} items loaded`}
               </span>
             )}
           </div>
@@ -662,9 +665,11 @@ export default function ProductGrid({
               Showing {inStockItems.length} of {totalCount} items • Scroll for more
             </span>
           )}
-          {!hasMore && inStockItems.length > 0 && totalCount > 0 && (
+          {!hasMore && inStockItems.length > 0 && (
             <span className="text-gray-400 dark:text-gray-500 text-sm">
-              All {inStockItems.length} items loaded
+              {searchQuery.trim()
+                ? searchFooterLabel(filteredItems.length, totalCount)
+                : `All ${inStockItems.length} items loaded`}
             </span>
           )}
         </div>

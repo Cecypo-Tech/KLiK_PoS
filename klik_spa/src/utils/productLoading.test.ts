@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKeyedDedupe, firstPageKey, listingIncludesGroups, showTabSkeleton } from "./productLoading";
+import { createKeyedDedupe, firstPageKey, listingIncludesGroups, showTabSkeleton, SEARCH_PAGE_SIZE, searchFooterLabel } from "./productLoading";
 
 describe("showTabSkeleton", () => {
   it("shows placeholders while the first load has no groups to show", () => {
@@ -78,5 +78,20 @@ describe("createKeyedDedupe", () => {
     const dedupe = createKeyedDedupe<number>();
     await expect(dedupe("k", async () => Promise.reject(new Error("offline")))).rejects.toThrow("offline");
     await expect(dedupe("k", async () => 7)).resolves.toBe(7);
+  });
+});
+
+describe("searchFooterLabel", () => {
+  it("says when a search shows only its first page", () => {
+    expect(searchFooterLabel(50, 120)).toBe("Showing the first 50 of 120 matches - keep typing to narrow it down");
+  });
+
+  it("counts the matches when they all fit", () => {
+    expect(searchFooterLabel(7, 7)).toBe("7 matches");
+    expect(searchFooterLabel(1, 1)).toBe("1 match");
+  });
+
+  it("asks the server for one short page", () => {
+    expect(SEARCH_PAGE_SIZE).toBe(50);
   });
 });

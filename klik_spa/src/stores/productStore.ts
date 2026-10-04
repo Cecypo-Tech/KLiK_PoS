@@ -5,7 +5,7 @@ import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
 import { resolveNextOffset, shouldKeepPaginating } from '../utils/pagination';
-import { createKeyedDedupe, firstPageKey, listingIncludesGroups } from '../utils/productLoading';
+import { createKeyedDedupe, firstPageKey, listingIncludesGroups, SEARCH_PAGE_SIZE } from '../utils/productLoading';
 
 interface ProductStoreState {
   products: MenuItem[];
@@ -530,7 +530,7 @@ export const useProductStore = create<ProductStoreState>()(
         const priceList = get().getEffectivePriceList();
         
         try {
-          const result = await fetchProductsFromAPI(500, 0, query, selectedCategory, customerId, priceList);
+          const result = await fetchProductsFromAPI(SEARCH_PAGE_SIZE, 0, query, selectedCategory, customerId, priceList);
           
           if (get().searchQuery.trim() === query) {
             set({
