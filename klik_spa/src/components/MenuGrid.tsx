@@ -7,7 +7,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useProduct } from "../providers/ProductProvider";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useCartStore } from "../stores/cartStore";
-import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap } from "lucide-react";
+import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap, Warehouse } from "lucide-react";
 import { toast } from "react-toastify";
 import { clearCacheAndReload } from "../utils/clearCache";
 import { isItemOutOfStock } from "../utils/stock";
@@ -219,6 +219,16 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
                 <List className="w-4 h-4" />
               </button>
             </div>
+
+            {!posDetails?.allow_warehouse_change && posDetails?.warehouse && (
+              <div
+                className="flex items-center gap-1 h-7 px-2.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0"
+                title={`Warehouse: ${posDetails.warehouse}`}
+              >
+                <Warehouse className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-xs font-medium truncate max-w-[10rem]">{posDetails.warehouse}</span>
+              </div>
+            )}
 
             {useScannerOnly && (
               <div className="flex items-center h-8 px-3 rounded-lg bg-blue-600 text-white">
