@@ -320,12 +320,15 @@ def get_items(
                 }
             )
 
+        group_by_item = {row["name"]: row["item_group"] for row in items}
+        listed_codes = [item["id"] for item in enriched_items]
         tax_info_map = _fetch_item_tax_info_map(
-            [item["id"] for item in enriched_items],
+            listed_codes,
             pos_doc,
             current_date,
             customer,
             price_by_item,
+            group_by_item={code: group_by_item.get(code) for code in listed_codes},
         )
         for item in enriched_items:
             tax_info = tax_info_map.get(item["id"], _empty_tax_info())
@@ -406,7 +409,9 @@ def _empty_tax_info():
     }
 
 
-def _fetch_item_tax_info_map(item_codes, pos_doc, current_date, customer=None, price_by_item=None):
+def _fetch_item_tax_info_map(
+    item_codes, pos_doc, current_date, customer=None, price_by_item=None, group_by_item=None
+):
     if not item_codes:
         return {}
 
@@ -430,7 +435,7 @@ def _fetch_item_tax_info_map(item_codes, pos_doc, current_date, customer=None, p
         for item_code in item_codes
     }
 
-    item_tax_rows = _fetch_item_tax_rows(item_codes, current_date)
+    item_tax_rows = _fetch_item_tax_rows(item_codes, current_date, group_by_item)
     if not item_tax_rows:
         return result
 
@@ -521,32 +526,57 @@ def _fetch_pos_sales_tax_rows(pos_doc):
         return []
 
 
-def _fetch_item_tax_rows(item_codes, current_date):
+def _fetch_item_tax_rows(item_codes, current_date, group_by_item=None):
     """Item Tax rows per item, tagged with `level`: 0 for the Item's own rows, then 1, 2, ...
     for its Item Group and each ancestor. ERPNext bills with the first level that yields a
-    usable template, so an item with no template of its own is taxed through its group."""
+    usable template, so an item with no template of its own is taxed through its group.
+
+    `group_by_item` (item code -> item group) spares re-reading groups the caller has."""
     own_rows = _fetch_own_item_tax_rows(item_codes)
     for row in own_rows:
         row["level"] = 0
-    return own_rows + _fetch_item_group_tax_rows(item_codes)
+    return own_rows + _fetch_item_group_tax_rows(item_codes, group_by_item)
 
 
-def _fetch_item_group_tax_rows(item_codes):
-    from frappe.utils.nestedset import get_ancestors_of
+def _item_group_lineages(groups):
+    """Each group with its ancestors, nearest first - [group, parent, ..., root] - for any
+    number of groups in one nested-set query (was one get_ancestors_of call per group)."""
+    groups = sorted({group for group in groups if group})
+    if not groups:
+        return {}
+    placeholders = ", ".join(["%s"] * len(groups))
+    rows = frappe.db.sql(
+        f"""
+        SELECT child.name AS grp, anc.name AS ancestor
+        FROM `tabItem Group` child
+        INNER JOIN `tabItem Group` anc ON anc.lft <= child.lft AND anc.rgt >= child.rgt
+        WHERE child.name IN ({placeholders})
+        ORDER BY child.name, anc.lft DESC
+        """,
+        tuple(groups),
+        as_dict=True,
+    )
+    # A group heads its own lineage even when its lft/rgt are broken, as
+    # [group, *get_ancestors_of(...)] always did.
+    lineages = {group: [group] for group in groups}
+    for row in rows:
+        if row.ancestor != row.grp:
+            lineages.setdefault(row.grp, [row.grp]).append(row.ancestor)
+    return lineages
 
+
+def _fetch_item_group_tax_rows(item_codes, group_by_item=None):
     try:
-        group_by_item = dict(
-            frappe.get_all(
-                "Item",
-                filters={"name": ["in", item_codes]},
-                fields=["name", "item_group"],
-                as_list=True,
+        if group_by_item is None:
+            group_by_item = dict(
+                frappe.get_all(
+                    "Item",
+                    filters={"name": ["in", item_codes]},
+                    fields=["name", "item_group"],
+                    as_list=True,
+                )
             )
-        )
-        lineage_by_group = {
-            group: [group, *get_ancestors_of("Item Group", group)]
-            for group in {g for g in group_by_item.values() if g}
-        }
+        lineage_by_group = _item_group_lineages(group_by_item.values())
         all_groups = sorted({g for lineage in lineage_by_group.values() for g in lineage})
         if not all_groups:
             return []
