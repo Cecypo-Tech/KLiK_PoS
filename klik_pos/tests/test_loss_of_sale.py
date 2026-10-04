@@ -388,3 +388,39 @@ class TestLossOfSale(FrappeTestCase):
 		response = self._sell([{"id": STOCKED, "quantity": 4, "los_qty": 3, "price": 100, "uom": "Nos"}], enabled=0)
 		self.assertTrue(response["success"], response.get("message"))
 		self.assertEqual(self._rows(response["invoice_name"]), [(STOCKED, 4, 0)])
+
+	def _held_rows(self, save):
+		"""save(payload) -> response with order_name; the order's (item, qty) rows."""
+		response = save(
+			{
+				"customer": {"id": self.customer},
+				"items": [
+					{"id": STOCKED, "quantity": 2, "los_qty": 0, "price": 100, "uom": "Nos"},
+					{"id": EMPTY, "quantity": 0, "los_qty": 6, "price": 100, "uom": "Nos"},
+				],
+				"status": "held",
+			}
+		)
+		self.assertTrue(response["success"], response.get("message"))
+		self.addCleanup(
+			lambda: frappe.db.exists("Sales Order", response["order_name"])
+			and (frappe.delete_doc("Sales Order", response["order_name"], force=True, ignore_permissions=True), frappe.db.commit())
+		)
+		return [
+			(r.item_code, r.qty)
+			for r in frappe.get_all(
+				"Sales Order Item", filters={"parent": response["order_name"]}, fields=["item_code", "qty"], order_by="idx"
+			)
+		]
+
+	def test_a_held_order_holds_what_was_asked_for(self):
+		self._require_shift()
+		from klik_pos.api.sales_order import create_held_order
+
+		self.assertEqual(self._held_rows(create_held_order), [(STOCKED, 2), (EMPTY, 6)])
+
+	def test_an_mpesa_order_holds_what_was_asked_for(self):
+		self._require_shift()
+		from klik_pos.api.mpesa_order import save_mpesa_order
+
+		self.assertEqual(self._held_rows(save_mpesa_order), [(STOCKED, 2), (EMPTY, 6)])
