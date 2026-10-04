@@ -170,7 +170,7 @@ def before_validate(doc, method=None):
 		return
 	if (
 		doc.get("_action") == "submit"
-		and not flt(doc.get("paid_amount"))
+		and not _has_money(doc)
 		and doc.get("pos_profile")
 		and cint(frappe.db.get_value("POS Profile", doc.pos_profile, PROFILE_FLAG))
 	):
@@ -178,6 +178,20 @@ def before_validate(doc, method=None):
 		if changes:
 			_announce(changes)
 	_allow_los_zero_rows(doc)
+
+
+def _has_money(doc):
+	"""Cash, a payment row, loyalty points or an advance is on the invoice. Payment rows are summed
+	because paid_amount is only recomputed in validate, after this hook."""
+	return any(
+		flt(amount) > 0
+		for amount in (
+			doc.get("paid_amount"),
+			sum(flt(row.amount) for row in doc.get("payments") or []),
+			doc.get("loyalty_amount"),
+			doc.get("total_advance"),
+		)
+	)
 
 
 def _allow_los_zero_rows(doc):

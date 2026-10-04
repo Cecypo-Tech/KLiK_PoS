@@ -245,12 +245,21 @@ class TestLossOfSale(FrappeTestCase):
 	def test_a_paid_invoice_is_never_shortened(self):
 		from klik_pos.overrides.loss_of_sale import before_validate
 
-		invoice = frappe.new_doc("Sales Invoice")
-		invoice.update({"customer": self.customer, "company": self.company, "pos_profile": self.profile.name})
-		invoice.update_stock = 1
-		invoice.paid_amount = 50
-		invoice.append("items", {"item_code": STOCKED, "qty": 16, "rate": 100, "warehouse": self.warehouse})
-		invoice._action = "submit"
-		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
-			before_validate(invoice)
-		self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
+		mode = frappe.db.get_value("Mode of Payment", {}, "name")
+		sources = {
+			"paid_amount": {"paid_amount": 50},
+			"payment row": {"payments": [{"mode_of_payment": mode, "amount": 50}]},
+			"loyalty": {"loyalty_amount": 50},
+			"advance": {"total_advance": 50},
+		}
+		for label, money in sources.items():
+			with self.subTest(label):
+				invoice = frappe.new_doc("Sales Invoice")
+				invoice.update({"customer": self.customer, "company": self.company, "pos_profile": self.profile.name})
+				invoice.update_stock = 1
+				invoice.update(money)
+				invoice.append("items", {"item_code": STOCKED, "qty": 16, "rate": 100, "warehouse": self.warehouse})
+				invoice._action = "submit"
+				with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+					before_validate(invoice)
+				self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
