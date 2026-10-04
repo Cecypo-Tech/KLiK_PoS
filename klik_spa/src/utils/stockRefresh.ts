@@ -32,7 +32,9 @@ export function applyStockUpdates(products: MenuItem[], updates: Record<string, 
     if (!(product.id in updates) || !isPlainStockItem(product)) return product;
     const raw = Number(updates[product.id]);
     if (!Number.isFinite(raw)) return product;
-    const value = Math.floor(raw / (product.conversion_factor || 1));
+    const factor = product.conversion_factor;
+    // Floor only when converting to another selling UOM, like the listing; 0.5 kg stays 0.5.
+    const value = factor && factor !== 1 ? Math.floor(raw / factor) : raw;
     if (value === product.available) return product;
     changed = true;
     return { ...product, available: value };

@@ -52,4 +52,9 @@ describe("applyStockUpdates", () => {
     expect(next[0]?.available).toBe(2);
     expect(applyStockUpdates(next, { BOX: 25 })).toBe(next);
   });
+
+  it("keeps fractional stock of an item sold in its stock UOM", () => {
+    const kg = item("KG", { available: 1 });
+    expect(applyStockUpdates([kg], { KG: 0.5 })[0]?.available).toBe(0.5);
+  });
 });
