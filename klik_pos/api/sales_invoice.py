@@ -12,7 +12,7 @@ from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile
-from klik_pos.overrides.loss_of_sale import split_cart_items
+from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority
 from .loyalty import (
@@ -2266,9 +2266,11 @@ def _queue_sales_invoice(data, source_order=None):
 			frappe.throw("At least one item is required")
 
 		if not flt(amount_paid) and not loyalty_redemption and not data.get("customerCredit"):
-			# Nothing taken yet (a credit sale), so it may still be shortened to the stock there
-			# is. A paid sale never is: the preview split it before the money was taken.
-			split_cart_items(items, _get_active_pos_profile())
+			# Nothing taken yet (a credit sale). The preview split the cart the cashier showed;
+			# if stock has moved since, billing a different split would go unseen - refuse it.
+			# A paid sale is not re-split at all: its money was taken against the preview.
+			if split_cart_items(items, _get_active_pos_profile()):
+				frappe.throw(_("Stock changed since checkout - review the cart."))
 
 		doc = build_sales_invoice_doc(
 			customer,
@@ -4241,7 +4243,7 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	# Only when the cashier wrote one: set_missing_values fills the Item's own otherwise.
 	if item.get("description"):
 		item_data["description"] = item.get("description")
-	if flt(item.get("los_qty")) > 0:
+	if flt(item.get("los_qty")) > 0 and cint(pos_profile.get(LOS_PROFILE_FLAG)):
 		item_data["custom_los_qty"] = flt(item.get("los_qty"))
 		if not flt(item.get("quantity")):
 			# set_missing_values fills a missing stock_qty with 1, which stock checks would count.
