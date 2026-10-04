@@ -51,6 +51,7 @@ It is called from three places:
 - A Desk-wide switch for invoices without a profile.
 - An LoS report.
 - Amending a cancelled invoice loses the LoS split, because of no_copy.
+- Batch-tracked items with batch autofetch: a zero-stock line the cart showed as Loss of Sale is still refused at checkout by `_autofetch_batch_fifo` ("no suitable batch").
 
 ## Verification
 - **Python unit tests** (new `klik_pos/tests/test_loss_of_sale.py`):
