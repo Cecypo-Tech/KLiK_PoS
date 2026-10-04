@@ -3215,6 +3215,12 @@ def build_sales_invoice_doc(
 	if include_payments:
 		doc.is_pos = 1
 		_add_payment_entries(doc, mode_of_payment)
+		# ERPNext refuses a POS invoice with no payment row. A sale paid with no tender (a
+		# voucher) that was not yet POS when ERPNext filled in the till's modes has none, so
+		# give it the default mode at 0 - ERPNext drops zero rows on submit.
+		default_mode = None if doc.get("payments") else _get_default_payment_mode()
+		if default_mode:
+			doc.append("payments", {"mode_of_payment": default_mode, "amount": 0})
 		doc.calculate_taxes_and_totals()
 
 	if is_credit_sale:

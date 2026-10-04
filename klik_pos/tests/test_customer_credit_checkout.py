@@ -186,6 +186,35 @@ class TestCheckoutWithCredit(FrappeTestCase):
 
 	def test_a_queued_voucher_sale_submits_on_a_till_without_part_payment(self):
 		"""The worker loads the draft afresh, so the voucher it was handed must count as paid."""
+		self._queued_voucher_sale("B2C")
+
+	def test_a_queued_voucher_sale_to_a_business_customer_submits(self):
+		"""A B2B sale (or a company customer on a B2B & B2C till) with no cash is not a POS
+		sale when ERPNext fills in the till's payment modes, so it got none; made a POS sale
+		afterwards with no payment row, ERPNext refused it at submit ("At least one mode of
+		payment is required for POS invoice.")."""
+		self._queued_voucher_sale("B2B")
+
+	def test_a_voucher_sale_to_a_business_customer_submits_directly(self):
+		self._no_partial_payment()
+		note = self._note(200)
+		result = si.create_and_submit_invoice(
+			{
+				"customer": {"id": CUSTOMER},
+				"items": self.items,
+				"businessType": "B2B",
+				"amountPaid": 0,
+				"paymentMethods": [],
+				"customerCredit": [{"invoice": note.name, "amount": self.total}],
+			}
+		)
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount"), 2),
+			0.0,
+		)
+
+	def _queued_voucher_sale(self, business_type):
 		self._no_partial_payment()
 		note = self._note(200)
 		rows = [{"invoice": note.name, "amount": self.total}]
@@ -194,7 +223,7 @@ class TestCheckoutWithCredit(FrappeTestCase):
 				{
 					"customer": {"id": CUSTOMER},
 					"items": self.items,
-					"businessType": "B2C",
+					"businessType": business_type,
 					"amountPaid": 0,
 					"paymentMethods": [],
 					"customerCredit": rows,
