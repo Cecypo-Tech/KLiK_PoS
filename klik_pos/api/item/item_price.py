@@ -10,7 +10,7 @@ from ..sql_builder import apply_sql_permissions
 ENABLED_PRICE_LIST = "price_list IN (SELECT name FROM `tabPrice List` WHERE enabled = 1)"
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_item_price_for_customer(item_code, customer=None, uom=None):
     try:
         if not item_code:

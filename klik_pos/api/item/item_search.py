@@ -38,7 +38,7 @@ def _validate_item_sales_eligibility(item_data, include_service_items):
     return is_stock_item
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_item_by_barcode(barcode: str):
     try:
         pos_doc = get_current_pos_profile_lite(_SCAN_POS_PROFILE_FIELDS)
@@ -203,7 +203,7 @@ def _resolve_item_code_from_identifier(code: str):
     return None, None, None
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_item_by_identifier(code: str):
     try:
         if not code:

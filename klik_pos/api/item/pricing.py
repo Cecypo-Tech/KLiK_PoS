@@ -9,7 +9,7 @@ from ..sql_builder import apply_sql_permissions
 from .item_price import ENABLED_PRICE_LIST, is_enabled_price_list
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_cart_pricing(cart_items, customer=None, price_list=None):
     """
     Single API call to get all pricing information for cart items

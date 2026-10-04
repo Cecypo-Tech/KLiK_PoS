@@ -44,7 +44,7 @@ def apply_queue_reservations_to_stock_map(stock_map, warehouse):
     return stock_map
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_stock_updates():
     pos_doc = None
 
@@ -154,7 +154,7 @@ def get_stock_updates():
         return {}
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_item_stock(item_code):
     pos_doc = get_current_pos_profile()
     warehouse = pos_doc.warehouse
