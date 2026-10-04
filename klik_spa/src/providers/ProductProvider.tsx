@@ -1,5 +1,8 @@
-import { createContext, useContext, ReactNode, useEffect } from 'react';
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useProductStore } from '../stores/productStore';
+import { usePOSProfileStore } from '../stores/posProfileStore';
+import { filterAvailableProducts } from '../utils/productFilter';
 import type { MenuItem, POSProfile, Customer, ItemGroup } from '../../types';
 
 interface ProductContextType {
@@ -23,7 +26,6 @@ interface ProductContextType {
   isLoadingMore: boolean;
   isSearching: boolean;
   isLoadingCustomers: boolean;
-  isRefreshingStock: boolean;
   error: string | null;
   
   useScannerOnly: boolean;
@@ -44,8 +46,6 @@ interface ProductContextType {
   searchCustomers: (query: string) => Promise<Customer[]>;
   setSelectedCustomer: (customer: Customer | null) => void;
   clearCache: () => void;
-  
-  lastUpdated: Date | null;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
@@ -57,67 +57,93 @@ interface ProductProviderProps {
 }
 
 export function ProductProvider({ children, posName, initialCustomerId }: ProductProviderProps) {
-  const store = useProductStore();
-  
+  // Field-by-field subscriptions and a memoized value: the whole-store subscription rebuilt
+  // the context - and redrew every consumer - on any change at all. isRefreshingStock and
+  // lastUpdated are left out (no consumer reads them) so stock ticks do not redraw the tree.
+  const state = useProductStore(
+    useShallow((s) => ({
+      products: s.products,
+      itemGroups: s.itemGroups,
+      customers: s.customers,
+      selectedCustomer: s.selectedCustomer,
+      searchQuery: s.searchQuery,
+      selectedCategory: s.selectedCategory,
+      totalCount: s.totalCount,
+      hasMore: s.hasMore,
+      degraded: s.degraded,
+      degradedReason: s.degradedReason,
+      stockUnavailable: s.stockUnavailable,
+      isLoading: s.isLoading,
+      isLoadingMore: s.isLoadingMore,
+      isSearching: s.isSearching,
+      isLoadingCustomers: s.isLoadingCustomers,
+      error: s.error,
+    })),
+  );
+  const actions = useProductStore(
+    useShallow((s) => ({
+      initializePOS: s.initializePOS,
+      fetchProducts: s.fetchProducts,
+      loadMoreProducts: s.loadMoreProducts,
+      searchProducts: s.searchProducts,
+      resolveSearchNow: s.resolveSearchNow,
+      clearSearch: s.clearSearch,
+      setCategory: s.setCategory,
+      refreshStockOnly: s.refreshStockOnly,
+      updateStockOnly: s.updateStockOnly,
+      updateStockForItems: s.updateStockForItems,
+      searchCustomers: s.searchCustomers,
+      setSelectedCustomer: s.setSelectedCustomer,
+      clearCache: s.clearCache,
+      stopBackgroundRefresh: s.stopBackgroundRefresh,
+    })),
+  );
+  const profile = usePOSProfileStore(
+    useShallow((p) => ({
+      useScannerOnly: p.useScannerOnly,
+      hideUnavailableItems: p.hideUnavailableItems,
+      scalePrefix: p.scalePrefix,
+      defaultView: p.defaultView,
+    })),
+  );
+
+  // `actions` keeps its identity (useShallow over store functions that never change), so
+  // this runs again only for a different till or customer.
   useEffect(() => {
     if (posName) {
-      store.initializePOS(posName, initialCustomerId);
+      actions.initializePOS(posName, initialCustomerId);
     }
     return () => {
-      store.stopBackgroundRefresh();
+      actions.stopBackgroundRefresh();
     };
-  }, [posName, initialCustomerId]);
-  
-  const filteredItems = store.getFilteredItems();
-  const useScannerOnly = store.getUseScannerOnly();
-  const hideUnavailableItems = store.getHideUnavailableItems();
-  const scalePrefix = store.getScalePrefix();
-  const defaultView = store.getDefaultView();
-  
-  const contextValue: ProductContextType = {
-    products: store.products,
-    filteredItems,
-    itemGroups: store.itemGroups,
-    customers: store.customers,
-    selectedCustomer: store.selectedCustomer,
-    
-    searchQuery: store.searchQuery,
-    selectedCategory: store.selectedCategory,
-    
-    totalCount: store.totalCount,
-    hasMore: store.hasMore,
-    degraded: store.degraded,
-    degradedReason: store.degradedReason,
-    stockUnavailable: store.stockUnavailable,
-    
-    isLoading: store.isLoading,
-    isLoadingMore: store.isLoadingMore,
-    isSearching: store.isSearching,
-    isLoadingCustomers: store.isLoadingCustomers,
-    isRefreshingStock: store.isRefreshingStock,
-    error: store.error,
-    
-    useScannerOnly,
-    hideUnavailableItems,
-    scalePrefix,
-    defaultView,
-    
-    initializePOS: store.initializePOS,
-    fetchProducts: store.fetchProducts,
-    loadMoreProducts: store.loadMoreProducts,
-    searchProducts: store.searchProducts,
-    resolveSearchNow: store.resolveSearchNow,
-    clearSearch: store.clearSearch,
-    setCategory: store.setCategory,
-    refreshStockOnly: store.refreshStockOnly,
-    updateStockOnly: store.updateStockOnly,
-    updateStockForItems: store.updateStockForItems,
-    searchCustomers: store.searchCustomers,
-    setSelectedCustomer: store.setSelectedCustomer,
-    clearCache: store.clearCache,
-    
-    lastUpdated: store.lastUpdated,
-  };
+  }, [posName, initialCustomerId, actions]);
+
+  const filteredItems = useMemo(
+    () => filterAvailableProducts(state.products, profile.hideUnavailableItems),
+    [state.products, profile.hideUnavailableItems],
+  );
+
+  const contextValue = useMemo<ProductContextType>(
+    () => ({
+      ...state,
+      ...profile,
+      filteredItems,
+      initializePOS: actions.initializePOS,
+      fetchProducts: actions.fetchProducts,
+      loadMoreProducts: actions.loadMoreProducts,
+      searchProducts: actions.searchProducts,
+      resolveSearchNow: actions.resolveSearchNow,
+      clearSearch: actions.clearSearch,
+      setCategory: actions.setCategory,
+      refreshStockOnly: actions.refreshStockOnly,
+      updateStockOnly: actions.updateStockOnly,
+      updateStockForItems: actions.updateStockForItems,
+      searchCustomers: actions.searchCustomers,
+      setSelectedCustomer: actions.setSelectedCustomer,
+      clearCache: actions.clearCache,
+    }),
+    [state, profile, filteredItems, actions],
+  );
   
   return (
     <ProductContext.Provider value={contextValue}>

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { createKeyedDedupe, firstPageKey, listingIncludesGroups, showTabSkeleton } from "./productLoading";
+import {
+  createKeyedDedupe,
+  findScrollParent,
+  firstPageKey,
+  listingIncludesGroups,
+  loadMoreSkeletonCount,
+  pageAdvanced,
+  prefetchRootMargin,
+  showTabSkeleton,
+  SEARCH_PAGE_SIZE,
+  searchFooterLabel,
+} from "./productLoading";
 
 describe("showTabSkeleton", () => {
   it("shows placeholders while the first load has no groups to show", () => {
@@ -78,5 +89,73 @@ describe("createKeyedDedupe", () => {
     const dedupe = createKeyedDedupe<number>();
     await expect(dedupe("k", async () => Promise.reject(new Error("offline")))).rejects.toThrow("offline");
     await expect(dedupe("k", async () => 7)).resolves.toBe(7);
+  });
+});
+
+describe("searchFooterLabel", () => {
+  it("says when a search shows only its first page", () => {
+    expect(searchFooterLabel(50, 120)).toBe("Showing the first 50 of 120 matches - keep typing to narrow it down");
+  });
+
+  it("counts the matches when they all fit", () => {
+    expect(searchFooterLabel(7, 7)).toBe("7 matches");
+    expect(searchFooterLabel(1, 1)).toBe("1 match");
+  });
+
+  it("asks the server for one short page", () => {
+    expect(SEARCH_PAGE_SIZE).toBe(50);
+  });
+});
+
+describe("pageAdvanced", () => {
+  const cursor = (code: string) => ({ after_name: code, after_code: code });
+
+  it("counts a new cursor as progress", () => {
+    expect(pageAdvanced({ cursor: cursor("A"), offset: 0 }, { cursor: cursor("B"), offset: 0 })).toBe(true);
+  });
+
+  it("does not count the same cursor twice", () => {
+    expect(pageAdvanced({ cursor: cursor("A"), offset: 3 }, { cursor: cursor("A"), offset: 3 })).toBe(false);
+  });
+
+  it("falls back to the offset against a server without cursors", () => {
+    expect(pageAdvanced({ cursor: null, offset: 150 }, { cursor: null, offset: 300 })).toBe(true);
+    expect(pageAdvanced({ cursor: null, offset: 150 }, { cursor: null, offset: 150 })).toBe(false);
+  });
+});
+
+describe("findScrollParent", () => {
+  type Box = { name: string; overflowY: string; parentElement: Box | null };
+  const node = (name: string, overflowY: string, parentElement: Box | null): Box => ({ name, overflowY, parentElement });
+
+  it("finds the nearest scrolling ancestor", () => {
+    const page = node("page", "visible", null);
+    const scroller = node("scroller", "auto", page);
+    const grid = node("grid", "visible", scroller);
+    const sentinel = node("sentinel", "visible", grid);
+    expect(findScrollParent(sentinel, (el) => el.overflowY)?.name).toBe("scroller");
+  });
+
+  it("returns null when only the page scrolls", () => {
+    const sentinel = node("sentinel", "visible", node("page", "visible", null));
+    expect(findScrollParent(sentinel, (el) => el.overflowY)).toBeNull();
+  });
+});
+
+describe("prefetchRootMargin", () => {
+  it("reaches two screens below what is visible", () => {
+    expect(prefetchRootMargin(700)).toBe("0px 0px 1400px 0px");
+  });
+
+  it("never shrinks below two 400px screens", () => {
+    expect(prefetchRootMargin(0)).toBe("0px 0px 800px 0px");
+  });
+});
+
+describe("loadMoreSkeletonCount", () => {
+  it("fills one row of the grid, or a few list rows", () => {
+    expect(loadMoreSkeletonCount(false, "grid")).toBe(4);
+    expect(loadMoreSkeletonCount(true, "grid")).toBe(2);
+    expect(loadMoreSkeletonCount(false, "list")).toBe(3);
   });
 });

@@ -68,7 +68,7 @@ export default function OrderSummary({
   const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | null>(null);
 
   const { posDetails } = usePOSProfileStore();
-  const { refreshStockOnly } = useProductStore();
+  const refreshStockOnly = useProductStore((s) => s.refreshStockOnly);
   const { activeSalesperson, ensureInitialized } = useSalespersonStore();
 
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, any>>(() => {

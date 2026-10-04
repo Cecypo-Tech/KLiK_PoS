@@ -178,11 +178,11 @@ def get_item_stock(item_code):
         }
 
 
-@frappe.whitelist(allow_guest=True)
-def get_items_stock_batch(item_codes):
+@frappe.whitelist()
+def get_items_stock_batch(item_codes, warehouse=None):
+    # Like get_items: the till may ask for the warehouse it switched to.
     pos_doc = get_current_pos_profile()
-    warehouse = pos_doc.warehouse
-    hide_unavailable = pos_doc.get("hide_unavailable_items")
+    warehouse = warehouse or pos_doc.warehouse
 
     try:
         item_codes_list = [
@@ -191,12 +191,21 @@ def get_items_stock_batch(item_codes):
             if code.strip()
         ]
 
-        all_stock = _fetch_batch_stock(item_codes_list, warehouse)
+        # Every plain stock item asked for, zeros included: a till hiding unavailable items
+        # must still learn that one sold out. Bundles, variant templates and non-stock items
+        # are left out - the listing computes their availability, and a Bin figure (0) would
+        # overwrite it on any till, including one still running the pre-deploy code.
+        stock_codes = set()
+        if item_codes_list:
+            stock_codes = set(
+                frappe.get_all(
+                    "Item",
+                    filters={"name": ["in", item_codes_list], "is_stock_item": 1, "has_variants": 0},
+                    pluck="name",
+                )
+            )
 
-        if hide_unavailable:
-            return {k: v for k, v in all_stock.items() if v > 0}
-
-        return all_stock
+        return _fetch_batch_stock([code for code in item_codes_list if code in stock_codes], warehouse)
 
     except Exception:
         frappe.log_error(

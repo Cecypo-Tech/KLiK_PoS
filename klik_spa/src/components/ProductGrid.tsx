@@ -1,5 +1,6 @@
 "use client";
 
+import { findScrollParent, loadMoreSkeletonCount, prefetchRootMargin, searchFooterLabel } from "../utils/productLoading";
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import type { MenuItem } from "../../types";
 import { useProduct } from "../providers/ProductProvider";
@@ -10,6 +11,7 @@ import VariantPickerModal from "./VariantPickerModal";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
 import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, seedCustomPrice, typeCustomPrice } from "../utils/priceOptions";
@@ -43,8 +45,14 @@ export default function ProductGrid({
   totalCount = 0,
   isSearching = false,
 }: ProductGridProps) {
-  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable } = useProduct();
-  const { addToCartWithQuantity, cartItems, updateQuantity, removeItem, toggleItemExpansion, expandedCartItemId, requestCustomRate } = useCartStore();
+  const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery } = useProduct();
+  // Actions only: subscribing to the whole cart redrew the grid on every cart change.
+  // Cart contents are read at keypress time (handleItemKeyDown) instead.
+  const addToCartWithQuantity = useCartStore((s) => s.addToCartWithQuantity);
+  const updateQuantity = useCartStore((s) => s.updateQuantity);
+  const removeItem = useCartStore((s) => s.removeItem);
+  const toggleItemExpansion = useCartStore((s) => s.toggleItemExpansion);
+  const requestCustomRate = useCartStore((s) => s.requestCustomRate);
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, ensureInitialized, isRestoring } = useSalespersonStore();
   const [showSalespersonModal, setShowSalespersonModal] = useState(false);
@@ -398,6 +406,7 @@ export default function ProductGrid({
       setQuantityBuffer('');
       void handleAddToCart(item, quantity);
     } else if (e.key === '-') {
+      const { cartItems } = useCartStore.getState();
       e.preventDefault();
       const step = bufferToQuantity(quantityBuffer);
       setQuantityBuffer('');
@@ -410,6 +419,7 @@ export default function ProductGrid({
         }
       }
     } else if (e.key === '.') {
+      const { cartItems, expandedCartItemId } = useCartStore.getState();
       // No match: leave the key unbound (no preventDefault) rather than swallow it.
       const cartItem = cartItems.find(ci => (ci.item_code || ci.id) === (item.item_code || item.id));
       if (!cartItem) return;
@@ -428,7 +438,7 @@ export default function ProductGrid({
       e.preventDefault();
       void openPricePopup(index, item);
     }
-  }, [cartItems, expandedCartItemId, handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
+  }, [handleAddToCart, isTaxIncludedInBasicRate, openPricePopup, pricePopup, commitPriceSelection, quantityBuffer, quantityShortcutEnabled, removeItem, toggleItemExpansion, updateQuantity]);
 
   const handleSalespersonAuthenticated = useCallback(() => {
     const itemToAdd = pendingCartItem;
@@ -441,6 +451,16 @@ export default function ProductGrid({
 
     void addItemToCart(itemToAdd.item, itemToAdd.quantity);
   }, [addItemToCart, pendingCartItem]);
+
+  // Stable identities for the memoized cards and rows: the underlying handlers change with
+  // the quantity buffer, popup and cart, which would otherwise redraw every card.
+  const handleCardAdd = useStableCallback((item: MenuItem) => {
+    void handleAddToCart(item);
+  });
+  const handleCardFocus = useStableCallback((index: number) => setFocusedIndex(index));
+  const handleCardKeyDown = useStableCallback(
+    (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => handleItemKeyDown(index, item, e),
+  );
 
   const handleVariantSelected = useCallback(async (variant: MenuItem) => {
     await addConcreteItemToCart(variant);
@@ -458,25 +478,19 @@ export default function ProductGrid({
   );
 
   useEffect(() => {
-    const option = {
-      root: null,
-      rootMargin: "200px",
+    const target = loadMoreRef.current;
+    if (!target) return;
+    // Observe against the element that really scrolls the list, two screens ahead, so the
+    // next page arrives before the cashier reaches the end.
+    const root = findScrollParent<HTMLElement>(target, (el) => getComputedStyle(el).overflowY);
+    const observer = new IntersectionObserver(handleObserver, {
+      root,
+      rootMargin: prefetchRootMargin(root ? root.clientHeight : window.innerHeight),
       threshold: 0,
-    };
-
-    const observer = new IntersectionObserver(handleObserver, option);
-    const currentLoadMoreRef = loadMoreRef.current;
-
-    if (currentLoadMoreRef) {
-      observer.observe(currentLoadMoreRef);
-    }
-
-    return () => {
-      if (currentLoadMoreRef) {
-        observer.unobserve(currentLoadMoreRef);
-      }
-    };
-  }, [handleObserver]);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [handleObserver, viewMode]);
 
   // Same amber treatment as CustomerReceivablesTable, so a degraded response reads as one
   // system wherever it appears. Rendered in every branch below - including the empty state,
@@ -504,26 +518,25 @@ export default function ProductGrid({
         <ProductLineView
           stockUnavailable={stockUnavailable}
           items={inStockItems}
-          onAddToCart={handleAddToCart}
+          onAddToCart={handleCardAdd}
           isMobile={isMobile}
           showItemCode={showItemCode}
           useItemCodeAsName={useItemCodeAsName}
           scannerOnly={scannerOnly}
           hideImages={hideImages}
           focusedIndex={focusedIndex}
-          onItemFocus={setFocusedIndex}
-          onItemKeyDown={handleItemKeyDown}
+          onItemFocus={handleCardFocus}
+          onItemKeyDown={handleCardKeyDown}
           quantityBuffer={displayQuantityBuffer}
         />
 
         {onLoadMore && (
           <div ref={loadMoreRef} className="py-4 flex justify-center">
             {isLoadingMore && (
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-beveren-600"></div>
-                <span className="text-gray-500 dark:text-gray-400 text-sm">
-                  Loading more items...
-                </span>
+              <div className="w-full space-y-2 px-1" aria-hidden="true">
+                {Array.from({ length: loadMoreSkeletonCount(isMobile, "list") }, (_, k) => (
+                  <div key={`load-more-row-${k}`} className="h-10 rounded-md bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                ))}
               </div>
             )}
             {!isLoadingMore && hasMore && (
@@ -533,7 +546,9 @@ export default function ProductGrid({
             )}
             {!hasMore && inStockItems.length > 0 && (
               <span className="text-gray-400 dark:text-gray-500 text-sm">
-                All {inStockItems.length} items loaded
+                {searchQuery.trim()
+                  ? searchFooterLabel(filteredItems.length, totalCount)
+                  : `All ${inStockItems.length} items loaded`}
               </span>
             )}
           </div>
@@ -633,38 +648,40 @@ export default function ProductGrid({
             stockUnavailable={stockUnavailable}
             key={item.id}
             item={item}
-            onAddToCart={handleAddToCart}
+            onAddToCart={handleCardAdd}
             isMobile={isMobile}
             showItemCode={showItemCode}
             useItemCodeAsName={useItemCodeAsName}
             scannerOnly={scannerOnly}
             productIndex={i}
             isFocused={focusedIndex === i}
-            onFocused={() => setFocusedIndex(i)}
-            onKeyboardAction={(e) => handleItemKeyDown(i, item, e)}
+            onFocused={handleCardFocus}
+            onKeyboardAction={handleCardKeyDown}
             quantityBuffer={focusedIndex === i ? displayQuantityBuffer : ""}
           />
         ))}
+        {isLoadingMore &&
+          Array.from({ length: loadMoreSkeletonCount(isMobile, "grid") }, (_, k) => (
+            <div
+              key={`load-more-skeleton-${k}`}
+              aria-hidden="true"
+              className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 animate-pulse ${isMobile ? "h-48" : "h-56"}`}
+            />
+          ))}
       </div>
 
       {onLoadMore && (
         <div ref={loadMoreRef} className="py-6 flex justify-center">
-          {isLoadingMore && (
-            <div className="flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-beveren-600"></div>
-              <span className="text-gray-500 dark:text-gray-400 text-sm">
-                Loading more items...
-              </span>
-            </div>
-          )}
           {!isLoadingMore && hasMore && (
             <span className="text-gray-400 dark:text-gray-500 text-sm">
               Showing {inStockItems.length} of {totalCount} items • Scroll for more
             </span>
           )}
-          {!hasMore && inStockItems.length > 0 && totalCount > 0 && (
+          {!hasMore && inStockItems.length > 0 && (
             <span className="text-gray-400 dark:text-gray-500 text-sm">
-              All {inStockItems.length} items loaded
+              {searchQuery.trim()
+                ? searchFooterLabel(filteredItems.length, totalCount)
+                : `All ${inStockItems.length} items loaded`}
             </span>
           )}
         </div>

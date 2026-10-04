@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate
@@ -16,7 +18,7 @@ from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balanc
 from .search_utils import build_item_search_conditions
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def get_items(
     limit: int = 1000,
     offset: int = 0,
@@ -27,12 +29,23 @@ def get_items(
     warehouse: str | None = None,
     item_codes=None,
     include_groups: int = 1,
+    after_name: str | None = None,
+    after_code: str | None = None,
+    include_count: int = 1,
+    compact_tax: int = 0,
 ):
     """`item_codes` (a list, or its JSON) limits the list to exactly those items - quick
     entry's way to fetch the items it matched as the product list would offer them.
 
     `include_groups=0` skips the category bar's groups: the till loads those once from
-    get_item_groups and only asks the listing for them while a search is narrowing them."""
+    get_item_groups and only asks the listing for them while a search is narrowing them.
+
+    Paging: pass the previous page's `next_cursor` back as `after_name` / `after_code` to
+    continue after its last row (offset is then ignored); `include_count=0` skips the
+    total, which a till needs once per browse. Without these, paging by offset with a
+    count on every page works as before. A search page is ranked, so it pages by offset.
+
+    `compact_tax=1` sends each distinct tax profile once (`tax_profiles`) and a `tax_key` per item."""
     if isinstance(item_codes, str):
         item_codes = frappe.parse_json(item_codes)
     item_codes = [str(code) for code in (item_codes or []) if code]
@@ -71,144 +84,64 @@ def get_items(
             "i.name, i.item_name, i.description, i.item_group, i.image, "
             "i.stock_uom, i.sales_uom, i.has_batch_no, i.has_serial_no, "
             "i.is_stock_item, i.has_variants, i.variant_of, i.variant_based_on, "
-            "i.allow_negative_stock, i.weight_per_unit, i.weight_uom, "
-            "CASE WHEN pb.name IS NULL THEN 0 ELSE 1 END AS is_product_bundle"
+            "i.allow_negative_stock, i.weight_per_unit, i.weight_uom"
         )
-        params_list = []
-        count_params = []
-
-        # Get allowed item groups from POS profile
-        allowed_item_groups = []
-        if getattr(pos_doc, "item_groups", None):
-            allowed_item_groups = [d.item_group for d in pos_doc.item_groups if d.item_group]
-
-        if effective_hide_unavailable and include_service_items:
-            join_clause = "LEFT JOIN `tabBin` b ON i.name = b.item_code"
-            if warehouse:
-                join_clause = "LEFT JOIN `tabBin` b ON i.name = b.item_code AND b.warehouse = %s"
-
-            base_query = [
-                f"SELECT DISTINCT {select_fields}",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                join_clause,
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-                "AND (i.has_variants = 1 OR pb.name IS NOT NULL OR i.is_stock_item = 0 OR b.actual_qty > 0 OR i.allow_negative_stock = 1)",
-            ]
-            count_query = [
-                "SELECT COUNT(DISTINCT i.name) as total",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                join_clause,
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-                "AND (i.has_variants = 1 OR pb.name IS NOT NULL OR i.is_stock_item = 0 OR b.actual_qty > 0 OR i.allow_negative_stock = 1)",
-            ]
-            if warehouse:
-                params_list.append(warehouse)
-                count_params.append(warehouse)
-        elif effective_hide_unavailable:
-            base_query = [
-                f"SELECT DISTINCT {select_fields}",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                "LEFT JOIN `tabBin` b ON i.name = b.item_code",
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-                "AND (i.has_variants = 1 OR pb.name IS NOT NULL OR (i.is_stock_item = 1 AND b.actual_qty > 0) OR i.allow_negative_stock = 1)",
-            ]
-            count_query = [
-                "SELECT COUNT(DISTINCT i.name) as total",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                "LEFT JOIN `tabBin` b ON i.name = b.item_code",
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-                "AND (i.has_variants = 1 OR pb.name IS NOT NULL OR (i.is_stock_item = 1 AND b.actual_qty > 0) OR i.allow_negative_stock = 1)",
-            ]
-
-            if warehouse:
-                base_query.append("AND (i.has_variants = 1 OR pb.name IS NOT NULL OR b.warehouse = %s)")
-                count_query.append("AND (i.has_variants = 1 OR pb.name IS NOT NULL OR b.warehouse = %s)")
-                params_list.append(warehouse)
-                count_params.append(warehouse)
-        else:
-            base_query = [
-                f"SELECT DISTINCT {select_fields}",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-            ]
-            count_query = [
-                "SELECT COUNT(DISTINCT i.name) as total",
-                "FROM `tabItem` i",
-                "LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0",
-                "WHERE i.disabled = 0",
-                "AND IFNULL(i.is_sales_item, 1) = 1",
-            ]
-
-            if not include_service_items:
-                base_query.append("AND (i.is_stock_item = 1 OR i.has_variants = 1 OR pb.name IS NOT NULL)")
-                count_query.append("AND (i.is_stock_item = 1 OR i.has_variants = 1 OR pb.name IS NOT NULL)")
-
-        # Apply item group filter from POS profile
-        if allowed_item_groups:
-            placeholders = ", ".join(["%s"] * len(allowed_item_groups))
-            base_query.append(f"AND i.item_group IN ({placeholders})")
-            count_query.append(f"AND i.item_group IN ({placeholders})")
-            params_list.extend(allowed_item_groups)
-            count_params.extend(allowed_item_groups)
-
-        if item_codes:
-            placeholders = ", ".join(["%s"] * len(item_codes))
-            base_query.append(f"AND i.name IN ({placeholders})")
-            count_query.append(f"AND i.name IN ({placeholders})")
-            params_list.extend(item_codes)
-            count_params.extend(item_codes)
-
-        # Apply category filter from request
-        if category and category != "all":
-            base_query.append("AND i.item_group = %s")
-            count_query.append("AND i.item_group = %s")
-            params_list.append(category)
-            count_params.append(category)
-
+        where_sql, where_params = _listing_where(
+            pos_doc,
+            warehouse,
+            effective_hide_unavailable,
+            include_service_items,
+            item_codes,
+            category,
+            search,
+        )
         enhanced_search = bool(getattr(pos_doc, "custom_enhanced_search", False))
-        search_clauses, search_params = build_item_search_conditions(search or "", enhanced_search)
-        base_query.extend(search_clauses)
-        count_query.extend(search_clauses)
-        params_list.extend(search_params)
-        count_params.extend(search_params)
         # pass raw search string to category-count helper so it applies the same logic
         search_term = search.strip() if search and search.strip() else None
 
-        count_sql = "\n".join(count_query)
-        count_sql = apply_sql_permissions(count_sql)
+        total_available_count = None
+        if cint(include_count):
+            count_sql = apply_sql_permissions(f"SELECT COUNT(*) AS total FROM `tabItem` i {where_sql}")
 
-        # Validate placeholder count matches params AFTER sql rewrite
-        placeholder_count = count_sql.count("%s")
-        if placeholder_count != len(count_params):
-            frappe.log_error(
-                message=f"Count query placeholder mismatch. placeholders={placeholder_count}, params={len(count_params)}\nSQL:\n{count_sql}",
-                title="Get Items Count Query Param Mismatch",
+            # Validate placeholder count matches params AFTER sql rewrite
+            placeholder_count = count_sql.count("%s")
+            if placeholder_count != len(where_params):
+                frappe.log_error(
+                    message=f"Count query placeholder mismatch. placeholders={placeholder_count}, params={len(where_params)}\nSQL:\n{count_sql}",
+                    title="Get Items Count Query Param Mismatch",
+                )
+                frappe.throw(_("Something went wrong while fetching item data."))
+
+            total_result = frappe.db.sql(count_sql, tuple(where_params), as_dict=True)
+            total_available_count = total_result[0]["total"] if total_result else 0
+
+        page_where = where_sql
+        page_params = list(where_params)
+        if after_code and not search_term:
+            # Continue right after the previous page's last row, on the name index.
+            page_where += "\nAND (i.item_name > %s OR (i.item_name = %s AND i.name > %s))"
+            page_params += [after_name or "", after_name or "", after_code]
+            offset = 0
+
+        order_sql = " ORDER BY i.item_name ASC, i.name ASC"
+        order_params = []
+        if search_term:
+            # A typed part number or scanned barcode first, then codes starting with it,
+            # then everything else by name.
+            order_sql = (
+                " ORDER BY (i.name = %s OR EXISTS (SELECT 1 FROM `tabItem Barcode` ibx"
+                " WHERE ibx.parent = i.name AND ibx.barcode = %s)) DESC,"
+                " (i.name LIKE %s) DESC, i.item_name ASC, i.name ASC"
             )
-            frappe.throw(_("Something went wrong while fetching item data."))
+            order_params = [search_term, search_term, f"{search_term}%"]
 
-        total_result = frappe.db.sql(
-            count_sql,
-            tuple(count_params),
-            as_dict=True,
+        # The item code breaks ties between equal names, so a page boundary between two
+        # items of the same name can neither repeat one nor skip one.
+        main_sql = apply_sql_permissions(
+            f"SELECT {select_fields} FROM `tabItem` i {page_where}{order_sql} LIMIT %s OFFSET %s"
         )
-
-        total_available_count = total_result[0]["total"] if total_result else 0
-
-        base_query.append("ORDER BY i.item_name ASC LIMIT %s OFFSET %s")
-        params_list.extend([limit, offset])
-
-        main_sql = "\n".join(base_query)
-        main_sql = apply_sql_permissions(main_sql)
+        # One row past the page answers has_more without a count.
+        params_list = [*page_params, *order_params, limit + 1, offset]
 
         placeholder_count = main_sql.count("%s")
         if placeholder_count != len(params_list):
@@ -218,10 +151,14 @@ def get_items(
             )
             frappe.throw(_("Something went wrong while fetching item data."))
 
-        items = frappe.db.sql(
-            main_sql,
-            tuple(params_list),
-            as_dict=True,
+        rows = frappe.db.sql(main_sql, tuple(params_list), as_dict=True)
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        last_row = items[-1] if items else None
+        next_cursor = (
+            {"after_name": last_row["item_name"], "after_code": last_row["name"]}
+            if has_more and last_row
+            else None
         )
 
         # Rows the SQL window actually consumed. The caller's next offset must advance by
@@ -245,19 +182,24 @@ def get_items(
         )
 
         if not items:
-            return {
+            response = {
                 "items": [],
                 "item_groups": item_groups_data,
                 "total_count": total_available_count,
                 "page_count": 0,
                 "has_more": False,
+                "next_cursor": None,
                 "next_offset": offset,
                 "limit": limit,
                 "offset": offset,
                 **_build_degradation(stock_unavailable),
             }
+            if cint(compact_tax):
+                response["tax_profiles"] = {}
+            return response
 
         item_codes = [item["name"] for item in items]
+        bundle_codes = _fetch_bundle_codes(item_codes)
 
         barcode_map = {}
         barcode_results = frappe.get_list(
@@ -274,7 +216,14 @@ def get_items(
         stock_map = _fetch_batch_stock(item_codes, warehouse)
         # "Hide Cost Price" keeps the figure off the wire, not just off the screen.
         hide_cost_price = cint(getattr(pos_doc, "restrict_cost_visibility_in_tooltip", 0) or 0) == 1
-        cost_price_map = {} if hide_cost_price else _fetch_batch_cost_price(item_codes, warehouse)
+        if hide_cost_price:
+            cost_price_map = {}
+        else:
+            # The stock read carries the valuation rates; a stock map without them (a test
+            # double, or the per-item fallback) still gets the cost from its own query.
+            cost_price_map = getattr(stock_map, "valuation_rates", None)
+            if cost_price_map is None:
+                cost_price_map = _fetch_batch_cost_price(item_codes, warehouse)
         product_bundle_map = _fetch_product_bundle_map(item_codes, warehouse)
         variant_count_map = _fetch_variant_count_map(item_codes)
 
@@ -300,7 +249,7 @@ def get_items(
             item_code = item["name"]
             balance = stock_map.get(item_code, 0)
             is_stock_item = int(item.get("is_stock_item") or 0) == 1
-            is_product_bundle = int(item.get("is_product_bundle") or 0) == 1
+            is_product_bundle = item_code in bundle_codes
             is_variant_template = int(item.get("has_variants") or 0) == 1
             allow_negative_stock = int(item.get("allow_negative_stock") or 0) == 1
             bundle_items = product_bundle_map.get(item_code, [])
@@ -382,7 +331,6 @@ def get_items(
                     "variant_count": variant_count,
                     "image": item.image,
                     "sold": 0,
-                    "preparationTime": 10,
                     "uom": item_uom,
                     # Weight is per stock UOM; the cart multiplies by conversion_factor.
                     "weight_per_unit": flt(item.get("weight_per_unit")),
@@ -397,19 +345,36 @@ def get_items(
                 }
             )
 
+        group_by_item = {row["name"]: row["item_group"] for row in items}
+        listed_codes = [item["id"] for item in enriched_items]
         tax_info_map = _fetch_item_tax_info_map(
-            [item["id"] for item in enriched_items],
+            listed_codes,
             pos_doc,
             current_date,
             customer,
             price_by_item,
+            group_by_item={code: group_by_item.get(code) for code in listed_codes},
         )
+        # Every item on a page usually shares one or two tax profiles: a till that asks
+        # gets each once, keyed, instead of a copy per item.
+        compact = cint(compact_tax)
+        tax_profiles = {}
+        tax_key_by_signature = {}
         for item in enriched_items:
             tax_info = tax_info_map.get(item["id"], _empty_tax_info())
-            item["tax_info"] = tax_info
             item["price_with_vat"] = _get_expected_display_price(item["price"], tax_info)
+            if not compact:
+                item["tax_info"] = tax_info
+                continue
+            signature = json.dumps(tax_info, sort_keys=True, default=str)
+            key = tax_key_by_signature.get(signature)
+            if key is None:
+                key = f"t{len(tax_key_by_signature)}"
+                tax_key_by_signature[signature] = key
+                tax_profiles[key] = tax_info
+            item["tax_key"] = key
 
-        return {
+        response = {
             "items": enriched_items,
             "item_groups": item_groups_data,
             # total_count is the size of the whole result set; page_count is what this
@@ -417,12 +382,16 @@ def get_items(
             # drops rows, and conflating them is what made "Showing X of Y" meaningless.
             "total_count": total_available_count,
             "page_count": len(enriched_items),
-            "has_more": (offset + sql_row_count) < total_available_count,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
             "next_offset": offset + sql_row_count,
             "limit": limit,
             "offset": offset,
             **_build_degradation(stock_unavailable),
         }
+        if compact:
+            response["tax_profiles"] = tax_profiles
+        return response
 
     except Exception:
         frappe.log_error(
@@ -482,7 +451,9 @@ def _empty_tax_info():
     }
 
 
-def _fetch_item_tax_info_map(item_codes, pos_doc, current_date, customer=None, price_by_item=None):
+def _fetch_item_tax_info_map(
+    item_codes, pos_doc, current_date, customer=None, price_by_item=None, group_by_item=None
+):
     if not item_codes:
         return {}
 
@@ -506,7 +477,7 @@ def _fetch_item_tax_info_map(item_codes, pos_doc, current_date, customer=None, p
         for item_code in item_codes
     }
 
-    item_tax_rows = _fetch_item_tax_rows(item_codes, current_date)
+    item_tax_rows = _fetch_item_tax_rows(item_codes, current_date, group_by_item)
     if not item_tax_rows:
         return result
 
@@ -597,32 +568,57 @@ def _fetch_pos_sales_tax_rows(pos_doc):
         return []
 
 
-def _fetch_item_tax_rows(item_codes, current_date):
+def _fetch_item_tax_rows(item_codes, current_date, group_by_item=None):
     """Item Tax rows per item, tagged with `level`: 0 for the Item's own rows, then 1, 2, ...
     for its Item Group and each ancestor. ERPNext bills with the first level that yields a
-    usable template, so an item with no template of its own is taxed through its group."""
+    usable template, so an item with no template of its own is taxed through its group.
+
+    `group_by_item` (item code -> item group) spares re-reading groups the caller has."""
     own_rows = _fetch_own_item_tax_rows(item_codes)
     for row in own_rows:
         row["level"] = 0
-    return own_rows + _fetch_item_group_tax_rows(item_codes)
+    return own_rows + _fetch_item_group_tax_rows(item_codes, group_by_item)
 
 
-def _fetch_item_group_tax_rows(item_codes):
-    from frappe.utils.nestedset import get_ancestors_of
+def _item_group_lineages(groups):
+    """Each group with its ancestors, nearest first - [group, parent, ..., root] - for any
+    number of groups in one nested-set query (was one get_ancestors_of call per group)."""
+    groups = sorted({group for group in groups if group})
+    if not groups:
+        return {}
+    placeholders = ", ".join(["%s"] * len(groups))
+    rows = frappe.db.sql(
+        f"""
+        SELECT child.name AS grp, anc.name AS ancestor
+        FROM `tabItem Group` child
+        INNER JOIN `tabItem Group` anc ON anc.lft < child.lft AND anc.rgt > child.rgt
+        WHERE child.name IN ({placeholders})
+        ORDER BY child.name, anc.lft DESC
+        """,
+        tuple(groups),
+        as_dict=True,
+    )
+    # Ancestry is strict, as in get_ancestors_of: a group is not its own ancestor, and on a
+    # damaged tree (groups left at lft = rgt = 0) none is another's. Each group heads its own
+    # lineage whatever its lft/rgt, as [group, *get_ancestors_of(...)] always did.
+    lineages = {group: [group] for group in groups}
+    for row in rows:
+        lineages.setdefault(row.grp, [row.grp]).append(row.ancestor)
+    return lineages
 
+
+def _fetch_item_group_tax_rows(item_codes, group_by_item=None):
     try:
-        group_by_item = dict(
-            frappe.get_all(
-                "Item",
-                filters={"name": ["in", item_codes]},
-                fields=["name", "item_group"],
-                as_list=True,
+        if group_by_item is None:
+            group_by_item = dict(
+                frappe.get_all(
+                    "Item",
+                    filters={"name": ["in", item_codes]},
+                    fields=["name", "item_group"],
+                    as_list=True,
+                )
             )
-        )
-        lineage_by_group = {
-            group: [group, *get_ancestors_of("Item Group", group)]
-            for group in {g for g in group_by_item.values() if g}
-        }
+        lineage_by_group = _item_group_lineages(group_by_item.values())
         all_groups = sorted({g for lineage in lineage_by_group.values() for g in lineage})
         if not all_groups:
             return []
@@ -849,17 +845,16 @@ def _get_item_groups_with_counts(
             group_query = """
                 SELECT DISTINCT i.item_group
                 FROM `tabItem` i
-                LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0
                 WHERE i.disabled = 0
                 AND IFNULL(i.is_sales_item, 1) = 1
                 AND i.item_group IS NOT NULL
                 AND i.item_group != ''
             """
             if not include_service_items:
-                group_query += " AND (i.is_stock_item = 1 OR i.has_variants = 1 OR pb.name IS NOT NULL)"
+                group_query += f" AND (i.is_stock_item = 1 OR i.has_variants = 1 OR {_BUNDLE_EXISTS})"
             
             if hide_unavailable and warehouse:
-                group_query += " AND (i.has_variants = 1 OR pb.name IS NOT NULL OR EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.warehouse = %s AND b.actual_qty > 0))"
+                group_query += f" AND (i.has_variants = 1 OR {_BUNDLE_EXISTS} OR EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.warehouse = %s AND b.actual_qty > 0))"
                 group_query_params = [warehouse]
             else:
                 group_query_params = []
@@ -887,9 +882,8 @@ def _get_item_groups_with_counts(
         # filter.
         placeholders = ", ".join(["%s"] * len(allowed_groups))
         count_query = f"""
-            SELECT i.item_group AS item_group, COUNT(DISTINCT i.name) as item_count
+            SELECT i.item_group AS item_group, COUNT(*) as item_count
             FROM `tabItem` i
-            LEFT JOIN `tabProduct Bundle` pb ON pb.new_item_code = i.name AND pb.disabled = 0
             WHERE i.disabled = 0
             AND IFNULL(i.is_sales_item, 1) = 1
             AND i.item_group IN ({placeholders})
@@ -897,10 +891,10 @@ def _get_item_groups_with_counts(
         count_params = list(allowed_groups)
 
         if not include_service_items:
-            count_query += " AND (i.is_stock_item = 1 OR i.has_variants = 1 OR pb.name IS NOT NULL)"
+            count_query += f" AND (i.is_stock_item = 1 OR i.has_variants = 1 OR {_BUNDLE_EXISTS})"
 
         if hide_unavailable and warehouse:
-            count_query += " AND (i.has_variants = 1 OR pb.name IS NOT NULL OR EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.warehouse = %s AND b.actual_qty > 0))"
+            count_query += f" AND (i.has_variants = 1 OR {_BUNDLE_EXISTS} OR EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.warehouse = %s AND b.actual_qty > 0))"
             count_params.append(warehouse)
 
         if search_term:
@@ -1046,22 +1040,18 @@ def _build_degradation(stock_unavailable):
 def _get_priority_price_list(customer=None, pos_profile=None, default_price_list=None):
     try:
         if customer:
-            try:
-                customer_doc = frappe.get_doc("Customer", customer)
-                if customer_doc.default_price_list and is_enabled_price_list(customer_doc.default_price_list):
-                    return customer_doc.default_price_list
-            except Exception:
-                pass
-            
-            try:
-                customer_doc = frappe.get_doc("Customer", customer)
-                if customer_doc.customer_group:
-                    customer_group_doc = frappe.get_doc("Customer Group", customer_doc.customer_group)
-                    group_list = getattr(customer_group_doc, "default_price_list", None)
+            row = frappe.db.get_value(
+                "Customer", customer, ["default_price_list", "customer_group"], as_dict=True
+            )
+            if row:
+                if row.default_price_list and is_enabled_price_list(row.default_price_list):
+                    return row.default_price_list
+                if row.customer_group:
+                    group_list = frappe.db.get_value(
+                        "Customer Group", row.customer_group, "default_price_list"
+                    )
                     if group_list and is_enabled_price_list(group_list):
-                        return customer_group_doc.default_price_list
-            except Exception:
-                pass
+                        return group_list
     except Exception as e:
         frappe.logger().warning(f"Error getting customer-based price list: {e}")
     
@@ -1085,17 +1075,109 @@ def _include_service_items(pos_doc):
     return cint(getattr(pos_doc, "custom_enable_service_items", 0) or 0) == 1
 
 
+_BUNDLE_EXISTS = (
+    "EXISTS (SELECT 1 FROM `tabProduct Bundle` pb"
+    " WHERE pb.new_item_code = i.name AND pb.disabled = 0)"
+)
+
+
+def _listing_where(pos_doc, warehouse, hide_unavailable, include_service_items, item_codes, category, search):
+    """WHERE clause of the till's item listing and its params, in placeholder order.
+
+    Bundles and stock are tested with EXISTS, never joined: joining tabBin without a
+    warehouse - or an item with several bundles - multiplies rows, which forced DISTINCT,
+    and DISTINCT made MariaDB build and sort the whole catalogue for every page. Bundles
+    are matched on new_item_code: their own name comes from a naming series
+    (PB-<item>-001), not from the item code.
+
+    Every EXISTS sits after the main WHERE on purpose: apply_sql_permissions takes the
+    first FROM and the first WHERE in the text as the query's own.
+    """
+    bundle = _BUNDLE_EXISTS
+    conditions = ["i.disabled = 0", "IFNULL(i.is_sales_item, 1) = 1"]
+    params = []
+
+    if hide_unavailable and include_service_items:
+        in_stock = "EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.actual_qty > 0"
+        if warehouse:
+            in_stock += " AND b.warehouse = %s"
+            params.append(warehouse)
+        in_stock += ")"
+        conditions.append(
+            f"(i.has_variants = 1 OR {bundle} OR i.is_stock_item = 0"
+            f" OR i.allow_negative_stock = 1 OR {in_stock})"
+        )
+    elif hide_unavailable and warehouse:
+        conditions.append(
+            f"(i.has_variants = 1 OR {bundle} OR EXISTS (SELECT 1 FROM `tabBin` b"
+            " WHERE b.item_code = i.name AND b.warehouse = %s"
+            " AND ((i.is_stock_item = 1 AND b.actual_qty > 0) OR i.allow_negative_stock = 1)))"
+        )
+        params.append(warehouse)
+    elif hide_unavailable:
+        conditions.append(
+            f"(i.has_variants = 1 OR {bundle} OR i.allow_negative_stock = 1 OR (i.is_stock_item = 1"
+            " AND EXISTS (SELECT 1 FROM `tabBin` b WHERE b.item_code = i.name AND b.actual_qty > 0)))"
+        )
+    elif not include_service_items:
+        conditions.append(f"(i.is_stock_item = 1 OR i.has_variants = 1 OR {bundle})")
+
+    allowed_groups = [d.item_group for d in (getattr(pos_doc, "item_groups", None) or []) if d.item_group]
+    if allowed_groups:
+        conditions.append(f"i.item_group IN ({', '.join(['%s'] * len(allowed_groups))})")
+        params.extend(allowed_groups)
+
+    if item_codes:
+        conditions.append(f"i.name IN ({', '.join(['%s'] * len(item_codes))})")
+        params.extend(item_codes)
+
+    if category and category != "all":
+        conditions.append("i.item_group = %s")
+        params.append(category)
+
+    enhanced = bool(getattr(pos_doc, "custom_enhanced_search", False))
+    search_clauses, search_params = build_item_search_conditions(search or "", enhanced)
+    params.extend(search_params)
+
+    return "WHERE " + "\nAND ".join(conditions) + "\n" + "\n".join(search_clauses), params
+
+
+def _fetch_bundle_codes(item_codes):
+    """Which of these items are enabled Product Bundles - by new_item_code, since a bundle's
+    own name comes from its naming series. Not permission-filtered, like the join it
+    replaces: whether an item is a bundle is a property of the item, not of the reader."""
+    if not item_codes:
+        return set()
+    placeholders = ", ".join(["%s"] * len(item_codes))
+    return set(
+        frappe.db.sql_list(
+            f"SELECT new_item_code FROM `tabProduct Bundle` WHERE disabled = 0 AND new_item_code IN ({placeholders})",
+            tuple(item_codes),
+        )
+    )
+
+
+class _StockMap(dict):
+    """Stock per item code, carrying the Bin valuation rates the same query read
+    (`valuation_rates`; None when that read failed), so the cost column needs no second
+    trip to tabBin."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.valuation_rates = {}
+
+
 def _fetch_batch_stock(item_codes, warehouse):
     if not item_codes or not warehouse:
-        return {}
+        return _StockMap()
 
-    stock_map = {code: 0 for code in item_codes}
+    stock_map = _StockMap({code: 0 for code in item_codes})
 
     try:
         placeholders = ", ".join(["%s"] * len(item_codes))
 
         stock_sql = f"""
-            SELECT item_code, actual_qty
+            SELECT item_code, actual_qty, valuation_rate
             FROM `tabBin`
             WHERE item_code IN ({placeholders}) AND warehouse = %s
         """
@@ -1109,12 +1191,14 @@ def _fetch_batch_stock(item_codes, warehouse):
 
         for row in results:
             stock_map[row["item_code"]] = flt(row["actual_qty"])
+            stock_map.valuation_rates[row["item_code"]] = flt(row["valuation_rate"])
 
         apply_queue_reservations_to_stock_map(stock_map, warehouse)
 
     except Exception:
         for code in item_codes:
             stock_map[code] = fetch_item_balance(code, warehouse)
+        stock_map.valuation_rates = None
 
     return stock_map
 

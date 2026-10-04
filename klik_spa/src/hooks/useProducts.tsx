@@ -6,7 +6,6 @@ interface UseProductsReturn {
   products: MenuItem[];
   isLoading: boolean;
   isLoadingMore: boolean;
-  isRefreshingStock: boolean;
   isSearching: boolean;
   error: string | null;
   refetch: () => Promise<void>;
@@ -23,7 +22,6 @@ interface UseProductsReturn {
   degradedReason: string | null;
   stockUnavailable: boolean;
   hasMore: boolean;
-  lastUpdated: Date | null;
   searchQuery: string;
 }
 
@@ -48,7 +46,6 @@ export function useProducts(): UseProductsReturn {
     products: context.products,
     isLoading: context.isLoading,
     isLoadingMore: context.isLoadingMore,
-    isRefreshingStock: context.isRefreshingStock,
     isSearching: context.isSearching,
     error: context.error,
     refetch: context.refetchProducts,
@@ -65,7 +62,6 @@ export function useProducts(): UseProductsReturn {
     degradedReason: context.degradedReason,
     stockUnavailable: context.stockUnavailable,
     hasMore: context.hasMore,
-    lastUpdated: context.lastUpdated,
     searchQuery: context.searchQuery,
   };
 }

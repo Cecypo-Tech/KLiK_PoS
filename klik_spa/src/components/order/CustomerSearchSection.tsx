@@ -72,7 +72,8 @@ export const CustomerSearchSection = ({
   const { customers, isLoading: isLoadingCustomers, refetch: refetchCustomers } = useCustomers(search);
   const { posDetails, warehouse: selectedWarehouse, setWarehouse } = usePOSProfileStore();
   const { checkCustomerPermission } = useCustomerPermission();
-  const { fetchProducts, setSelectedCustomer: setProductCustomer } = useProductStore();
+  const fetchProducts = useProductStore((s) => s.fetchProducts);
+  const setProductCustomer = useProductStore((s) => s.setSelectedCustomer);
   const selectedPriceList = useCartStore((state) => state.selectedPriceList);
   const setSelectedPriceList = useCartStore((state) => state.setSelectedPriceList);
   const refreshCartPricing = useCartStore((state) => state.refreshCartPricing);

@@ -4,8 +4,12 @@ import { toast } from 'react-toastify';
 import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
-import { resolveNextOffset, shouldKeepPaginating } from '../utils/pagination';
-import { createKeyedDedupe, firstPageKey, listingIncludesGroups } from '../utils/productLoading';
+import { applyStockUpdates, chunkCodes, stockRefreshCodes } from '../utils/stockRefresh';
+import { getCSRFToken } from '../utils/csrf';
+import { filterAvailableProducts } from '../utils/productFilter';
+import { resolveNextOffset } from '../utils/pagination';
+import { expandTaxProfiles } from '../utils/productPayload';
+import { createKeyedDedupe, firstPageKey, listingIncludesGroups, pageAdvanced, SEARCH_PAGE_SIZE, type PageCursor } from '../utils/productLoading';
 
 interface ProductStoreState {
   products: MenuItem[];
@@ -20,6 +24,7 @@ interface ProductStoreState {
   totalCount: number;
   hasMore: boolean;
   currentOffset: number;
+  currentCursor: PageCursor | null;
   isLoading: boolean;
   isLoadingMore: boolean;
   isSearching: boolean;
@@ -44,6 +49,7 @@ interface ProductStoreState {
   clearSearch: () => void;
   setCategory: (category: string) => void;
   refreshStockOnly: () => Promise<boolean>;
+  refreshStockNow: () => Promise<boolean>;
   updateStockOnly: (itemCode: string, newStock: number) => void;
   updateStockForItems: (itemCodes: string[]) => Promise<void>;
   searchCustomers: (query: string) => Promise<Customer[]>;
@@ -55,13 +61,22 @@ interface ProductStoreState {
   executeSearch: (query: string) => Promise<void>;
   attemptIdentifierLookup: (query: string) => Promise<boolean>;
   fetchItemByIdentifier: (code: string) => Promise<MenuItem | null>;
-  fetchProductsFromAPI: (limit: number, offset: number, search: string, category: string, customerId: string, priceList?: string) => Promise<{
+  fetchProductsFromAPI: (
+    limit: number,
+    offset: number,
+    search: string,
+    category: string,
+    customerId: string,
+    priceList?: string,
+    options?: { cursor?: PageCursor | null; includeCount?: boolean },
+  ) => Promise<{
     items: MenuItem[];
     item_groups: ItemGroup[];
-    total_count: number;
+    total_count: number | null;
     page_count: number;
     has_more: boolean;
     next_offset: number | null;
+    next_cursor: PageCursor | null;
     degraded: boolean;
     degraded_reason: string | null;
     stock_unavailable: boolean;
@@ -79,8 +94,9 @@ interface ProductStoreState {
 }
 
 const PAGE_SIZE = 250;
-const LOAD_MORE_SIZE = 500;
+const LOAD_MORE_SIZE = 150;
 const CACHE_DURATION = 5 * 60 * 1000;
+const STOCK_REFRESH_CHUNK = 200;
 let currentPosName = '';
 let refreshTimers: Array<ReturnType<typeof setInterval>> = [];
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +107,33 @@ type FirstPage = Awaited<ReturnType<ProductStoreState['fetchProductsFromAPI']>>;
 // Startup has several triggers (profile load, customer sync, price list); overlapping
 // loads of the same first page share one request.
 const dedupeFirstPage = createKeyedDedupe<FirstPage>();
+
+/** POST so a long list of item codes never outgrows a URL. */
+async function fetchStockFor(codes: string[]): Promise<Record<string, number>> {
+  const merged: Record<string, number> = {};
+  for (const chunk of chunkCodes(codes, STOCK_REFRESH_CHUNK)) {
+    try {
+      const response = await fetch('/api/method/klik_pos.api.item.item_stock.get_items_stock_batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': getCSRFToken() ?? '' },
+        credentials: 'include',
+        body: JSON.stringify({ item_codes: chunk.join(','), warehouse: usePOSProfileStore.getState().warehouse || undefined }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        Object.assign(merged, data?.message || {});
+      }
+    } catch (error) {
+      console.error('Stock update failed:', error);
+    }
+  }
+  return merged;
+}
+
+// Refreshes run one at a time; a call that arrives meanwhile shares one follow-up run (so the
+// post-sale refresh is never lost) and resolves after it.
+let stockRefreshRun: Promise<boolean> | null = null;
+let stockRefreshQueued: Promise<boolean> | null = null;
 
 export const useProductStore = create<ProductStoreState>()(
   persist(
@@ -108,6 +151,7 @@ export const useProductStore = create<ProductStoreState>()(
       degradedReason: null,
       stockUnavailable: false,
       currentOffset: 0,
+      currentCursor: null,
       isLoading: false,
       isLoadingMore: false,
       isSearching: false,
@@ -119,20 +163,8 @@ export const useProductStore = create<ProductStoreState>()(
       isInitialized: false,
       posName: null,
 
-      getFilteredItems: () => {
-        const { products } = get();
-        const hideUnavailable = usePOSProfileStore.getState().hideUnavailableItems;
-        if (hideUnavailable) {
-          return products.filter((p) => {
-            const isStockItem = p.is_stock_item !== false;
-            if (!isStockItem || p.allow_negative_stock) {
-              return true;
-            }
-            return (p.available || 0) > 0;
-          });
-        }
-        return products;
-      },
+      getFilteredItems: () =>
+        filterAvailableProducts(get().products, usePOSProfileStore.getState().hideUnavailableItems),
       
       getUseScannerOnly: () => usePOSProfileStore.getState().useScannerOnly,
       getHideUnavailableItems: () => usePOSProfileStore.getState().hideUnavailableItems,
@@ -185,7 +217,7 @@ export const useProductStore = create<ProductStoreState>()(
         }
       },
 
-      fetchProductsFromAPI: async (limit, offset, search, category, customerId, priceList) => {
+      fetchProductsFromAPI: async (limit, offset, search, category, customerId, priceList, options) => {
         try {
           const params = new URLSearchParams({
             limit: limit.toString(),
@@ -211,6 +243,14 @@ export const useProductStore = create<ProductStoreState>()(
           // The bar's groups load on their own (fetchItemGroups); the listing sends them
           // only while a search narrows their counts.
           params.append('include_groups', listingIncludesGroups(search || '') ? '1' : '0');
+          params.append('compact_tax', '1');
+          // Later pages skip the count (the till keeps the first page's) and continue
+          // after the previous page's last row.
+          if (options?.includeCount === false) params.append('include_count', '0');
+          if (options?.cursor) {
+            params.append('after_name', options.cursor.after_name);
+            params.append('after_code', options.cursor.after_code);
+          }
 
           const response = await fetch(`/api/method/klik_pos.api.item.item_listing.get_items?${params.toString()}`);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -219,15 +259,16 @@ export const useProductStore = create<ProductStoreState>()(
           const message = data?.message || data;
           
           return {
-            items: message.items || [],
+            items: expandTaxProfiles(message.items || [], message.tax_profiles),
             item_groups: message.item_groups || [],
-            total_count: message.total_count || 0,
+            total_count: typeof message.total_count === 'number' ? message.total_count : null,
             page_count: message.page_count ?? (message.items || []).length,
             has_more: message.has_more || false,
             // Advances by SQL rows consumed, which is not the same as items received once
             // hide_unavailable_items filters a page. null on an older backend that does
             // not send it - callers fall back to counting items.
             next_offset: typeof message.next_offset === 'number' ? message.next_offset : null,
+            next_cursor: message.next_cursor ?? null,
             degraded: !!message.degraded,
             degraded_reason: message.degraded_reason ?? null,
             stock_unavailable: !!message.stock_unavailable,
@@ -235,31 +276,18 @@ export const useProductStore = create<ProductStoreState>()(
         } catch (err) {
           console.error('fetchProductsFromAPI error:', err);
           return {
-            items: [], item_groups: [], total_count: 0, page_count: 0, has_more: false,
-            next_offset: null, degraded: false, degraded_reason: null, stock_unavailable: false,
+            items: [], item_groups: [], total_count: null, page_count: 0, has_more: false,
+            next_offset: null, next_cursor: null, degraded: false, degraded_reason: null, stock_unavailable: false,
           };
         }
       },
 
       fetchStockUpdates: async () => {
-        const { products } = get();
-        if (products.length === 0) return {};
-        
-        try {
-          const itemCodes = products.slice(0, 100).map(p => p.id).join(',');
-          const response = await fetch(
-            `/api/method/klik_pos.api.item.item_stock.get_items_stock_batch?item_codes=${encodeURIComponent(itemCodes)}&pos_profile=${encodeURIComponent(currentPosName)}`
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            return data?.message || {};
-          }
-          return {};
-        } catch (error) {
-          console.error('Stock update failed:', error);
-          return {};
-        }
+        // Every loaded stock item, not just the first 100: pages loaded by scrolling used to
+        // keep their first stock figure until the next full reload.
+        const codes = stockRefreshCodes(get().products);
+        if (codes.length === 0) return {};
+        return fetchStockFor(codes);
       },
 
       initializePOS: async (posName: string, customerId = '') => {
@@ -298,17 +326,18 @@ export const useProductStore = create<ProductStoreState>()(
               category: 'all',
               search: '',
             }),
-            () => get().fetchProductsFromAPI(PAGE_SIZE, 0, '', 'all', effectiveCustomerId, effectivePriceList)
+            () => get().fetchProductsFromAPI(PAGE_SIZE, 0, '', 'all', effectiveCustomerId, effectivePriceList, { includeCount: true })
           );
 
           set({
             products: result.items,
-            totalCount: result.total_count,
+            totalCount: result.total_count ?? 0,
             hasMore: result.has_more,
             degraded: result.degraded,
             degradedReason: result.degraded_reason,
             stockUnavailable: result.stock_unavailable,
             currentOffset: resolveNextOffset(result.next_offset, result.items.length),
+            currentCursor: result.next_cursor,
             isLoading: false,
             lastFullRefresh: Date.now(),
             lastUpdated: new Date(),
@@ -353,7 +382,8 @@ export const useProductStore = create<ProductStoreState>()(
               requestSearchQuery,
               requestCategory,
               customerId,
-              priceList
+              priceList,
+              reset ? { includeCount: true } : { includeCount: false, cursor: get().currentCursor },
             );
           const result = reset
             ? await dedupeFirstPage(
@@ -394,7 +424,7 @@ export const useProductStore = create<ProductStoreState>()(
                 : get().baseItemGroups.length
                   ? get().baseItemGroups
                   : get().itemGroups,
-            totalCount: result.total_count,
+            totalCount: result.total_count ?? get().totalCount,
             hasMore: result.has_more,
             degraded: result.degraded,
             degradedReason: result.degraded_reason,
@@ -403,6 +433,7 @@ export const useProductStore = create<ProductStoreState>()(
               result.next_offset,
               reset ? result.items.length : get().currentOffset + result.items.length,
             ),
+            currentCursor: result.next_cursor,
             isLoading: false,
             lastFullRefresh: Date.now(),
             lastUpdated: new Date(),
@@ -417,19 +448,19 @@ export const useProductStore = create<ProductStoreState>()(
         const { isLoadingMore, hasMore, searchQuery, fetchProducts } = get();
         if (isLoadingMore || !hasMore || searchQuery) return;
 
-        const offsetBefore = get().currentOffset;
+        const before = { cursor: get().currentCursor, offset: get().currentOffset };
 
         set({ isLoadingMore: true });
         await fetchProducts(false);
 
         // Backstop: the grid's infinite-scroll sentinel re-fires for as long as hasMore is
-        // true, so a page that leaves the cursor where it was loops forever. Require real
+        // true, so a page that leaves the position where it was loops forever. Require real
         // forward progress rather than trusting the server's has_more. A context change
-        // mid-flight also lands here (the stale-response guard above returns without moving
-        // the cursor) and stopping is the right outcome there too - the reset fetch that
-        // follows the change repopulates hasMore.
+        // mid-flight also lands here (the stale-response guard returns without moving the
+        // position) and stopping is the right outcome there too.
         const state = get();
-        const keepGoing = shouldKeepPaginating(state.hasMore, offsetBefore, state.currentOffset);
+        const keepGoing =
+          state.hasMore && pageAdvanced(before, { cursor: state.currentCursor, offset: state.currentOffset });
         set({ isLoadingMore: false, ...(keepGoing ? {} : { hasMore: false }) });
       },
 
@@ -530,18 +561,19 @@ export const useProductStore = create<ProductStoreState>()(
         const priceList = get().getEffectivePriceList();
         
         try {
-          const result = await fetchProductsFromAPI(500, 0, query, selectedCategory, customerId, priceList);
+          const result = await fetchProductsFromAPI(SEARCH_PAGE_SIZE, 0, query, selectedCategory, customerId, priceList);
           
           if (get().searchQuery.trim() === query) {
             set({
               products: result.items,
               itemGroups: result.item_groups,
-              totalCount: result.total_count,
+              totalCount: result.total_count ?? 0,
               hasMore: false,
               degraded: result.degraded,
               degradedReason: result.degraded_reason,
               stockUnavailable: result.stock_unavailable,
               currentOffset: resolveNextOffset(result.next_offset, result.items.length),
+              currentCursor: null,
               isSearching: false,
             });
           }
@@ -677,24 +709,30 @@ export const useProductStore = create<ProductStoreState>()(
         }
       },
 
-      refreshStockOnly: async () => {
+      refreshStockOnly: () => {
+        if (!stockRefreshRun) {
+          stockRefreshRun = get().refreshStockNow().finally(() => { stockRefreshRun = null; });
+          return stockRefreshRun;
+        }
+        if (!stockRefreshQueued) {
+          stockRefreshQueued = stockRefreshRun.then(() => {
+            stockRefreshQueued = null;
+            return get().refreshStockOnly();
+          });
+        }
+        return stockRefreshQueued;
+      },
+
+      refreshStockNow: async () => {
         set({ isRefreshingStock: true });
-        
+
         try {
           const stockUpdates = await get().fetchStockUpdates();
-          
-          if (Object.keys(stockUpdates).length > 0) {
-            set(state => ({
-              products: state.products.map(product => ({
-                ...product,
-                available: stockUpdates[product.id] ?? product.available
-              })),
-              lastUpdated: new Date(),
-              isRefreshingStock: false,
-            }));
+          const products = applyStockUpdates(get().products, stockUpdates);
+          if (products !== get().products) {
+            set({ products, lastUpdated: new Date(), isRefreshingStock: false });
             return true;
           }
-          
           set({ isRefreshingStock: false });
           return false;
         } catch (error) {
@@ -714,27 +752,11 @@ export const useProductStore = create<ProductStoreState>()(
 
       updateStockForItems: async (itemCodes: string[]) => {
         if (itemCodes.length === 0) return;
-        
-        try {
-          const itemCodesString = itemCodes.join(',');
-          const response = await fetch(
-            `/api/method/klik_pos.api.item.item_stock.get_items_stock_batch?item_codes=${encodeURIComponent(itemCodesString)}&pos_profile=${encodeURIComponent(currentPosName)}`
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            const stockUpdates = data?.message || {};
-            
-            set(state => ({
-              products: state.products.map(product => ({
-                ...product,
-                available: stockUpdates[product.id] ?? product.available
-              }))
-            }));
-          }
-        } catch (error) {
-          console.error('Failed to update stock for items:', error);
-        }
+        const stockUpdates = await fetchStockFor(itemCodes);
+        set((state) => {
+          const products = applyStockUpdates(state.products, stockUpdates);
+          return products === state.products ? state : { products };
+        });
       },
 
       searchCustomers: async (query: string) => {
@@ -788,6 +810,7 @@ export const useProductStore = create<ProductStoreState>()(
           totalCount: 0,
           hasMore: false,
           currentOffset: 0,
+          currentCursor: null,
           isLoading: false,
           isLoadingMore: false,
           isSearching: false,
@@ -835,10 +858,12 @@ export const useProductStore = create<ProductStoreState>()(
           }
         }, 30000);
         
+        // No timed reload of the list: it threw the cashier back to page 1 and re-downloaded
+        // the first page every 5 minutes. Stock refreshes in place (above); the list itself
+        // reloads on real triggers - category, search, customer, price list, profile change.
+        // The category bar's counts are cheap to keep fresh.
         const fullRefreshInterval = setInterval(() => {
-          const { searchQuery, isLoading } = get();
-          if (document.visibilityState === 'visible' && !searchQuery && !isLoading) {
-            get().fetchProducts(true);
+          if (document.visibilityState === 'visible') {
             void get().fetchItemGroups();
           }
         }, CACHE_DURATION);
