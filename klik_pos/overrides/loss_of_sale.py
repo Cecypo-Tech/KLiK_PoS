@@ -165,11 +165,14 @@ def split_invoice_rows(doc):
 def before_validate(doc, method=None):
 	"""Sales Invoice doc_event. On submit of an unpaid stock invoice whose till records Loss of
 	Sale, shorten lines to the stock there is instead of ERPNext refusing with 'units needed'.
-	A paid invoice is left alone: shortening it would leave money unaccounted for."""
+	A paid invoice is left alone: shortening it would leave money unaccounted for. So is a till
+	invoice: the till split its cart before building it, and shortening it later (in the
+	background worker) would bill less than the cashier showed, with no one to tell."""
 	if doc.get("is_return") or not cint(doc.get("update_stock")):
 		return
 	if (
 		doc.get("_action") == "submit"
+		and not cint(doc.get("custom_is_created_from_klik"))
 		and not _has_money(doc)
 		and doc.get("pos_profile")
 		and cint(frappe.db.get_value("POS Profile", doc.pos_profile, PROFILE_FLAG))
@@ -205,7 +208,7 @@ def _allow_los_zero_rows(doc):
 def _announce(changes):
 	rows = "".join(
 		"<tr><td>{0}</td><td>{1}</td><td>{2} → {3}</td><td>{4}</td></tr>".format(
-			change["idx"], frappe.bold(change["item_code"]), flt(change["from_qty"]), flt(change["qty"]), flt(change["los_qty"])
+			change["idx"], frappe.bold(frappe.utils.escape_html(change["item_code"])), flt(change["from_qty"]), flt(change["qty"]), flt(change["los_qty"])
 		)
 		for change in changes
 	)

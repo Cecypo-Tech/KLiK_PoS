@@ -236,6 +236,17 @@ class TestLossOfSale(FrappeTestCase):
 			with self.assertRaises(frappe.ValidationError):
 				invoice.submit()
 
+	def test_a_till_invoice_is_not_shortened_on_submit(self):
+		# The till split its cart before building the invoice; shortening it again in the
+		# worker would bill less than the cashier showed, with no one to tell.
+		invoice = self._desk_invoice((STOCKED, 16))
+		invoice.custom_is_created_from_klik = 1
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
+			with self.assertRaises(frappe.ValidationError) as caught:  # NegativeStockError is one
+				invoice.submit()
+		self.assertIn("needed", str(caught.exception))
+		self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
+
 	def test_desk_sale_with_nothing_in_stock_is_refused(self):
 		invoice = self._desk_invoice((EMPTY, 6))
 		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=1):
