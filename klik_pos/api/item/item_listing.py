@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate
@@ -30,6 +32,7 @@ def get_items(
     after_name: str | None = None,
     after_code: str | None = None,
     include_count: int = 1,
+    compact_tax: int = 0,
 ):
     """`item_codes` (a list, or its JSON) limits the list to exactly those items - quick
     entry's way to fetch the items it matched as the product list would offer them.
@@ -40,7 +43,9 @@ def get_items(
     Paging: pass the previous page's `next_cursor` back as `after_name` / `after_code` to
     continue after its last row (offset is then ignored); `include_count=0` skips the
     total, which a till needs once per browse. Without these, paging by offset with a
-    count on every page works as before. A search page is ranked, so it pages by offset."""
+    count on every page works as before. A search page is ranked, so it pages by offset.
+
+    `compact_tax=1` sends each distinct tax profile once (`tax_profiles`) and a `tax_key` per item."""
     if isinstance(item_codes, str):
         item_codes = frappe.parse_json(item_codes)
     item_codes = [str(code) for code in (item_codes or []) if code]
@@ -177,7 +182,7 @@ def get_items(
         )
 
         if not items:
-            return {
+            response = {
                 "items": [],
                 "item_groups": item_groups_data,
                 "total_count": total_available_count,
@@ -189,6 +194,9 @@ def get_items(
                 "offset": offset,
                 **_build_degradation(stock_unavailable),
             }
+            if cint(compact_tax):
+                response["tax_profiles"] = {}
+            return response
 
         item_codes = [item["name"] for item in items]
         bundle_codes = _fetch_bundle_codes(item_codes)
@@ -323,7 +331,6 @@ def get_items(
                     "variant_count": variant_count,
                     "image": item.image,
                     "sold": 0,
-                    "preparationTime": 10,
                     "uom": item_uom,
                     # Weight is per stock UOM; the cart multiplies by conversion_factor.
                     "weight_per_unit": flt(item.get("weight_per_unit")),
@@ -348,12 +355,26 @@ def get_items(
             price_by_item,
             group_by_item={code: group_by_item.get(code) for code in listed_codes},
         )
+        # Every item on a page usually shares one or two tax profiles: a till that asks
+        # gets each once, keyed, instead of a copy per item.
+        compact = cint(compact_tax)
+        tax_profiles = {}
+        tax_key_by_signature = {}
         for item in enriched_items:
             tax_info = tax_info_map.get(item["id"], _empty_tax_info())
-            item["tax_info"] = tax_info
             item["price_with_vat"] = _get_expected_display_price(item["price"], tax_info)
+            if not compact:
+                item["tax_info"] = tax_info
+                continue
+            signature = json.dumps(tax_info, sort_keys=True, default=str)
+            key = tax_key_by_signature.get(signature)
+            if key is None:
+                key = f"t{len(tax_key_by_signature)}"
+                tax_key_by_signature[signature] = key
+                tax_profiles[key] = tax_info
+            item["tax_key"] = key
 
-        return {
+        response = {
             "items": enriched_items,
             "item_groups": item_groups_data,
             # total_count is the size of the whole result set; page_count is what this
@@ -368,6 +389,9 @@ def get_items(
             "offset": offset,
             **_build_degradation(stock_unavailable),
         }
+        if compact:
+            response["tax_profiles"] = tax_profiles
+        return response
 
     except Exception:
         frappe.log_error(

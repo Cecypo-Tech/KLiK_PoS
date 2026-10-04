@@ -5,6 +5,7 @@ import type { MenuItem, Customer, ItemGroup } from '../../types';
 import { usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
 import { resolveNextOffset, shouldKeepPaginating } from '../utils/pagination';
+import { expandTaxProfiles } from '../utils/productPayload';
 import { createKeyedDedupe, firstPageKey, listingIncludesGroups, SEARCH_PAGE_SIZE } from '../utils/productLoading';
 
 interface ProductStoreState {
@@ -211,6 +212,7 @@ export const useProductStore = create<ProductStoreState>()(
           // The bar's groups load on their own (fetchItemGroups); the listing sends them
           // only while a search narrows their counts.
           params.append('include_groups', listingIncludesGroups(search || '') ? '1' : '0');
+          params.append('compact_tax', '1');
 
           const response = await fetch(`/api/method/klik_pos.api.item.item_listing.get_items?${params.toString()}`);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -219,7 +221,7 @@ export const useProductStore = create<ProductStoreState>()(
           const message = data?.message || data;
           
           return {
-            items: message.items || [],
+            items: expandTaxProfiles(message.items || [], message.tax_profiles),
             item_groups: message.item_groups || [],
             total_count: message.total_count || 0,
             page_count: message.page_count ?? (message.items || []).length,
