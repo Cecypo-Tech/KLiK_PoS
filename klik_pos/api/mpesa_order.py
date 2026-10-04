@@ -17,7 +17,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, flt
+from frappe.utils import add_to_date, flt, get_datetime, now_datetime
 
 from klik_pos.api import sales_order
 from klik_pos.api.sales_invoice import (
@@ -440,3 +440,95 @@ def discard_mpesa_order(order_id):
 
 	delete_order(so)
 	return {"success": True, "kept": False, "message": _("Order {0} discarded.").format(order_id)}
+
+
+#: Times one cashier may ask Safaricom about pushes in a minute.
+CHECKS_PER_MINUTE = 10
+#: What Safaricom's status query says while the customer is still on the prompt: the "being
+#: processed" error, and the "still under processing" result.
+STILL_PROCESSING = ("500.001.1001", "4999")
+#: At most one pull per shortcode in this many seconds, however many tills ask.
+PULL_EVERY_SECONDS = 30
+#: A pull for a push reaches back this far before the push was sent.
+PULL_LEAD_MINUTES = 5
+PULL_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+PUSH_FIELDS = [
+	"name",
+	"status",
+	"transaction_id",
+	"result_desc",
+	"reference_doctype",
+	"reference_name",
+	"account_reference",
+	"phone_number",
+	"amount",
+	"settings",
+	"creation",
+]
+
+
+def _push_for_caller(request_name):
+	"""The push, when it was sent from an M-Pesa order the caller may act on."""
+	push = frappe.db.get_value(EXPRESS, request_name, PUSH_FIELDS, as_dict=True)
+	if not push or push.reference_doctype != "Sales Order":
+		frappe.throw(_("M-Pesa request {0} is not for a checkout order.").format(request_name))
+	so = frappe.get_doc("Sales Order", push.reference_name)
+	if not so.get("custom_klik_mpesa_order") or not sales_order._may_act_on_held_order(so):
+		frappe.throw(_("You are not allowed to act on order {0}.").format(so.name))
+	return push
+
+
+def _request_pull(push):
+	"""Ask Safaricom for the shortcode's payments from a little before the push until now, so a
+	paid push's receipt reaches the register: a background job, at most once per
+	PULL_EVERY_SECONDS per shortcode, whoever asks."""
+	from frappe_mpsa_payments.frappe_mpsa_payments.api.m_pesa_api import pull_transactions
+
+	key = frappe.cache.make_key(f"klik_mpesa_pull:{push.settings}")
+	if not frappe.cache.set(key, 1, ex=PULL_EVERY_SECONDS, nx=True):
+		return
+	start = add_to_date(get_datetime(push.creation), minutes=-PULL_LEAD_MINUTES)
+	pull_transactions(
+		push.settings, start.strftime(PULL_TIME_FORMAT), now_datetime().strftime(PULL_TIME_FORMAT)
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def check_mpesa_push(request_name):
+	"""Ask Safaricom what became of a push whose confirmation has not arrived.
+
+	`paid`: the customer paid. Safaricom's answer carries no receipt number, so the push is
+	Completed with its receipt pending, and a pull is requested to bring the receipt in.
+	`not_paid` (with Safaricom's reason): the push failed. `waiting`: the customer is still on
+	the prompt. `no_answer`: Safaricom answered with an error, or not at all. Only an answer
+	changes the push (frappe_mpsa_payments' status handlers); a push already answered is
+	reported without asking again.
+	"""
+	push = _push_for_caller(request_name)
+	key = frappe.cache.make_key(f"klik_mpesa_checks:{frappe.session.user}")
+	pipe = frappe.cache.pipeline()
+	pipe.set(key, 0, ex=60, nx=True)
+	pipe.incr(key)
+	if pipe.execute()[1] > CHECKS_PER_MINUTE:
+		frappe.throw(
+			_("Too many M-Pesa checks - wait a minute, then check again."), frappe.RateLimitExceededError
+		)
+
+	reply = None
+	if push.status == "In Progress":
+		from frappe_mpsa_payments.frappe_mpsa_payments.api.m_pesa_api import check_transaction_status
+
+		reply = check_transaction_status(push.name)
+		push.update(
+			frappe.db.get_value(EXPRESS, push.name, ["status", "transaction_id", "result_desc"], as_dict=True)
+		)
+
+	if push.status == "Completed":
+		if not push.transaction_id:
+			_request_pull(push)
+		return {"outcome": "paid", "transaction_id": push.transaction_id}
+	if push.status == "Failed":
+		return {"outcome": "not_paid", "reason": push.result_desc}
+	reply = reply if isinstance(reply, dict) else {}
+	code = str(reply.get("errorCode") or reply.get("ResultCode") or "")
+	return {"outcome": "waiting" if code in STILL_PROCESSING else "no_answer"}
