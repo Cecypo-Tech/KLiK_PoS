@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, receiptPaidAt, tenderSent, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, receiptPaidAt, refitReceiptRow, tenderSent, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -145,5 +145,27 @@ describe("tenderSent", () => {
 
   it("sends every row when no receipts were picked", () => {
     expect(tenderSent(rows, null)).toEqual(rows);
+  });
+});
+
+describe("refitReceiptRow", () => {
+  it("shrinks the receipts' row, not the cash, when a voucher is added", () => {
+    expect(refitReceiptRow({ Cash: 200, "Mpesa-1": 800, voucher: 300 }, "Mpesa-1", 5000, 1000)).toEqual({
+      Cash: 200,
+      "Mpesa-1": 500,
+      voucher: 300,
+    });
+  });
+
+  it("gives the row back, up to what the receipts hold, when the voucher goes", () => {
+    expect(refitReceiptRow({ Cash: 200, "Mpesa-1": 500, voucher: 0 }, "Mpesa-1", 600, 1000)).toEqual({
+      Cash: 200,
+      "Mpesa-1": 600,
+      voucher: 0,
+    });
+  });
+
+  it("never goes below nothing when the other rows already pay the sale", () => {
+    expect(refitReceiptRow({ Cash: 1200, "Mpesa-1": 300 }, "Mpesa-1", 5000, 1000)["Mpesa-1"]).toBe(0);
   });
 });

@@ -33,6 +33,7 @@ import {
   appliedFromReceipts,
   isMpesaPaymentMode,
   receiptPicksPayload,
+  refitReceiptRow,
   tenderSent,
   receiptLeftoverMessage,
   uncoveredMpesa,
@@ -2872,10 +2873,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     commitVouchers(resizeVoucher(appliedVouchers, note, amount, checkoutPayableTotal));
   };
 
+  // With receipts picked, the M-Pesa row follows the vouchers: it pays what they leave.
+  const refitReceipts = (amounts: PaymentAmount): PaymentAmount => {
+    const picks = mpesaFlow?.source === "c2b" ? mpesaFlow.c2bPayments ?? [] : [];
+    if (!mpesaFlow || !picks.length) return amounts;
+    const open = picks.reduce((sum, payment) => sum + payment.amount, 0);
+    return refitReceiptRow(amounts, mpesaFlow.modeOfPayment, open, checkoutPayableTotal);
+  };
+
   const commitVouchers = (next: AppliedVoucher[]) => {
     setAppliedVouchers(next);
     setPaymentAmounts((prev) => {
-      const withVouchers: PaymentAmount = { ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) };
+      const withVouchers: PaymentAmount = refitReceipts({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) });
       const preferred = Object.keys(withVouchers).filter(
         (methodId) => methodId !== CUSTOMER_CREDIT_METHOD && (withVouchers[methodId] || 0) > 0
       );
@@ -2889,7 +2898,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const removeVoucher = (note: string) => {
     const next = appliedVouchers.filter((voucher) => voucher.note !== note);
     setAppliedVouchers(next);
-    setPaymentAmounts((prev) => ({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) }));
+    setPaymentAmounts((prev) => refitReceipts({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(next) }));
   };
 
   // A Walk In sale paid with a named customer's voucher becomes that customer's sale -
@@ -2909,7 +2918,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (appliedTotal(appliedVouchers) <= roundCurrency(checkoutPayableTotal)) return;
     const capped = capVouchers(appliedVouchers, checkoutPayableTotal);
     setAppliedVouchers(capped);
-    setPaymentAmounts((prev) => ({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(capped) }));
+    setPaymentAmounts((prev) => refitReceipts({ ...prev, [CUSTOMER_CREDIT_METHOD]: appliedTotal(capped) }));
   }, [checkoutPayableTotal, appliedVouchers]);
 
   const renderVoucherButton = () => (
