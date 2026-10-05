@@ -272,3 +272,11 @@
     padding-block: 0.2rem;
   }
 }
+
+/* Pages fill the screen below the banners (App.tsx measures them into --klik-banners). */
+.klik-page .h-screen {
+  height: calc(100vh - var(--klik-banners, 0px));
+}
+.klik-page .min-h-screen {
+  min-height: calc(100vh - var(--klik-banners, 0px));
+}
