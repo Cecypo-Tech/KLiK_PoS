@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { WalkinDetails } from "../../stores/cartStore";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import { AutoComplete } from "../ui/AutoComplete";
+import { fetchRecalledWalkin, recallablePhone, withRecalled } from "../../utils/walkinRecall";
 
 interface Props {
   isWalkin: boolean;
@@ -20,6 +21,28 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
   const [taxId, setTaxId] = useState(seed.taxId);
   const [phone, setPhone] = useState(seed.phone);
   const { fields } = useExtraFields();
+
+  // A returning walk-in gives only their number: the name and PIN of their last sale fill in.
+  const [recalled, setRecalled] = useState("");
+  useEffect(() => {
+    if (!isWalkin || !recallablePhone(phone)) return;
+    let stale = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const found = await fetchRecalledWalkin(phone);
+        if (stale || (!found.name && !found.tax_id)) return;
+        setName((n) => withRecalled({ name: n, taxId: "" }, found).name);
+        setTaxId((t) => withRecalled({ name: "", taxId: t }, found).taxId);
+        setRecalled("Filled in from this number's last sale.");
+      } catch {
+        // Recall is a convenience: the cashier types the details as before.
+      }
+    }, 300);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer);
+    };
+  }, [isWalkin, phone]);
   const [extra, setExtra] = useState<Record<string, string>>(extraFields || {});
 
   // KRA PIN -> taxpayer name, only when cecypo_pin_checker is installed and configured.
@@ -116,6 +139,12 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
         <div className={`grid gap-x-6 gap-y-3 ${fields.length ? "grid-cols-2" : "grid-cols-1"}`}>
           <div className="space-y-3">
             <div>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Phone</label>
+              <input className={`${base} ${isWalkin ? "" : ro}`} value={phone} readOnly={!isWalkin} type="tel"
+                onChange={(e) => { setPhone(e.target.value); setRecalled(""); }} placeholder="Phone for this sale" />
+              {recalled && <p className="mt-1 text-xs text-green-600 dark:text-green-400">{recalled}</p>}
+            </div>
+            <div>
               <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Name</label>
               <input className={`${base} ${isWalkin ? "" : ro}`} value={name} readOnly={!isWalkin}
                 onChange={(e) => setName(e.target.value)} placeholder="Customer name for this sale" />
@@ -145,11 +174,6 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
                   {pinLookup.message}
                 </p>
               )}
-            </div>
-            <div>
-              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Phone</label>
-              <input className={`${base} ${isWalkin ? "" : ro}`} value={phone} readOnly={!isWalkin} type="tel"
-                onChange={(e) => setPhone(e.target.value)} placeholder="Phone for this sale" />
             </div>
           </div>
           {fields.length > 0 && (

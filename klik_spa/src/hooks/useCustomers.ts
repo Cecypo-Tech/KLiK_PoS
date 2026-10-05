@@ -18,6 +18,9 @@ interface ERPCustomer {
   custom_last_visit?: string;
   is_walkin?: number;
   tax_id?: string;
+  email_id?: string;
+  mobile_no?: string;
+  city?: string;
   loyalty?: {
     loyalty_points?: number;
   };
@@ -391,11 +394,11 @@ export function useCustomers(searchQuery?: string) {
           id: customer.name,
           type: customer.customer_type === "Company" ? "company" : "individual",
           name: customer.customer_name || `Customer ${customer.name.slice(0, 5)}`,
-          email: customer.contact?.email_id || "",
-          phone: customer.contact?.mobile_no || customer.contact?.phone || "",
+          email: customer.contact?.email_id || customer.email_id || "",
+          phone: customer.contact?.mobile_no || customer.contact?.phone || customer.mobile_no || "",
           address: {
             street: customer.address?.address_line1 || "",
-            city: customer.address?.city || "",
+            city: customer.address?.city || customer.city || "",
             state: customer.address?.state || "",
             zipCode: customer.address?.pincode || "",
             country: customer.address?.country || ""

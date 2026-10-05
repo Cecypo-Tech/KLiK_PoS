@@ -788,8 +788,12 @@ export const useProductStore = create<ProductStoreState>()(
 
       setSelectedCustomer: (customer: Customer | null) => {
         set({ selectedCustomer: customer });
-        
-        useCartStore.getState().setSelectedCustomer(customer);
+
+        // The customer search sets the cart's customer itself first: a second set would price
+        // the cart again for nothing.
+        if (useCartStore.getState().selectedCustomer !== customer) {
+          useCartStore.getState().setSelectedCustomer(customer);
+        }
         
         if (currentPosName && customer) {
           get().initializePOS(currentPosName, customer?.id || '');
