@@ -230,6 +230,9 @@ export default function VoucherPanel({
                     aria-label={`Amount from ${voucher.note}`}
                     onBlur={(event) => {
                       const value = Number(event.currentTarget.value);
+                      // Show the held amount until the dialog settles: a value capped back to
+                      // the same amount keeps the key, so nothing else would undo the typing.
+                      event.currentTarget.value = String(voucher.amount);
                       if (Number.isFinite(value) && value !== voucher.amount) onResize(voucher.note, value);
                     }}
                     onKeyDown={(event) => {

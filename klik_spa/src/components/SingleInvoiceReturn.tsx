@@ -73,6 +73,11 @@ export default function SingleInvoiceReturn({
     }
   }, [isOpen, invoice]);
 
+  // Cash back never shows more than the drawer took for this sale: the server caps it there
+  // anyway, and a field reading more invites the cashier to hand it over.
+  const setRefund = (value: number) =>
+    setReturnAmount(Math.round(Math.min(value, refundableCash > 0 ? refundableCash : value) * 100) / 100);
+
   // Update return amount when items change
   useEffect(() => {
     if (originalInvoicePaidAmount > 0) {
@@ -104,12 +109,12 @@ export default function SingleInvoiceReturn({
       }
 
       // Round to 2 decimal places to avoid floating point precision issues
-      setReturnAmount(Math.round(calculatedReturnAmount * 100) / 100);
+      setRefund(calculatedReturnAmount);
     } else {
       // Fallback to item-based calculation if paid amount is not available
-      setReturnAmount(returnedValueWithTax({ items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal }));
+      setRefund(returnedValueWithTax({ items: returnItems, fixed_charges: fixedCharges, grand_total: originalInvoiceGrandTotal }));
     }
-  }, [returnItems, fixedCharges, originalInvoiceGrandTotal, originalInvoicePaidAmount, posDetails?.custom_ignore_write_off_on_partial_returns]);
+  }, [returnItems, fixedCharges, originalInvoiceGrandTotal, originalInvoicePaidAmount, refundableCash, posDetails?.custom_ignore_write_off_on_partial_returns]);
 
   // Set default payment method when payment modes are loaded
 
@@ -694,14 +699,12 @@ export default function SingleInvoiceReturn({
                     <StepperInput
                       aria-label="Refund amount"
                       value={returnAmount}
-                      onChange={(e) => {
-                        const value = parseFloat(e.target.value) || 0;
-                        // Round to 2 decimal places to avoid floating point precision issues
-                        setReturnAmount(Math.round(value * 100) / 100);
-                      }}
-                      onStep={(next) => setReturnAmount(Math.round(next * 100) / 100)}
+                      onChange={(e) => setRefund(parseFloat(e.target.value) || 0)}
+                      onStep={setRefund}
                       step="0.01"
                       min="0"
+                      max={refundableCash}
+                      maxValue={refundableCash}
                       className="w-full pl-8 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-beveren-500 transition-colors text-right text-lg font-semibold"
                       placeholder="0.00"
                     />
