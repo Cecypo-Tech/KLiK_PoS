@@ -5510,17 +5510,20 @@ def create_partial_return(
 			if cint(return_doc.update_outstanding_for_self)
 			else _("credited to the invoice")
 		)
+		def money(amount):
+			return fmt_money(amount, precision, return_doc.currency)
+
 		if refunded_cash > 0 and credited_amount > 0:
 			message = _("Return created: {0} (refunded {1} via {2}, {3} {4})").format(
-				return_doc.name, flt(refunded_cash, precision), final_payment_method, credited_amount, credit_went
+				return_doc.name, money(refunded_cash), final_payment_method, money(credited_amount), credit_went
 			)
 		elif refunded_cash > 0:
 			message = _("Return created: {0} (refunded {1} via {2})").format(
-				return_doc.name, flt(refunded_cash, precision), final_payment_method
+				return_doc.name, money(refunded_cash), final_payment_method
 			)
 		else:
 			message = _("Return created: {0} ({1} {2}, no cash refunded)").format(
-				return_doc.name, credited_amount, credit_went
+				return_doc.name, money(credited_amount), credit_went
 			)
 
 		return {

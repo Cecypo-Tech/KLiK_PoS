@@ -58,3 +58,11 @@ class TestReturnVoucher(CashOnlyReturnCase):
 		result = self._partial(invoice)
 		self.assertIn(f"left as store credit on {result['return_invoice']}", result["message"])
 		self.assertNotIn("credited to the invoice", result["message"])
+
+	def test_the_message_shows_money_not_raw_numbers(self):
+		from frappe.utils import fmt_money
+
+		invoice = self._sale(500, card=500)
+		result = self._partial(invoice)
+		self.assertIn(fmt_money(500, currency=invoice.currency), result["message"])
+		self.assertNotIn("500.0 ", result["message"])
