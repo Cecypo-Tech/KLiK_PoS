@@ -449,6 +449,24 @@ class TestReturningAnAdvanceSettledSale(MpesaFirstCase):
 		self.assertEqual(self._bank_gl(credit.name), 0, "the return posts no M-Pesa movement")
 		self.assertEqual(flt(abs(credit.outstanding_amount)), 100.0, "the value stays as credit-note balance")
 
+	def test_the_credit_from_an_mpesa_return_pays_a_later_sale(self):
+		"""The note an M-Pesa return leaves is a voucher: listed, spendable, and spent down."""
+		from klik_pos.api.customer_credit import apply_customer_credit, get_customer_credit
+
+		result = return_sales_invoice(self._settled().name)
+		note = result["return_invoice"]
+		self.assertEqual(result["credit"]["available"], 100.0)
+
+		def available():
+			notes = get_customer_credit(CUSTOMER, COMPANY)["notes"]
+			return next((n["available"] for n in notes if n["invoice"] == note), 0.0)
+
+		self.assertEqual(available(), 100.0)
+		sale = create_sales_invoice(company=COMPANY, customer=CUSTOMER, rate=60, posting_date=frappe.utils.nowdate())
+		self.assertEqual(apply_customer_credit(sale.name, [{"invoice": note, "amount": 60}])["applied"], 60.0)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", sale.name, "outstanding_amount")), 0.0)
+		self.assertEqual(available(), 40.0, "what was spent is gone from the voucher")
+
 	def test_the_return_picker_names_every_way_the_sale_was_paid(self):
 		"""The picker read the payments table, and only fell back to Payment Entries when
 		that table was empty - so a sale part-paid at the till and part-paid by receipt
