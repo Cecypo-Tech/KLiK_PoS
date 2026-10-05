@@ -731,18 +731,21 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
         {!canViewOtherCashiers && (
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Showing only your transactions</p>
         )}
-        <select
-          value={paymentFilter}
-          onChange={(e) => setPaymentFilter(e.target.value)}
-          className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
-        >
-          <option value="all">All Payments</option>
-          {modes.map((mode) => (
-            <option key={mode.name} value={mode.name}>
-              {mode.name}
-            </option>
-          ))}
-        </select>
+        {/* Held orders have no payment yet, and the filter never applies to them. */}
+        {activeTab !== "Held" && (
+          <select
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
+            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+          >
+            <option value="all">All Payments</option>
+            {modes.map((mode) => (
+              <option key={mode.name} value={mode.name}>
+                {mode.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
         {hasMore && (
           <div className="mt-3 text-center">
