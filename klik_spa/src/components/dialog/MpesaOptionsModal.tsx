@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import type { MpesaRegisterPayment } from "../../services/mpesa";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
+import { formatDateOnly } from "../../utils/time";
 import { receiptCardState } from "../../utils/mpesaReceipts";
 import { canSendStk } from "../../utils/stkAutoSubmit";
 
@@ -202,7 +203,12 @@ export default function MpesaOptionsModal({
                             {payment.transid || payment.name}
                             {payment.msisdn ? ` - ${payment.msisdn}` : ""}
                           </div>
-                          <div>{payment.billrefnumber || "No reference"}</div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="truncate">{payment.billrefnumber || "No reference"}</span>
+                            {payment.posting_date && (
+                              <span className="whitespace-nowrap">{formatDateOnly(payment.posting_date)}</span>
+                            )}
+                          </div>
                           {card.kind === "other" && (
                             <div className="text-amber-600 dark:text-amber-400">
                               Held by {card.heldBy}. Switch customer to use it.
