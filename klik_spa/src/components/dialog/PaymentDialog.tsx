@@ -62,17 +62,7 @@ import { useProductStore } from "../../stores/productStore";
 import type { Customer as CartCustomer } from "../../../types";
 import VoucherPanel from "./VoucherPanel";
 import { nextAllocationTargets, stkAutoSubmitDecision } from "../../utils/stkAutoSubmit";
-import {
-  AUTO_CHECK_AFTER_MS,
-  RECEIPT_GIVE_UP_MESSAGE,
-  RECEIPT_PENDING_MESSAGE,
-  RECEIPT_POLL_MS,
-  autoCheckFor,
-  pretickedReceipt,
-  pushCheckMessage,
-  receiptLookupStep,
-  stkReceiptPending,
-} from "../../utils/stkPushCheck";
+import { autoCheckDelay, pushCheckMessage } from "../../utils/stkPushCheck";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
   holdBlockedByMpesa,
@@ -82,10 +72,8 @@ import {
   stkRetryAction,
 } from "../../utils/mpesaDraftLifecycle";
 import {
-  attachPushReceipt,
   checkMpesaPush,
   discardMpesaOrder,
-  findPushReceipts,
   saveMpesaOrder,
   submitMpesaOrder,
 } from "../../services/mpesaOrder";
@@ -282,12 +270,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [isTaxPreviewLoading, setIsTaxPreviewLoading] = useState(false);
   const [, setTaxPreviewError] = useState<string | null>(null);
   const [mpesaFlow, setMpesaFlow] = useState<MpesaFlowState | null>(null);
-  // The push "Check with M-Pesa" is offered for: set once the till's own check has run on it.
+  // The push the till last asked Safaricom about; "Check with M-Pesa" is offered for it.
   const [checkOfferedFor, setCheckOfferedFor] = useState<string | null>(null);
   const [isCheckingMpesa, setIsCheckingMpesa] = useState(false);
-  // A paid push's receipt: the matches the lookup found, and the push it stopped looking for.
-  const [pushReceipts, setPushReceipts] = useState<MpesaRegisterPayment[]>([]);
-  const [receiptLookupEndedFor, setReceiptLookupEndedFor] = useState<string | null>(null);
   // The draft Sales Order STK pushes are sent from (klik_pos.api.mpesa_order), until submit.
   const [mpesaOrderName, setMpesaOrderName] = useState<string | null>(null);
   // Set once a push is sent from it in this dialog: only then does leaving checkout let it go.
@@ -795,8 +780,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       : null;
   // Paid and not yet submitted: leaving takes an explicit confirmation.
   const stkPaidMethod = stkLockedMethod && mpesaFlow?.status === "completed" ? stkLockedMethod : null;
-  // Safaricom said paid without a receipt number: nothing submits until the receipt is attached.
-  const receiptPending = stkReceiptPending(mpesaFlow) && !invoiceSubmitted;
 
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const closeDialog = useCallback(
@@ -931,7 +914,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [mpesaFlow?.requestName]);
 
   /** "Check with M-Pesa": ask Safaricom about a push whose confirmation has not arrived. */
-  const checkWithMpesa = useCallback(async (requestName: string) => {
+  const checkWithMpesa = useCallback(async (requestName: string, quiet = false) => {
     setIsCheckingMpesa(true);
     try {
       const check = await checkMpesaPush(requestName);
@@ -944,7 +927,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         if (check.outcome === "not_paid") return { ...prev, status: "failed", message };
         return { ...prev, message };
       });
-      if (check.outcome === "waiting" || check.outcome === "no_answer") toast.info(message);
+      // The till's own asks stay quiet while the customer is still on the prompt.
+      if (!quiet && (check.outcome === "waiting" || check.outcome === "no_answer")) toast.info(message);
     } catch (error) {
       toast.error(extractErrorFromException(error, "Couldn't check with M-Pesa"));
     } finally {
@@ -1201,9 +1185,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (isMobile) setMpesaPanelDismissed(true);
   };
 
-  // A paid push's receipt is pending: the panel lists its matches (or what a search finds), and
-  // only one of them can be its receipt.
-  const mpesaPanelPayments = receiptPending && mpesaSearchTerm.trim().length < 3 ? pushReceipts : mpesaRegisterPayments;
+  const mpesaPanelPayments = mpesaRegisterPayments;
 
   const handleToggleMpesaPayment = (paymentName: string) => {
     const payment = mpesaPanelPayments.find((entry) => entry.name === paymentName);
@@ -1214,31 +1196,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       if (exists) {
         return prev.filter((entry) => entry.name !== paymentName);
       }
-      return receiptPending ? [payment] : [...prev, payment];
+      return [...prev, payment];
     });
-  };
-
-  /** "Use this receipt": the ticked receipt becomes the paid push's own; the sale then submits as usual. */
-  const handleUsePushReceipt = async () => {
-    const requestName = mpesaFlow?.requestName;
-    const receipt = selectedMpesaPayments[0];
-    if (!requestName || !receipt || selectedMpesaPayments.length !== 1) return;
-    setIsProcessingPayment(true);
-    try {
-      const { transaction_id } = await attachPushReceipt(requestName, receipt.name);
-      setMpesaFlow((prev) =>
-        prev && prev.requestName === requestName
-          ? { ...prev, transactionId: transaction_id, message: "Payment confirmed" }
-          : prev,
-      );
-      setSelectedMpesaPayments([]);
-      setPushReceipts([]);
-      setMpesaSearchTerm("");
-    } catch (error) {
-      toast.error(extractErrorFromException(error, "Couldn't use this receipt"));
-    } finally {
-      setIsProcessingPayment(false);
-    }
   };
 
   const handleReconcileMpesaPayments = async () => {
@@ -1670,68 +1629,19 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
   }, [mpesaFlow?.requestName, mpesaFlow?.source, mpesaFlow?.status, refreshMpesaStatus]);
 
-  // Safaricom's confirmation can be lost: a minute into the wait the till asks once by itself,
-  // and from then on offers "Check with M-Pesa".
-  const autoCheckRequest = autoCheckFor(mpesaFlow, checkOfferedFor);
+  // Safaricom's confirmation can be lost: the till asks Safaricom itself, 20 s into the wait and
+  // then every 15 s, and offers "Check with M-Pesa" from the first ask.
+  const autoCheckRequest = mpesaFlow?.requestName;
+  const autoCheckIn = autoCheckDelay(mpesaFlow, checkOfferedFor);
   useEffect(() => {
-    if (!autoCheckRequest) return;
+    if (!autoCheckRequest || autoCheckIn === null) return;
     const timer = window.setTimeout(() => {
       setCheckOfferedFor(autoCheckRequest);
-      void checkWithMpesa(autoCheckRequest);
-    }, AUTO_CHECK_AFTER_MS);
+      void checkWithMpesa(autoCheckRequest, true);
+    }, autoCheckIn);
     return () => window.clearTimeout(timer);
-  }, [autoCheckRequest, checkWithMpesa]);
-
-  // A paid push without its receipt number: look for the receipt every 5 s - asking for a pull at
-  // once and again at 30 s and 90 s - until one turns up, or give up after two minutes.
-  const receiptLookupRequest =
-    receiptPending && mpesaFlow?.requestName !== receiptLookupEndedFor ? mpesaFlow?.requestName : undefined;
-  useEffect(() => {
-    if (!receiptLookupRequest) return;
-    const requestName = receiptLookupRequest;
-    const startedAt = Date.now();
-    let pulls = 0;
-    let timer = 0;
-    let cancelled = false;
-    const look = async () => {
-      const step = receiptLookupStep(Date.now() - startedAt, pulls);
-      if (step.pull) pulls += 1;
-      try {
-        const found = await findPushReceipts(requestName, step.pull);
-        if (cancelled) return;
-        if (found.transaction_id) {
-          // Safaricom's own confirmation arrived meanwhile: an ordinary paid push now.
-          const transactionId = found.transaction_id;
-          setMpesaFlow((prev) =>
-            prev && prev.requestName === requestName ? { ...prev, transactionId, message: "Payment confirmed" } : prev,
-          );
-          return;
-        }
-        if (found.receipts.length > 0) {
-          setPushReceipts(found.receipts);
-          const only = pretickedReceipt(found.receipts);
-          setSelectedMpesaPayments(only ? [only] : []);
-          setMpesaPanelDismissed(false);
-          setReceiptLookupEndedFor(requestName);
-          return;
-        }
-      } catch (error) {
-        console.error("Failed to look for the M-Pesa receipt", error);
-      }
-      if (cancelled) return;
-      if (step.giveUp) {
-        setReceiptLookupEndedFor(requestName);
-        toast.warning(RECEIPT_GIVE_UP_MESSAGE, { autoClose: 15000, toastId: `stk-receipt-${requestName}` });
-        return;
-      }
-      timer = window.setTimeout(() => void look(), RECEIPT_POLL_MS);
-    };
-    void look();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [receiptLookupRequest]);
+    // isCheckingMpesa: the next ask is timed from the end of this one.
+  }, [autoCheckRequest, autoCheckIn, checkWithMpesa, isCheckingMpesa]);
 
   useEffect(() => {
     if (mpesaFlow?.source !== "stk" || !mpesaFlow?.requestName) return;
@@ -1750,8 +1660,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           message: status === "completed" && data.transaction_id ? "Payment confirmed" : prev.message,
         };
       });
-      // A status check reports "paid" without the receipt number: the receipt lookup takes over.
-      if (status === "completed" && data.transaction_id) {
+      if (status === "completed") {
         toast.success("M-Pesa payment confirmed.");
       }
     };
@@ -1772,10 +1681,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       setMpesaPanelDismissed(false);
       setMpesaSearchTerm("");
       setSelectedMpesaPayments([]);
-      // Resumed again later, the push is checked and its receipt looked for afresh.
+      // Resumed again later, the push is checked afresh.
       setCheckOfferedFor(null);
-      setPushReceipts([]);
-      setReceiptLookupEndedFor(null);
       setDeliveryCharge(0);
       // The next sale's customer brings their own number; never push to the last one's.
       setMpesaPhoneNumber("");
@@ -2238,7 +2145,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   const mpesaReceiptsOpen =
     mpesaFlow?.source === "c2b" ? (mpesaFlow.c2bPayments ?? []).reduce((sum, payment) => sum + payment.amount, 0) : 0;
-  const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" && mpesaFlow.transactionId ? Number(mpesaFlow.amount || 0) : 0;
+  const mpesaStkDone = mpesaFlow?.source === "stk" && mpesaFlow.status === "completed" ? Number(mpesaFlow.amount || 0) : 0;
   const mpesaUncovered = uncoveredMpesa(getActiveMpesaPayment()?.amount || 0, mpesaReceiptsOpen, mpesaStkDone);
 
   // An overpay with vouchers applied that no cash row can take as change would be booked
@@ -2283,9 +2190,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   useEffect(() => {
     if (!isOpen || invoiceSubmitted) return;
     if (mpesaFlow?.source !== "stk" || mpesaFlow.status !== "completed" || !mpesaFlow.requestName) return;
-    // Paid with its receipt pending cannot submit - the server needs the receipt number. It is
-    // decided once the receipt is attached, like any confirmed push.
-    if (!mpesaFlow.transactionId) return;
     if (handledStkRequestRef.current === mpesaFlow.requestName) return;
     handledStkRequestRef.current = mpesaFlow.requestName;
     // The row shows what the customer actually paid, whatever it held before (a resumed
@@ -3006,11 +2910,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     } else {
       label =
         mpesaFlow.status === "completed"
-          ? mpesaFlow.transactionId
-            ? "STK: Paid"
-            : receiptLookupEndedFor === mpesaFlow.requestName
-              ? "STK: Paid - receipt needed"
-              : RECEIPT_PENDING_MESSAGE
+          ? "STK: Paid"
           : mpesaFlow.status === "failed"
             ? `STK failed${mpesaFlow.message ? ` - ${mpesaFlow.message}` : ""}`
             : "STK: Awaiting customer";
@@ -3374,8 +3274,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onInitiateStk={() => void handleInitiateMpesaPayment()}
           stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
-          useReceipt={receiptPending}
-          onAddPayments={() => void (receiptPending ? handleUsePushReceipt() : handleReconcileMpesaPayments())}
+          onAddPayments={() => void handleReconcileMpesaPayments()}
           status={renderMpesaStatusNotice()}
         />
         {renderLeaveConfirm()}
@@ -3545,8 +3444,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     onInitiateStk={() => void handleInitiateMpesaPayment()}
           stkPending={mpesaFlow?.source === "stk" && mpesaFlow.status === "in_progress"}
           stkPaid={mpesaFlow?.source === "stk" && mpesaFlow.status === "completed"}
-          useReceipt={receiptPending}
-                    onAddPayments={() => void (receiptPending ? handleUsePushReceipt() : handleReconcileMpesaPayments())}
+                    onAddPayments={() => void handleReconcileMpesaPayments()}
                     variant="panel"
                     status={renderMpesaStatusNotice()}
                   />

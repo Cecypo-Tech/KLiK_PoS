@@ -339,8 +339,9 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 
 	# -- vouchers with an STK push ---------------------------------------------------------
 
-	def _stk_order_paid(self, amount):
-		"""A klik M-Pesa order for the cart, and a push from it the customer paid `amount` on."""
+	def _stk_order_paid(self, amount, receipt=True):
+		"""A klik M-Pesa order for the cart, and a push from it the customer paid `amount` on -
+		without its receipt number when Safaricom's status query, not its callback, said paid."""
 		from klik_pos.api.mpesa_order import save_mpesa_order
 
 		saved = save_mpesa_order(
@@ -354,7 +355,7 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 				"name": f"_Test MEXP {frappe.generate_hash(length=8)}",
 				"docstatus": 1,
 				"status": "Completed",
-				"transaction_id": f"TX{frappe.generate_hash(length=8).upper()}",
+				"transaction_id": f"TX{frappe.generate_hash(length=8).upper()}" if receipt else None,
 				"reference_doctype": "Sales Order",
 				"reference_name": order,
 				"account_reference": order,
@@ -391,6 +392,19 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 			self.addCleanup(_delete_push, push)  # first: it links to the invoice
 		frappe.db.commit()
 		return result
+
+	def test_a_push_paid_without_its_receipt_number_pays_the_sale(self):
+		"""MEXP-26-10-000016 on dev: the success callback never came, the status check said paid,
+		and the till could not submit."""
+		total = self._total()
+		order, push = self._stk_order_paid(total, receipt=False)
+
+		result = self._submit_order(order, push, self._stk_payload(push, total, []))
+
+		self.assertTrue(result["success"], result)
+		invoice = frappe.get_doc("Sales Invoice", result["invoice_name"])
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(flt(invoice.outstanding_amount), 0)
 
 	def test_a_voucher_and_an_stk_push_pay_together(self):
 		note = self._voucher(30)
