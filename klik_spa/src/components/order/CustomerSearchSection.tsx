@@ -26,6 +26,7 @@ import WalkinInfoModal from "./WalkinInfoModal";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import countryList from "react-select-country-list";
 import { parsePhoneNumber } from "react-phone-number-input";
+import { customerRowDetails } from "../../utils/customerRow";
 import AddCustomerModal from "../customer/AddCustomerModal";
 import OverdueWarningModal from "../customer/OverdueWarningModal";
 
@@ -261,51 +262,21 @@ export const CustomerSearchSection = ({
     shouldPreventSearchRef.current = true;
     
     setIsLoading(true);
+    // Every step after the click is a round trip to the server; on a till far from it each one
+    // shows. The overdue check needs only the customer's id, so it goes alongside the details,
+    // and the product list reloads in the background behind its own loader.
+    void checkOverdue(customer);
     try {
-      const fullCustomer = await fetchCustomerInfo(customer.name);
-      if (fullCustomer) {
-        onCustomerSelect(fullCustomer);
-        setProductCustomer(fullCustomer);
-        if (!selectedPriceList && fullCustomer.sellingPriceList) {
-          await setSelectedPriceList(fullCustomer.sellingPriceList);
-        }
-        await fetchProducts(true);
-      } else {
-        onCustomerSelect(customer);
-        setProductCustomer(customer);
-        if (!selectedPriceList && customer.sellingPriceList) {
-          await setSelectedPriceList(customer.sellingPriceList);
-        }
-        await fetchProducts(true);
-      }
-      // Check for overdue invoices if setting is on and customer is not walk-in
-      const resolvedCustomer = fullCustomer ?? customer;
-      if (posDetails?.custom_show_overdue_warning && resolvedCustomer.isWalkin !== 1) {
-        const company = typeof posDetails.company === "string" ? posDetails.company : (posDetails.company as any)?.name ?? ""
-        try {
-          const params = new URLSearchParams({ customer: resolvedCustomer.id, company })
-          const res = await fetch(
-            `/api/method/klik_pos.api.customer.get_customer_overdue_invoices?${params.toString()}`
-          )
-          const json = await res.json()
-          if (json?.message?.has_overdue) {
-            setOverdueData({
-              invoices: json.message.invoices,
-              customerName: json.message.customer_name || resolvedCustomer.name,
-            })
-          }
-        } catch (e) {
-          console.error("Overdue check failed:", e)
-        }
+      const resolved = (await fetchCustomerInfo(customer.name)) ?? customer;
+      onCustomerSelect(resolved);
+      setProductCustomer(resolved);
+      if (!selectedPriceList && resolved.sellingPriceList) {
+        await setSelectedPriceList(resolved.sellingPriceList);
       }
     } catch (error) {
       console.error("Error fetching customer info:", error);
       onCustomerSelect(customer);
       setProductCustomer(customer);
-      if (!selectedPriceList && customer.sellingPriceList) {
-        await setSelectedPriceList(customer.sellingPriceList);
-      }
-      await fetchProducts(true);
     } finally {
       setIsLoading(false);
       setUserRemovedDefaultCustomer(false);
@@ -313,6 +284,25 @@ export const CustomerSearchSection = ({
         isSelectingRef.current = false;
         shouldPreventSearchRef.current = false;
       }, 300);
+    }
+    void fetchProducts(true);
+  };
+
+  const checkOverdue = async (customer: Customer) => {
+    if (!posDetails?.custom_show_overdue_warning || customer.isWalkin === 1 || (customer as { is_walkin?: number }).is_walkin === 1) return;
+    const company = typeof posDetails.company === "string" ? posDetails.company : (posDetails.company as any)?.name ?? "";
+    try {
+      const params = new URLSearchParams({ customer: customer.id, company });
+      const res = await fetch(`/api/method/klik_pos.api.customer.get_customer_overdue_invoices?${params.toString()}`);
+      const json = await res.json();
+      if (json?.message?.has_overdue) {
+        setOverdueData({
+          invoices: json.message.invoices,
+          customerName: json.message.customer_name || customer.name,
+        });
+      }
+    } catch (e) {
+      console.error("Overdue check failed:", e);
     }
   };
 
@@ -555,39 +545,29 @@ export const CustomerSearchSection = ({
                     {getCustomerIcon(customer)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-gray-900 dark:text-white text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-900 dark:text-white text-sm truncate">
                         {customer.name}
                       </span>
                       {badge && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${badge.color}`}>
+                        <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${badge.color}`}>
                           {badge.label}
                         </span>
                       )}
-                      {isSelected && (
-                        <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 ml-auto" />
-                      )}
-                    </div>
-                    
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                      {customer.phone && customer.phone !== "N/A" && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                          <Phone className="w-3 h-3" />
-                          <span>{customer.phone}</span>
-                        </div>
-                      )}
-                      {customer.email && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                          <Mail className="w-3 h-3" />
-                          <span className="truncate max-w-[150px]">{customer.email}</span>
-                        </div>
-                      )}
                       {customer.taxId && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                          <span className="font-mono">PIN: {customer.taxId}</span>
-                        </div>
+                        <span className="ml-auto shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
+                          PIN: {customer.taxId}
+                        </span>
+                      )}
+                      {isSelected && (
+                        <Check className={`w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-blue-400 ${customer.taxId ? "" : "ml-auto"}`} />
                       )}
                     </div>
+                    {customerRowDetails(customer) && (
+                      <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {customerRowDetails(customer)}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

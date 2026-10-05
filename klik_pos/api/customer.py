@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from erpnext.setup.utils import get_exchange_rate
@@ -111,11 +112,13 @@ def get_customers(limit: int = 100, start: int = 0, search: str = ""):
                 c.email_id,
                 c.mobile_no,
                 c.tax_id,
+                addr.city,
                 c.custom_is_walkin as is_walkin,
                 COALESCE(({total_orders_sql("c.name")}), 0) as custom_total_orders,
                 COALESCE(({total_spent_sql("c.name")}), 0) as custom_total_spent,
                 ({last_visit_sql("c.name")}) as custom_last_visit
             FROM `tabCustomer` c
+            LEFT JOIN `tabAddress` addr ON addr.name = c.customer_primary_address
             WHERE {where_clause}
             ORDER BY c.creation DESC
             LIMIT %s OFFSET %s
@@ -156,6 +159,36 @@ def get_customers(limit: int = 100, start: int = 0, search: str = ""):
         }
     
     
+@frappe.whitelist()
+def get_walkin_details_by_phone(phone: str):
+    """The name and tax ID a walk-in gave on their last sales under this phone number - each
+    from the newest sale that has it - so a returning walk-in only needs to give the number.
+    The number matches however it was typed: 07..., 2547..., +254 7...
+    """
+    frappe.has_permission("Sales Invoice", "read", throw=True)
+    digits = re.sub(r"\D", "", phone or "")
+    if len(digits) < 9 or not frappe.db.has_column("Sales Invoice", "custom_walkin_phone"):
+        return {}
+    local = digits[-9:]
+    # ponytail: the stored forms klik itself writes; a number saved with spaces is not found.
+    forms = (f"0{local}", f"254{local}", f"+254{local}", local)
+    rows = frappe.db.sql(
+        """SELECT custom_walkin_customer_name AS name, tax_id
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND custom_walkin_phone IN %(forms)s
+        ORDER BY creation DESC
+        LIMIT 50""",
+        {"forms": forms},
+        as_dict=True,
+    )
+    found = {}
+    for field in ("name", "tax_id"):
+        value = next((r[field] for r in rows if (r[field] or "").strip()), None)
+        if value:
+            found[field] = value.strip()
+    return found
+
+
 def get_user_company_and_currency():
     default_company = frappe.defaults.get_user_default("Company")
     if not default_company:
