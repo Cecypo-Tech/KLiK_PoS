@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { Outlet } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import { ThemeProvider } from "./hooks/useTheme";
@@ -25,6 +25,22 @@ function App() {
   // so the alert has to reach the cashier wherever they are by then.
   useQueueFailureAlerts();
 
+  // The banners sit above the page, and pages size themselves to the screen (h-screen):
+  // without this the page overflows by the banners' height and its bottom - the till's
+  // Checkout button - is cut off. index.css takes this height off .klik-page's screen units.
+  const bannersRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const banners = bannersRef.current;
+    if (!banners) return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => root.style.setProperty("--klik-banners", `${banners.offsetHeight}px`));
+    observer.observe(banners);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--klik-banners");
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -34,9 +50,13 @@ function App() {
               <RetailSidebar />
               {/* Unposted sales first: money the till will not balance outranks a
                   warning about figures the cashier can still work past. */}
-              <UnresolvedSalesBanner />
-              <PermissionHealthBanner />
-              <Outlet />
+              <div ref={bannersRef}>
+                <UnresolvedSalesBanner />
+                <PermissionHealthBanner />
+              </div>
+              <div className="klik-page">
+                <Outlet />
+              </div>
               <ToastContainer position="top-center" autoClose={3000} aria-label="Notification" />
             </ProductProvider>
           </I18nProvider>
