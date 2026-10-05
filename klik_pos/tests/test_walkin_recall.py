@@ -39,6 +39,11 @@ class TestWalkinRecall(FrappeTestCase):
 
 		self.assertEqual(get_walkin_details_by_phone(f"0{self.digits}"), {"name": "New Name", "tax_id": "A000000000Z"})
 
+	def test_a_number_saved_with_spaces_or_dashes_is_found(self):
+		self._sale(self.newer, f"0{self.digits[:3]} {self.digits[3:6]}-{self.digits[6:]}", "Spaced Name")
+
+		self.assertEqual(get_walkin_details_by_phone(f"+254{self.digits}"), {"name": "Spaced Name"})
+
 	def test_an_unknown_or_short_number_recalls_nothing(self):
 		self.assertEqual(get_walkin_details_by_phone(f"0{self.digits}"), {})
 		self.assertEqual(get_walkin_details_by_phone("0712"), {})
