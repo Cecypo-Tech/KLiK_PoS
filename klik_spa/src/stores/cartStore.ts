@@ -51,9 +51,10 @@ const hasFiniteAvailableStock = (item: { available?: number; is_stock_item?: boo
   return typeof item.available === 'number' && Number.isFinite(item.available);
 };
 
-const losEnabledFor = (item: { has_serial_no?: boolean; is_product_bundle?: boolean }) =>
+const losEnabledFor = (item: { has_serial_no?: boolean; has_batch_no?: boolean; is_product_bundle?: boolean }) =>
   !!usePOSProfileStore.getState().posDetails?.custom_enable_loss_of_sale &&
   !item.has_serial_no &&
+  !item.has_batch_no &&
   !item.is_product_bundle;
 
 const sameItemQty = (items: CartItem[], code: string, exceptId?: string) =>

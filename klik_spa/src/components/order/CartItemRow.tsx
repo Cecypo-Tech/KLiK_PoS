@@ -684,7 +684,7 @@ export const CartItemRow = ({
                     return;
                   }
                   const available = item.available;
-                  if (!posDetails?.custom_enable_loss_of_sale && available > 0 && typed > available && !item.allow_negative_stock) {
+                  if (!(posDetails?.custom_enable_loss_of_sale && !item.has_serial_no && !item.has_batch_no) && available > 0 && typed > available && !item.allow_negative_stock) {
                     setLocalQty(available);
                     onUpdateQuantity(item.id, available);
                     toast.warning(`Only ${available} units available. Quantity set to ${available}.`);

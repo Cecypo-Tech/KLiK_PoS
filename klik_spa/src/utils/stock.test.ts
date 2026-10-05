@@ -46,8 +46,9 @@ describe("isItemOutOfStock", () => {
       expect(isItemOutOfStock(stockItem(0), false, true)).toBe(false);
     });
 
-    it("still blocks serial-numbered items and bundles when on", () => {
+    it("still blocks serial-numbered, batch items and bundles when on", () => {
       expect(isItemOutOfStock({ ...stockItem(0), has_serial_no: true }, false, true)).toBe(true);
+      expect(isItemOutOfStock({ ...stockItem(0), has_batch_no: true }, false, true)).toBe(true);
       expect(isItemOutOfStock({ ...stockItem(0), is_product_bundle: true }, false, true)).toBe(true);
     });
 

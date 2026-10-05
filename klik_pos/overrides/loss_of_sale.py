@@ -51,8 +51,17 @@ def split_cart_items(items, pos_profile):
 		for index, item in enumerate(items)
 		if item["id"] in eligible and not item.get("bundle_entries")
 	]
+	# A line Loss of Sale may not touch (batch, serial, bundle) sells what was asked for and
+	# meets the normal stock check: the till can mark one when a scan left its flags unknown.
+	changes = []
+	picked_indexes = {index for index, _item in picked}
+	for index, item in enumerate(items):
+		if index not in picked_indexes and flt(item.get("los_qty")):
+			item["quantity"] = flt(item.get("quantity")) + flt(item.get("los_qty"))
+			item["los_qty"] = 0
+			changes.append({"index": index, "item_code": item["id"], "quantity": item["quantity"], "los_qty": 0})
 	if not picked or not warehouse:
-		return []
+		return changes
 
 	lines = [
 		{
@@ -67,14 +76,13 @@ def split_cart_items(items, pos_profile):
 	]
 	available = _available({line["key"] for line in lines})
 
-	changes = []
 	for (index, item), (qty, los_qty) in zip(picked, split_lines(lines, available)):
 		if qty != flt(item.get("quantity")) or los_qty != flt(item.get("los_qty")):
 			changes.append({"index": index, "item_code": item["id"], "quantity": qty, "los_qty": los_qty})
 		item["quantity"] = qty
 		item["los_qty"] = los_qty
 	_refuse_if_nothing_sold([item.get("quantity") for item in items])
-	return changes
+	return sorted(changes, key=lambda change: change["index"])
 
 
 def fold_los_into_quantity(items):
@@ -87,8 +95,8 @@ def fold_los_into_quantity(items):
 
 
 def _eligible_item_codes(item_codes):
-	"""Stock items that may not go negative and carry no serial numbers: the lines Loss of Sale
-	may shorten. A product bundle is not a stock item, so it is never one of them."""
+	"""Stock items that may not go negative and carry no serial or batch numbers: the lines Loss
+	of Sale may shorten. A product bundle is not a stock item, so it is never one of them."""
 	if not item_codes:
 		return set()
 	return set(
@@ -99,6 +107,7 @@ def _eligible_item_codes(item_codes):
 				"is_stock_item": 1,
 				"allow_negative_stock": 0,
 				"has_serial_no": 0,
+				"has_batch_no": 0,
 			},
 			pluck="name",
 		)

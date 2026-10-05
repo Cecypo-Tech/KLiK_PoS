@@ -9,13 +9,13 @@ import type { MenuItem } from "../../types";
  * sellable regardless of on-hand quantity.
  */
 export const isItemOutOfStock = (
-  item: Pick<MenuItem, "is_stock_item" | "available" | "allow_negative_stock" | "has_serial_no" | "is_product_bundle">,
+  item: Pick<MenuItem, "is_stock_item" | "available" | "allow_negative_stock" | "has_serial_no" | "has_batch_no" | "is_product_bundle">,
   stockUnavailable = false,
   losEnabled = false,
 ): boolean => {
   // Loss of Sale: the cart sells what is there and records the shortfall (mirrors
   // losEnabledFor in cartStore), so an empty shelf does not block the add.
-  if (losEnabled && !item.has_serial_no && !item.is_product_bundle) {
+  if (losEnabled && !item.has_serial_no && !item.has_batch_no && !item.is_product_bundle) {
     return false;
   }
 

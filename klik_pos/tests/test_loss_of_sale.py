@@ -12,6 +12,7 @@ from klik_pos.setup.pos_profile_fields import install_los_qty_field, install_pos
 ITEM_GROUP = "TEST-LOS-GROUP"
 STOCKED = "TEST-LOS-STOCKED"  # 10 in the till's warehouse
 EMPTY = "TEST-LOS-EMPTY"  # none anywhere
+BATCHED = "TEST-LOS-BATCHED"  # batch-tracked, none anywhere
 CUSTOMER = "TEST-LOS-CUSTOMER"
 
 
@@ -29,10 +30,11 @@ def _profile():
 	return frappe.get_doc("POS Profile", name) if name else None
 
 
-def _make_item(code):
+def _make_item(code, has_batch_no=0):
 	if frappe.db.exists("Item", code):
 		return
 	item = frappe.new_doc("Item")
+	item.has_batch_no = has_batch_no
 	item.item_code = code
 	item.item_name = code
 	item.item_group = ITEM_GROUP
@@ -63,6 +65,7 @@ class TestLossOfSale(FrappeTestCase):
 			).insert(ignore_permissions=True)
 		_make_item(STOCKED)
 		_make_item(EMPTY)
+		_make_item(BATCHED, has_batch_no=1)
 		if not frappe.db.exists("Customer", CUSTOMER):
 			customer = frappe.new_doc("Customer")
 			customer.customer_name = CUSTOMER
@@ -84,7 +87,7 @@ class TestLossOfSale(FrappeTestCase):
 	def tearDownClass(cls):
 		if getattr(cls, "ready", False):
 			for name in frappe.get_all(
-				"Sales Invoice Item", filters={"item_code": ["in", [STOCKED, EMPTY]]}, pluck="parent", distinct=True
+				"Sales Invoice Item", filters={"item_code": ["in", [STOCKED, EMPTY, BATCHED]]}, pluck="parent", distinct=True
 			):
 				cls._drop_invoice(name)
 			entry = frappe.get_doc("Stock Entry", cls.stock_entry.name)
@@ -92,9 +95,9 @@ class TestLossOfSale(FrappeTestCase):
 				entry.flags.ignore_permissions = True
 				entry.cancel()
 			frappe.delete_doc("Stock Entry", entry.name, force=True, ignore_permissions=True)
-			for name in frappe.get_all("Bin", filters={"item_code": ["in", [STOCKED, EMPTY]]}, pluck="name"):
+			for name in frappe.get_all("Bin", filters={"item_code": ["in", [STOCKED, EMPTY, BATCHED]]}, pluck="name"):
 				frappe.delete_doc("Bin", name, force=True, ignore_permissions=True)
-			for code in (STOCKED, EMPTY):
+			for code in (STOCKED, EMPTY, BATCHED):
 				if frappe.db.exists("Item", code):
 					frappe.delete_doc("Item", code, force=True, ignore_permissions=True)
 			for doctype, name in (("Item Group", ITEM_GROUP), ("Customer", CUSTOMER)):
@@ -173,6 +176,17 @@ class TestLossOfSale(FrappeTestCase):
 		cart = self._cart((STOCKED, 4, 0), (EMPTY, 6, 0))
 		self._split(cart)
 		self.assertEqual([(i["quantity"], i["los_qty"]) for i in cart], [(4, 0), (0, 6)])
+
+	def test_a_batch_item_is_left_alone(self):
+		cart = self._cart((STOCKED, 4, 0), (BATCHED, 6, 0))
+		self._split(cart)
+		self.assertEqual([(i["quantity"], i["los_qty"]) for i in cart], [(4, 0), (6, 0)])
+
+	def test_loss_marked_on_a_batch_line_goes_back_to_its_quantity(self):
+		cart = self._cart((STOCKED, 4, 0), (BATCHED, 4, 2))
+		changes = self._split(cart)
+		self.assertEqual([(i["quantity"], i["los_qty"]) for i in cart], [(4, 0), (6, 0)])
+		self.assertEqual(changes, [{"index": 1, "item_code": BATCHED, "quantity": 6, "los_qty": 0}])
 
 	def test_a_sale_with_nothing_in_stock_is_refused(self):
 		with self.assertRaisesRegex(frappe.ValidationError, "Nothing on this sale is in stock"):
