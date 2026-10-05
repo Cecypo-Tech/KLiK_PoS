@@ -87,3 +87,20 @@ export function receiptPaidAt(
 export function tenderSent<T extends { method: string; amount: number }>(rows: T[], receiptMethod?: string | null): T[] {
   return receiptMethod ? rows.filter((row) => row.method !== receiptMethod) : rows;
 }
+
+/**
+ * The payment amounts with the picked receipts' M-Pesa row refitted: the receipts pay what the
+ * other rows (vouchers included) leave owing, up to what they hold. A voucher added after the
+ * pick shrinks the M-Pesa row rather than the cashier's cash; one removed gives it back.
+ */
+export function refitReceiptRow(
+  amounts: Record<string, number>,
+  method: string,
+  receiptsOpen: number,
+  payable: number,
+): Record<string, number> {
+  const others = Object.entries(amounts)
+    .filter(([key]) => key !== method)
+    .reduce((sum, [, value]) => sum + (Number(value) || 0), 0);
+  return { ...amounts, [method]: appliedFromReceipts(receiptsOpen, roundCurrency(payable - others)) };
+}
