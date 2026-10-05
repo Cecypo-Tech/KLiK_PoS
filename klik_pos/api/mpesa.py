@@ -192,14 +192,16 @@ def _stk_backs(payment_row, invoice_name: str) -> bool:
 		["name", "status", "transaction_id", "amount"],
 		as_dict=True,
 	)
-	if not req or req.status != "Completed" or not req.transaction_id or flt(req.amount) < flt(payment_row.amount):
+	# Safaricom's status query confirms a payment without its receipt number; the number
+	# follows when the receipt reaches the register (frappe_mpsa_payments matches it by order).
+	if not req or req.status != "Completed" or flt(req.amount) < flt(payment_row.amount):
 		return False
 	used_elsewhere = frappe.db.sql(
 		"""SELECT 1 FROM `tabSales Invoice Payment` sip
 		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
 		WHERE (sip.custom_reference_text IN %(ids)s OR sip.reference_no IN %(ids)s)
 			AND si.name != %(invoice)s AND si.docstatus = 1 LIMIT 1""",
-		{"ids": (req.name, req.transaction_id), "invoice": invoice_name},
+		{"ids": tuple(filter(None, (req.name, req.transaction_id))), "invoice": invoice_name},
 	)
 	return not used_elsewhere
 

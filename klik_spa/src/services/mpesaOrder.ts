@@ -5,7 +5,6 @@
 import type { KeptMpesaPush } from '../utils/mpesaDraftLifecycle';
 import type { PushCheck } from '../utils/stkPushCheck';
 import { extractErrorMessage } from '../utils/errorExtraction';
-import type { MpesaRegisterPayment } from './mpesa';
 import { HeldOrderGoneError } from './salesOrder';
 
 /** The newest push sent from an M-Pesa order, as get_held_order_details returns it. */
@@ -65,20 +64,4 @@ export async function submitMpesaOrder(
 /** Ask Safaricom what became of a push whose confirmation has not arrived (check_mpesa_push). */
 export async function checkMpesaPush(requestName: string): Promise<PushCheck> {
   return post('check_mpesa_push', { request_name: requestName });
-}
-
-/**
- * The register receipts that can be a paid push's (find_push_receipts). `pull` also asks
- * Safaricom for the shortcode's recent payments. transaction_id is set once the push has one.
- */
-export async function findPushReceipts(
-  requestName: string,
-  pull: boolean,
-): Promise<{ status: string; transaction_id: string | null; receipts: MpesaRegisterPayment[] }> {
-  return post('find_push_receipts', { request_name: requestName, pull: pull ? 1 : 0 });
-}
-
-/** Make a register receipt the paid push's own receipt number (attach_push_receipt). */
-export async function attachPushReceipt(requestName: string, register: string): Promise<{ transaction_id: string }> {
-  return post('attach_push_receipt', { request_name: requestName, register });
 }

@@ -22,8 +22,6 @@ interface MpesaOptionsModalProps {
   stkPending?: boolean;
   /** A push for this sale was paid: submit it, don't ask the customer again. */
   stkPaid?: boolean;
-  /** The paid push's receipt is pending: the list holds its matches and the button attaches the ticked one. */
-  useReceipt?: boolean;
   onClose: () => void;
   onPhoneNumberChange: (value: string) => void;
   onSearchChange: (value: string) => void;
@@ -51,7 +49,6 @@ export default function MpesaOptionsModal({
   isProcessing,
   stkPending = false,
   stkPaid = false,
-  useReceipt = false,
   onClose,
   onPhoneNumberChange,
   onSearchChange,
@@ -162,7 +159,7 @@ export default function MpesaOptionsModal({
               </span>
             </div>
 
-            {!isLoadingPayments && (useReceipt || searchTerm.trim().length >= 3) && payments.length > 0 && (
+            {!isLoadingPayments && searchTerm.trim().length >= 3 && payments.length > 0 && (
             <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
               {payments.map((payment) => {
                   const checked = selectedPaymentNames.includes(payment.name);
@@ -241,12 +238,13 @@ export default function MpesaOptionsModal({
               disabled={
                 isProcessing ||
                 stkPending ||
-                (useReceipt ? selectedPaymentNames.length !== 1 : stkPaid || selectedPaymentNames.length === 0)
+                stkPaid ||
+                selectedPaymentNames.length === 0
               }
               className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : null}
-              <span>{useReceipt ? "Use this receipt" : "Add Selected Payments"}</span>
+              <span>Add Selected Payments</span>
             </button>
           </section>
         </div>
