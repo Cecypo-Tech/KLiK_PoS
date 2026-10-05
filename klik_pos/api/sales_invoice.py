@@ -7,7 +7,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.stock.get_item_details import get_item_details
 from frappe import _
 from frappe.exceptions import ValidationError
-from frappe.utils import cint, flt, fmt_money, nowdate, strip_html_tags
+from frappe.utils import cint, flt, fmt_money, getdate, nowdate, strip_html_tags
 
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
@@ -1483,6 +1483,8 @@ def get_sales_invoices(
 	cashier_name=None,
 	submitted_only=False,
 	surface="",
+	from_date=None,
+	to_date=None,
 ):
 	"""
 	Get sales invoices with proper filtering based on user role and POS opening entry.
@@ -1491,6 +1493,7 @@ def get_sales_invoices(
 		skip_opening_entry_filter: If True, skip filtering by opening entry (for Invoice History page)
 		cashier_name: Filter by cashier name (full name). If provided, only returns invoices for that cashier.
 		submitted_only: If True, only return submitted invoices (docstatus=1). Use for Sales Dashboard; excludes Draft and Cancelled.
+		from_date, to_date: Optional posting_date bounds, both inclusive. Empty means unbounded.
 		surface: Which screen is asking. Four screens share this endpoint and they do not
 			want the same scoping, so they say which they are rather than having it
 			guessed from the other arguments:
@@ -1634,6 +1637,13 @@ def get_sales_invoices(
 				searched.append("si.custom_walkin_customer_name")
 			conditions.append("(" + " OR ".join(f"{col} LIKE %s" for col in searched) + ")")
 			params.extend([search_term] * len(searched))
+
+		if from_date:
+			conditions.append("si.posting_date >= %s")
+			params.append(getdate(from_date))
+		if to_date:
+			conditions.append("si.posting_date <= %s")
+			params.append(getdate(to_date))
 
 		where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

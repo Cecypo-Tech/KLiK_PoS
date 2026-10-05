@@ -10,7 +10,11 @@ export function useSalesInvoices(
   /** Which screen is asking. The backend scopes differently per surface — see
    *  get_sales_invoices. Omit it for Closing Shift; the customer list (useCustomerInvoices)
    *  sends "customer". */
-  surface: "" | "history" | "customer" | "dashboard" = ""
+  surface: "" | "history" | "customer" | "dashboard" = "",
+  /** Inclusive posting_date bounds ("yyyy-mm-dd"), filtered on the server so paging
+   *  cannot hide older invoices. Empty is unbounded. */
+  fromDate: string = "",
+  toDate: string = ""
 ) {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,8 +58,9 @@ export function useSalesInvoices(
       const submittedOnlyParam = submittedOnly ? '&submitted_only=true' : '';
       // Which screen is asking; the backend will not guess it from the other params.
       const surfaceParam = surface ? `&surface=${surface}` : '';
+      const dateParams = (fromDate ? `&from_date=${fromDate}` : '') + (toDate ? `&to_date=${toDate}` : '');
       const response = await fetch(
-        `/api/method/klik_pos.api.sales_invoice.get_sales_invoices?limit=${LIMIT}&start=${start}${searchParam}${skipOpeningFilter}${cashierParam}${submittedOnlyParam}${surfaceParam}`,
+        `/api/method/klik_pos.api.sales_invoice.get_sales_invoices?limit=${LIMIT}&start=${start}${searchParam}${skipOpeningFilter}${cashierParam}${submittedOnlyParam}${surfaceParam}${dateParams}`,
         {
           method: 'GET',
           headers: {
@@ -185,7 +190,7 @@ export function useSalesInvoices(
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, [debouncedSearchTerm, skipOpeningEntryFilter, cashierName, submittedOnly, surface]);
+  }, [debouncedSearchTerm, skipOpeningEntryFilter, cashierName, submittedOnly, surface, fromDate, toDate]);
 
   const loadMore = useCallback(() => {
     if (!isLoadingMore && hasMore) {
