@@ -60,7 +60,8 @@ import { approvalBadge, PRICE_APPROVED, WITHDRAW_APPROVAL } from "../utils/price
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { handlePrintInvoice } from "../utils/printHandler";
 import { useCartStore } from "../stores/cartStore";
-import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
+import { formatDateTime, toSortableTimestamp } from "../utils/time";
+import { inDateRange, storedDate } from "../utils/dateRange";
 import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "../utils/exportUtils";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -82,7 +83,8 @@ const INVOICE_HISTORY_FILTERS_KEY = "invoice-history-filters";
 interface InvoiceHistoryFiltersState {
   activeTab: string;
   searchTerm: string;
-  dateFilter: string;
+  fromDate: string;
+  toDate: string;
   customerFilter: string;
   paymentFilter: string;
   cashierFilter: string;
@@ -91,7 +93,8 @@ interface InvoiceHistoryFiltersState {
 const DEFAULT_INVOICE_HISTORY_FILTERS: InvoiceHistoryFiltersState = {
   activeTab: "all",
   searchTerm: "",
-  dateFilter: "all",
+  fromDate: "",
+  toDate: "",
   customerFilter: "",
   paymentFilter: "all",
   cashierFilter: "all",
@@ -108,10 +111,14 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
       return DEFAULT_INVOICE_HISTORY_FILTERS;
     }
 
+    // Older saves carry a `dateFilter` preset instead of From/To: it is never read, and the
+    // next save drops it.
     const parsed = JSON.parse(raw) as Partial<InvoiceHistoryFiltersState>;
     return {
       ...DEFAULT_INVOICE_HISTORY_FILTERS,
       ...parsed,
+      fromDate: storedDate(parsed.fromDate),
+      toDate: storedDate(parsed.toDate),
       // The Held tab used to be called Draft; a tab remembered from then should still open it.
       activeTab: parsed.activeTab === "Draft" ? "Held" : (parsed.activeTab || DEFAULT_INVOICE_HISTORY_FILTERS.activeTab),
       customerFilter: parsed.customerFilter === "all" ? "" : (parsed.customerFilter || ""),
@@ -165,7 +172,8 @@ export default function InvoiceHistoryPage() {
   // One write is skipped so a tab arrived at by link does not become the remembered one.
   const skipFilterPersist = useRef(Boolean(urlTab));
   const [searchTerm, setSearchTerm] = useState(initialFilters.searchTerm);
-  const [dateFilter, setDateFilter] = useState(initialFilters.dateFilter);
+  const [fromDate, setFromDate] = useState(initialFilters.fromDate);
+  const [toDate, setToDate] = useState(initialFilters.toDate);
   const [customerFilter, setCustomerFilter] = useState(initialFilters.customerFilter);
   const [paymentFilter, setPaymentFilter] = useState(initialFilters.paymentFilter);
   const [cashierFilter, setCashierFilter] = useState(initialFilters.cashierFilter);
@@ -189,7 +197,7 @@ export default function InvoiceHistoryPage() {
 
   // Skip opening entry filter for Invoice History - show all invoices for cashier regardless of opening entry
   // Pass cashier filter to API so it filters on server side (more efficient)
-  const { invoices, isLoading, isLoadingMore, error, hasMore, totalLoaded, totalCount, loadMore, refetch } = useSalesInvoices(searchTerm, true, cashierFilter, false, "history");
+  const { invoices, isLoading, isLoadingMore, error, hasMore, totalLoaded, totalCount, loadMore, refetch } = useSalesInvoices(searchTerm, true, cashierFilter, false, "history", fromDate, toDate);
 
   // Held draft Sales Orders (custom_is_klik_held=1) — surfaced under the Held tab.
   // Mapped to the SalesInvoice shape with `isHeldOrder` so the row + action handlers
@@ -392,13 +400,14 @@ export default function InvoiceHistoryPage() {
       JSON.stringify({
         activeTab,
         searchTerm,
-        dateFilter,
+        fromDate,
+        toDate,
         customerFilter,
         paymentFilter,
         cashierFilter,
       })
     );
-  }, [activeTab, searchTerm, dateFilter, customerFilter, paymentFilter, cashierFilter]);
+  }, [activeTab, searchTerm, fromDate, toDate, customerFilter, paymentFilter, cashierFilter]);
 
   // Keyboard event handler for Escape key
   useEffect(() => {
@@ -430,38 +439,8 @@ export default function InvoiceHistoryPage() {
     { id: "Cancelled", name: "Cancelled", icon: XCircle, color: "text-red-500" },
   ];
 
-  const filterInvoiceByDate = (invoiceDateStr: string) => {
-    if (dateFilter === "all") return true;
-
-    if (dateFilter === "today") {
-      return isToday(invoiceDateStr);
-    }
-
-    if (dateFilter === "yesterday") {
-      const yesterday = new Date();
-      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-      const invoiceDate = new Date(invoiceDateStr);
-      return (
-        invoiceDate.getUTCFullYear() === yesterday.getUTCFullYear() &&
-        invoiceDate.getUTCMonth() === yesterday.getUTCMonth() &&
-        invoiceDate.getUTCDate() === yesterday.getUTCDate()
-      );
-    }
-
-    if (dateFilter === "week") {
-      return isThisWeek(invoiceDateStr);
-    }
-
-    if (dateFilter === "month") {
-      return isThisMonth(invoiceDateStr);
-    }
-
-    if (dateFilter === "year") {
-      return isThisYear(invoiceDateStr);
-    }
-
-    return true;
-  };
+  // Invoices are already bounded by the server; this also bounds the Held tab's orders.
+  const filterInvoiceByDate = (invoiceDateStr: string) => inDateRange(invoiceDateStr, fromDate, toDate);
 
 
 const getStatusBadge = (status: string) => {
@@ -570,7 +549,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
     });
 
     return filtered;
-  }, [invoices, heldOrders, activeTab, dateFilter, customerFilter, paymentFilter, cashierFilter, isLoading, error, filterInvoiceByDate]);
+  }, [invoices, heldOrders, activeTab, fromDate, toDate, customerFilter, paymentFilter, cashierFilter, isLoading, error, filterInvoiceByDate]);
 
   const { sortedData: sortedInvoices, sortKey: invoiceSortKey, sortDirection: invoiceSortDirection, toggleSort: toggleInvoiceSort } = useTableSort(
     filteredInvoices,
@@ -700,18 +679,27 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           onChange={(e) => setCustomerFilter(e.target.value)}
           className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
         />
-        <select
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
-        >
-          <option value="all">All Time</option>
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="week">This Week</option>
-          <option value="month">This Month</option>
-          <option value="year">This Year</option>
-        </select>
+        <div className="flex items-center gap-2 md:col-span-2">
+          <input
+            type="date"
+            aria-label="From date"
+            title="From date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="min-w-0 flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
+          />
+          <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
+          <input
+            type="date"
+            aria-label="To date"
+            title="To date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+            className="min-w-0 flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
+          />
+        </div>
         
         <select
           value={cashierFilter}
