@@ -11,7 +11,7 @@ import {
   voucherCustomerRule,
   voucherStatusLabel,
   vouchersBlockedReason,
-  vouchersBlockMpesaReason,
+  vouchersLockedByPush,
   resizeVoucher,
 } from "./voucher";
 
@@ -132,35 +132,29 @@ describe("appliedTotal", () => {
 
 describe("vouchersBlockedReason", () => {
   it("allows vouchers on a normal sale", () => {
-    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: false })).toBeNull();
+    expect(vouchersBlockedReason({ isCreditSale: false, editingDraft: false })).toBeNull();
   });
 
-  it("blocks them on a credit sale, an M-Pesa order or an older draft", () => {
-    expect(vouchersBlockedReason({ isCreditSale: true, mpesaOrder: false, editingDraft: false })).toMatch(/credit sale/);
-    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: true, editingDraft: false })).toMatch(/M-Pesa/);
-    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toMatch(/draft/);
+  it("blocks them on a credit sale or an older draft", () => {
+    expect(vouchersBlockedReason({ isCreditSale: true, editingDraft: false })).toMatch(/credit sale/);
+    expect(vouchersBlockedReason({ isCreditSale: false, editingDraft: true })).toMatch(/draft/);
   });
 
   it("names the reason as a bare phrase, to follow the dialog's prefix", () => {
-    expect(vouchersBlockedReason({ isCreditSale: true, mpesaOrder: false, editingDraft: false })).toBe("this is a credit sale");
-    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: true, editingDraft: false })).toBe(
-      "this sale is an M-Pesa order",
-    );
-    expect(vouchersBlockedReason({ isCreditSale: false, mpesaOrder: false, editingDraft: true })).toBe(
+    expect(vouchersBlockedReason({ isCreditSale: true, editingDraft: false })).toBe("this is a credit sale");
+    expect(vouchersBlockedReason({ isCreditSale: false, editingDraft: true })).toBe(
       "this sale is finishing an older draft",
     );
   });
 });
 
-describe("vouchersBlockMpesaReason", () => {
-  it("lets M-Pesa go ahead without vouchers", () => {
-    expect(vouchersBlockMpesaReason(0)).toBeNull();
+describe("vouchersLockedByPush", () => {
+  it("lets vouchers change before any M-Pesa request", () => {
+    expect(vouchersLockedByPush(null)).toBeNull();
   });
 
-  it("refuses an M-Pesa request while vouchers are applied, saying what to do instead", () => {
-    expect(vouchersBlockMpesaReason(2)).toBe(
-      "Vouchers can't be combined with an M-Pesa request yet - pick the customer's M-Pesa receipt instead, or take the rest in cash or card.",
-    );
+  it("refuses once a request went out for what the vouchers left", () => {
+    expect(vouchersLockedByPush("Mpesa-1")).toMatch(/before sending the M-Pesa request/);
   });
 });
 

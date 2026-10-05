@@ -52,7 +52,7 @@ import {
   netOfChange,
   voucherApplyAmount,
   vouchersBlockedReason,
-  vouchersBlockMpesaReason,
+  vouchersLockedByPush,
   type AppliedVoucher,
 } from "../../utils/voucher";
 import { QUEUE_FAILURE_EVENT, watchQueuedCheckout } from "../../utils/queueFailure";
@@ -376,11 +376,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
   }, [isOpen, selectedCustomer, posCompanyName, posDetails?.currency]);
 
-  // A credit sale, an M-Pesa order or an older draft carries no vouchers: those paths
-  // settle no credit, so the figures must stop counting them.
+  // A credit sale or an older draft carries no vouchers: those paths settle no credit, so the
+  // figures must stop counting them.
   const vouchersBlocked = vouchersBlockedReason({
     isCreditSale,
-    mpesaOrder: Boolean(mpesaOrderName),
     editingDraft: Boolean(getOriginalDraftInvoiceId()),
   });
   useEffect(() => {
@@ -984,10 +983,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     const activeMpesaPayment = options?.excludeActiveMpesa ? getActiveMpesaPayment() : null;
     // Customer credit is not a payment row: it leaves this list, leaves amountPaid,
     // and reaches the server as customerCredit allocations settled after submit.
-    // Draft and M-Pesa-order submits have no credit wiring server-side, so those
-    // flows carry no credit at all - the tender is hidden and zeroed for them too.
-    // Picked receipts go with the ordinary checkout, which settles credit.
-    const creditFlowBlocked = Boolean(mpesaOrderName || getOriginalDraftInvoiceId());
+    // A resumed older draft still takes no vouchers at the till (see vouchersBlocked), so it
+    // carries no credit at all - the tender is hidden and zeroed for it too.
+    const creditFlowBlocked = Boolean(getOriginalDraftInvoiceId());
     const creditAmount = creditFlowBlocked
       ? 0
       : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
@@ -1112,13 +1110,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const initiateMpesaFlow = async (method: string, amount: number, phoneNumber: string): Promise<boolean> => {
     if (!selectedCustomer || !selectedCustomer.name) {
       toast.error("Kindly select a customer");
-      return false;
-    }
-    // Checked before ensureMpesaOrder: an M-Pesa order drops the vouchers, and the customer
-    // would then owe what they covered on top of the push.
-    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
-    if (voucherReason) {
-      toast.error(voucherReason);
       return false;
     }
     if (!phoneNumber.trim()) {
@@ -2854,6 +2845,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.error(`Vouchers unavailable: ${vouchersBlocked}.`);
       return;
     }
+    const pushLock = vouchersLockedByPush(stkLockedMethod);
+    if (pushLock) {
+      toast.error(pushLock);
+      return;
+    }
     if (appliedVouchers.some((applied) => applied.note === voucher.note)) {
       toast.info(`${voucher.note} is already applied.`);
       return;
@@ -2870,6 +2866,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
   // The cashier spends part of an applied voucher; a larger amount trims the other rows.
   const resizeAppliedVoucher = (note: string, amount: number) => {
+    const pushLock = vouchersLockedByPush(stkLockedMethod);
+    if (pushLock) {
+      toast.error(pushLock);
+      return;
+    }
     commitVouchers(resizeVoucher(appliedVouchers, note, amount, checkoutPayableTotal));
   };
 
