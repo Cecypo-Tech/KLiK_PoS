@@ -189,8 +189,78 @@ def validate_allocations(invoice_doc, allocations):
 
 
 def apply_customer_credit(invoice_name, allocations):
-	"""Reconcile each note against the submitted invoice - the desk tool's own path."""
+	"""Settle each validated voucher against the submitted invoice with a "Credit Note"
+	adjustment Journal Entry - the one desk Payment Reconciliation books.
+
+	The till's cashier usually holds no right to Journal Entries, and must not be given one:
+	the entry is built here and only it skips the permission check, so the cashier can spend
+	the voucher in front of them (validate_allocations) and nothing else. It stays theirs in
+	the audit trail. Both documents are locked and re-read first: a note drained meanwhile
+	books only what it has left.
+	"""
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+	from erpnext import get_company_currency
+
+	company_currency = get_company_currency(invoice.company)
+	if (invoice.party_account_currency or invoice.currency) != company_currency:
+		# ponytail: ERPNext's own path books the exchange gain/loss a foreign-currency
+		# voucher needs - and needs a user with Journal Entry rights.
+		return _reconcile_with_erpnext(invoice, allocations)
+	applied, entries = 0.0, []
+	for row in allocations:
+		note_open = -flt(frappe.db.get_value("Sales Invoice", row["invoice"], "outstanding_amount", for_update=True), 2)
+		sale_open = flt(frappe.db.get_value("Sales Invoice", invoice_name, "outstanding_amount", for_update=True), 2)
+		amount = flt(min(flt(row["amount"], 2), note_open, sale_open), 2)
+		if amount <= 0:
+			frappe.throw(f"{row['invoice']} no longer holds credit to apply.")
+		entries.append(_credit_note_adjustment(invoice, row["invoice"], amount))
+		applied += amount
+	return {"applied": flt(applied, 2), "journal_entries": entries}
+
+
+def _credit_note_adjustment(invoice, note, amount):
+	"""ERPNext's reconcile_dr_cr_note entry for one voucher: the sale credited, the note debited,
+	both on the receivable account."""
+	from erpnext import get_default_cost_center
+	from frappe.utils import fmt_money, today
+
+	money = fmt_money(amount, currency=invoice.party_account_currency or invoice.currency)
+	row = {
+		"account": invoice.debit_to,
+		"party_type": "Customer",
+		"party": invoice.customer,
+		"reference_type": "Sales Invoice",
+		"cost_center": get_default_cost_center(invoice.company),
+		"exchange_rate": 1,
+	}
+	je = frappe.get_doc(
+		{
+			"doctype": "Journal Entry",
+			"voucher_type": "Credit Note",
+			"posting_date": today(),
+			"company": invoice.company,
+			"accounts": [
+				{**row, "credit_in_account_currency": amount, "reference_name": invoice.name,
+				 "user_remark": f"{money} against {invoice.name}"},
+				{**row, "debit_in_account_currency": amount, "reference_name": note,
+				 "user_remark": f"{money} from {note}"},
+			],
+		}
+	)
+	je.flags.ignore_permissions = True
+	je.flags.ignore_mandatory = True
+	je.flags.ignore_exchange_rate = True
+	je.flags.skip_remarks_creation = True
+	je.remark = None
+	je.is_system_generated = 1
+	je.insert()
+	je.submit()
+	return je.name
+
+
+def _reconcile_with_erpnext(invoice, allocations):
+	"""Reconcile each note against the submitted invoice - the desk tool's own path."""
+	invoice_name = invoice.name
 	before = {je.name for je in _adjustment_jes(invoice_name)}
 	applied = 0.0
 	for row in allocations:
@@ -212,8 +282,6 @@ def apply_customer_credit(invoice_name, allocations):
 		for a in pr.allocation:
 			a.allocated_amount = min(flt(a.allocated_amount, 2), flt(row["amount"], 2))
 		pr.reconcile()
-		# What actually got booked, not what was asked: a concurrently drained note
-		# reconciles less, and the caller reports that honestly.
 		applied += flt(sum(flt(a.allocated_amount) for a in pr.allocation), 2)
 	return {
 		"applied": flt(applied, 2),
