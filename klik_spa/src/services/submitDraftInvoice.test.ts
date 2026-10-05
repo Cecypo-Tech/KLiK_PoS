@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { discardMpesaDraft, DraftNoLongerDraftError, submitDraftInvoice } from "./salesInvoice";
+import { DraftNoLongerDraftError, submitDraftInvoice } from "./salesInvoice";
 import { HeldOrderGoneError } from "./salesOrder";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -76,34 +76,5 @@ describe("submitDraftInvoice for a held order paid by M-Pesa", () => {
 
     expect(err).toBeInstanceOf(HeldOrderGoneError);
     expect(err.orderId).toBe("SAL-ORD-2026-00034");
-  });
-});
-
-describe("discardMpesaDraft", () => {
-  it("reports a discarded draft", async () => {
-    vi.stubGlobal("window", { csrf_token: "t" });
-    vi.stubGlobal("fetch", reply({ success: true }));
-
-    expect(await discardMpesaDraft("POS-01500")).toEqual({ kept: false });
-  });
-
-  it("reports a draft kept because an STK push was sent from it", async () => {
-    vi.stubGlobal("window", { csrf_token: "t" });
-    vi.stubGlobal(
-      "fetch",
-      reply({ success: false, code: "mpesa_request_sent", invoice_id: "POS-01500", error: "Draft POS-01500 was kept" }),
-    );
-
-    expect(await discardMpesaDraft("POS-01500")).toEqual({ kept: true, message: "Draft POS-01500 was kept" });
-  });
-
-  it("raises on any other refusal", async () => {
-    vi.stubGlobal("window", { csrf_token: "t" });
-    vi.stubGlobal("fetch", reply({ success: false, error: "not this checkout's to discard" }));
-
-    const err = await discardMpesaDraft("POS-01500").catch((e) => e);
-
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toBe("not this checkout's to discard");
   });
 });

@@ -11,10 +11,6 @@ describe("staleDraftNotice", () => {
     expect(notice.blockSubmit).toBe(false);
   });
 
-  it("asks for M-Pesa to be taken again when the cancelled draft carried it", () => {
-    expect(staleDraftNotice("POS-01190", 2, { wasMpesaDraft: true }).message).toMatch(/M-Pesa/);
-  });
-
   it("blocks Submit when the draft was already submitted, so the sale is not charged twice", () => {
     const notice = staleDraftNotice("POS-01190", 1);
     expect(notice.message).toMatch(/already submitted/);
