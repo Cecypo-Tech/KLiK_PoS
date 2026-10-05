@@ -1,6 +1,8 @@
 import type { MpesaRegisterPayment } from "../services/mpesa";
 import { formatCurrencyWithSymbol } from "./currency";
 import { roundCurrency } from "./currencyMath";
+import { localDay } from "./dateRange";
+import { formatDateOnly } from "./time";
 
 export interface ReceiptCardState {
   kind: "new" | "open" | "other";
@@ -59,4 +61,20 @@ export function isMpesaPaymentMode(mode: { is_mpesa?: boolean; type?: string } |
 /** The note after a sale that left money on its M-Pesa receipt(s) for the customer's next sale. */
 export function receiptLeftoverMessage(amount: number, currencySymbol: string, who: string): string {
   return `${formatCurrencyWithSymbol(amount, currencySymbol)} stays on the M-Pesa receipt for ${who}'s next sale. No cash change is given for M-Pesa.`;
+}
+
+/**
+ * When the customer paid, for the receipt card: Safaricom's transtime ("YYYYMMDDHHmmss") as
+ * date and time, else the row's posting date. `today` says whether it is the till's today -
+ * an older receipt is more likely one a cashier should look at twice.
+ */
+export function receiptPaidAt(
+  payment: Pick<MpesaRegisterPayment, "transtime" | "posting_date">,
+  today: string = localDay(0),
+): { label: string; today: boolean } | null {
+  const t = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})\d{2}$/.exec(payment.transtime || "");
+  const day = t ? `${t[1]}-${t[2]}-${t[3]}` : (payment.posting_date || "").slice(0, 10);
+  if (!day) return null;
+  const label = t ? `${formatDateOnly(day)} ${t[4]}:${t[5]}` : formatDateOnly(day);
+  return { label, today: day === today };
 }

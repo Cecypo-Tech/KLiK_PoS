@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, receiptPaidAt, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -106,5 +106,29 @@ describe("receiptLeftoverMessage", () => {
     expect(receiptLeftoverMessage(6598, "Sh", "Walk In")).toBe(
       "Sh 6,598.00 stays on the M-Pesa receipt for Walk In's next sale. No cash change is given for M-Pesa.",
     );
+  });
+});
+
+describe("receiptPaidAt", () => {
+  it("reads Safaricom's transtime as the payment date and time", () => {
+    expect(receiptPaidAt({ transtime: "20261005125701", posting_date: "2026-10-04" }, "2026-10-05")).toEqual({
+      label: "Oct 5, 2026 12:57",
+      today: true,
+    });
+  });
+
+  it("marks a receipt from an earlier day as not today", () => {
+    expect(receiptPaidAt({ transtime: "20260618173837" }, "2026-10-05")?.today).toBe(false);
+  });
+
+  it("falls back to the posting date when transtime is not a full timestamp", () => {
+    expect(receiptPaidAt({ transtime: "120000", posting_date: "2026-10-05" }, "2026-10-05")).toEqual({
+      label: "Oct 5, 2026",
+      today: true,
+    });
+  });
+
+  it("shows nothing without either", () => {
+    expect(receiptPaidAt({}, "2026-10-05")).toBeNull();
   });
 });
