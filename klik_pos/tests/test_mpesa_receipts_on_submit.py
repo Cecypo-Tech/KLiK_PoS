@@ -9,6 +9,8 @@ End to end against the site's open shift, like test_checkout_payment_scenarios: 
 checkout commits, so cleanup cancels and deletes what each test made.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
@@ -335,6 +337,110 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 		self.assertTrue(result.get("success"), result)
 		self._assert_voucher_and_receipt_paid(response["invoice_name"], receipt, note)
 
+	# -- vouchers with an STK push ---------------------------------------------------------
+
+	def _stk_order_paid(self, amount):
+		"""A klik M-Pesa order for the cart, and a push from it the customer paid `amount` on."""
+		from klik_pos.api.mpesa_order import save_mpesa_order
+
+		saved = save_mpesa_order(
+			{"customer": {"id": CUSTOMER}, "items": self._items(), "paymentMethods": [], "businessType": "B2C", "status": "held"}
+		)
+		self.assertTrue(saved["success"], saved)
+		order = saved["order_name"]
+		push = frappe.get_doc(
+			{
+				"doctype": "Mpesa Express Request",
+				"name": f"_Test MEXP {frappe.generate_hash(length=8)}",
+				"docstatus": 1,
+				"status": "Completed",
+				"transaction_id": f"TX{frappe.generate_hash(length=8).upper()}",
+				"reference_doctype": "Sales Order",
+				"reference_name": order,
+				"account_reference": order,
+				"phone_number": "254700000777",
+				"currency": "KES",
+				"base_amount": amount,
+				"amount": amount,
+			}
+		)
+		push.db_insert()
+		frappe.db.commit()
+		self.addCleanup(_delete_push, push.name)
+		self.addCleanup(_remove, "Sales Order", order)
+		return order, push.name
+
+	def _stk_payload(self, push, amount, rows, background=False):
+		return {
+			"customer": {"id": CUSTOMER},
+			"items": self._items(),
+			"amountPaid": amount,
+			"paymentMethods": [{"method": self.mode, "amount": amount, "custom_reference_text": push}],
+			"businessType": "B2C",
+			"enable_background_invoice_submission": background,
+			"customerCredit": rows,
+		}
+
+	def _submit_order(self, order, push, payload):
+		from klik_pos.api.mpesa_order import submit_mpesa_order
+
+		with pos_profile_settings(self.pos_profile.name, allow_partial_payment=0):
+			result = submit_mpesa_order(order, data=payload)
+		if result.get("invoice_name"):
+			self.addCleanup(_remove, "Sales Invoice", result["invoice_name"])
+			self.addCleanup(_delete_push, push)  # first: it links to the invoice
+		frappe.db.commit()
+		return result
+
+	def test_a_voucher_and_an_stk_push_pay_together(self):
+		note = self._voucher(30)
+		pushed = flt(self._total() - 30, 2)
+		order, push = self._stk_order_paid(pushed)
+		rows = [{"invoice": note.name, "amount": 30}]
+
+		result = self._submit_order(order, push, self._stk_payload(push, pushed, rows))
+
+		self.assertTrue(result["success"], result)
+		self.assertEqual(flt(result["customer_credit"]["applied"], 2), 30)
+		invoice = frappe.get_doc("Sales Invoice", result["invoice_name"])
+		self.assertEqual(invoice.docstatus, 1)
+		self.assertEqual(flt(invoice.outstanding_amount), 0)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", note.name, "outstanding_amount")), 0)
+
+	def test_a_voucher_and_an_stk_push_pay_a_queued_sale(self):
+		note = self._voucher(30)
+		pushed = flt(self._total() - 30, 2)
+		order, push = self._stk_order_paid(pushed)
+		rows = [{"invoice": note.name, "amount": 30}]
+
+		with patch("frappe.enqueue") as enqueue:
+			result = self._submit_order(order, push, self._stk_payload(push, pushed, rows, background=True))
+		self.assertTrue(result["success"], result)
+		worker = [
+			c.kwargs for c in enqueue.call_args_list if c.args[:1] == ("klik_pos.api.sales_invoice.process_queued_sales_invoice",)
+		]
+		self.assertEqual([w.get("customer_credit") for w in worker], [rows], "the vouchers go to the worker")
+
+		with pos_profile_settings(self.pos_profile.name, allow_partial_payment=0):
+			done = process_queued_sales_invoice(result["invoice_name"], requested_by="Administrator", customer_credit=rows)
+		frappe.db.commit()
+
+		self.assertTrue(done.get("success"), done)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", result["invoice_name"], "outstanding_amount")), 0)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", note.name, "outstanding_amount")), 0)
+
+	def test_a_voucher_short_of_what_the_push_left_is_refused(self):
+		"""Without part payment, the push plus the voucher must cover the sale."""
+		note = self._voucher(10)
+		pushed = flt(self._total() - 30, 2)
+		order, push = self._stk_order_paid(pushed)
+
+		result = self._submit_order(order, push, self._stk_payload(push, pushed, [{"invoice": note.name, "amount": 10}]))
+
+		self.assertFalse(result["success"])
+		self.assertIn("Partial Payment", result.get("error", ""))
+		self.assertTrue(frappe.db.exists("Sales Order", order), "a refused sale keeps its order")
+
 
 def _remove(doctype, name):
 	if not name or not frappe.db.exists(doctype, name):
@@ -350,4 +456,10 @@ def _remove(doctype, name):
 def _delete_request(request_id):
 	if frappe.db.exists(CHECKOUT_REQUEST_DOCTYPE, request_id):
 		frappe.delete_doc(CHECKOUT_REQUEST_DOCTYPE, request_id, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+
+def _delete_push(name):
+	if frappe.db.exists("Mpesa Express Request", name):
+		frappe.db.delete("Mpesa Express Request", {"name": name})
 		frappe.db.commit()

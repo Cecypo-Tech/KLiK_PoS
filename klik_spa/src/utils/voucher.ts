@@ -152,24 +152,19 @@ export function labelVoucherAmounts(amounts: Record<string, number>, key: string
 
 /** Why this sale cannot carry vouchers right now, or null when it can - a bare phrase the
 dialog puts after "Vouchers removed:" or "Vouchers unavailable:". */
-export function vouchersBlockedReason(state: {
-  isCreditSale: boolean;
-  mpesaOrder: boolean;
-  editingDraft: boolean;
-}): string | null {
+export function vouchersBlockedReason(state: { isCreditSale: boolean; editingDraft: boolean }): string | null {
   if (state.isCreditSale) return "this is a credit sale";
-  if (state.mpesaOrder) return "this sale is an M-Pesa order";
   if (state.editingDraft) return "this sale is finishing an older draft";
   return null;
 }
 
 /**
- * Vouchers and an M-Pesa request (STK push) are not combined yet: the M-Pesa order path settles
- * no credit. Picked M-Pesa receipts go with the ordinary checkout and do combine.
+ * Why the vouchers cannot change now, or null. Once an M-Pesa request went out it asked the
+ * customer for what the vouchers left: a voucher added or resized after it would overpay the sale.
  */
-export function vouchersBlockMpesaReason(appliedCount: number): string | null {
-  return appliedCount > 0
-    ? "Vouchers can't be combined with an M-Pesa request yet - pick the customer's M-Pesa receipt instead, or take the rest in cash or card."
+export function vouchersLockedByPush(pushMethod: string | null | undefined): string | null {
+  return pushMethod
+    ? "Apply vouchers before sending the M-Pesa request - it already asked the customer for this amount."
     : null;
 }
 

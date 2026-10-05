@@ -2344,10 +2344,8 @@ def _queue_sales_invoice(data, source_order=None):
 
 		_validate_reserved_stock_for_items(doc)
 
-		# Customer credit: every row checked before anything persists; applied after
-		# submit. The in-memory marker exempts the sale-type cash gate only when the
-		# credit (plus any tender and picked receipts) fully covers the sale - at its
-		# rounded total, which is what the invoice's outstanding is built from.
+		# Customer credit: every row checked before anything persists; marked on the
+		# invoice once the receipts are on it (_reserve_checkout_credit), applied after submit.
 		credit_rows = validate_allocations(doc, data.get("customerCredit") or [])
 
 		if receipts:
@@ -2357,16 +2355,7 @@ def _queue_sales_invoice(data, source_order=None):
 			# receipt checkout never drew a receipt number.
 			attach_mpesa_receipts(doc, receipts)
 
-		if credit_rows:
-			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
-			# The receipts are allocated before submit and the credit settles after it: the
-			# allocation leaves the credit's share owing, or the credit would find nothing to pay.
-			doc._klik_credit_reserved = credit_sum
-			receipts_total = sum(flt(c.amount) for c in doc.get("custom_mpesa_reconciled_payments") or [])
-			if flt(flt(doc.paid_amount) + credit_sum + receipts_total, 2) >= flt(
-				doc.rounded_total or doc.grand_total, 2
-			):
-				doc._klik_customer_credit = credit_sum
+		_reserve_checkout_credit(doc, credit_rows)
 
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
@@ -2515,6 +2504,23 @@ def get_checkout_request_status(checkout_request_id):
 	# The lookup itself succeeded even when the checkout it describes did not.
 	response["success"] = True
 	return response
+
+
+def _reserve_checkout_credit(doc, credit_rows):
+	"""Mark the vouchers on the in-memory invoice before submit; they settle after it.
+
+	The receipts are allocated before submit, so they must leave the credit's share owing
+	(_klik_credit_reserved), or the credit would find nothing to pay. The full-payment check
+	counts the credit (_klik_customer_credit) only when it, the tender and the picked receipts
+	cover the sale - at its rounded total, which the invoice's outstanding is built from.
+	"""
+	if not credit_rows:
+		return
+	credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
+	doc._klik_credit_reserved = credit_sum
+	receipts_total = sum(flt(c.amount) for c in doc.get("custom_mpesa_reconciled_payments") or [])
+	if flt(flt(doc.paid_amount) + credit_sum + receipts_total, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
+		doc._klik_customer_credit = credit_sum
 
 
 def _apply_checkout_credit(doc, credit_rows):
@@ -5838,17 +5844,10 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 	remarks: the checkout's note, applied whether or not `data` comes - an M-Pesa sale paid
 	wholly from receipts sends no cart data, and a note typed after picking them must land.
 	"""
-	# This path has no customer-credit wiring (no validate, no apply). Refusing the
-	# payload outright beats silently dropping a tender the cashier watched being taken.
-	if data:
-		_payload = json.loads(data) if isinstance(data, str) else data
-		if isinstance(_payload, dict) and _payload.get("customerCredit"):
-			frappe.throw(
-				_(
-					"Customer credit cannot be used on this checkout path yet - remove the "
-					"credit tender, or ring the sale as a normal checkout."
-				)
-			)
+	# Customer credit (vouchers) works as in the ordinary checkout: checked against the
+	# rebuilt draft before submit, settled right after it (or by the queue worker).
+	_payload = (json.loads(data) if isinstance(data, str) else data) if data else {}
+	credit_rows = []
 
 	draft_touched = False
 	try:
@@ -6013,6 +6012,9 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 
 			invoice_doc.save(ignore_permissions=True)
 
+			credit_rows = validate_allocations(invoice_doc, _payload.get("customerCredit") or [])
+			_reserve_checkout_credit(invoice_doc, credit_rows)
+
 		if remarks is not None:
 			_apply_remarks(invoice_doc, {"remarks": remarks})
 
@@ -6049,6 +6051,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 				enqueue_after_commit=True,
 				invoice_name=invoice_doc.name,
 				requested_by=frappe.session.user,
+				customer_credit=credit_rows,
 			)
 
 			if held_order_id:
@@ -6109,6 +6112,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 				"message": f"Draft invoice {invoice_id} submitted successfully",
 				"invoice_name": invoice_doc.name,
 				"invoice": invoice_doc,
+				"customer_credit": _apply_checkout_credit(invoice_doc, credit_rows),
 			}
 			if mpesa_reconciliation:
 				response["mpesa_reconciliation"] = mpesa_reconciliation
