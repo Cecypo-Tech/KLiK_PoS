@@ -163,10 +163,13 @@ export function vouchersBlockedReason(state: {
   return null;
 }
 
-/** Vouchers and M-Pesa are not combined yet: the M-Pesa order and draft paths settle no credit. */
+/**
+ * Vouchers and an M-Pesa request (STK push) are not combined yet: the M-Pesa order path settles
+ * no credit. Picked M-Pesa receipts go with the ordinary checkout and do combine.
+ */
 export function vouchersBlockMpesaReason(appliedCount: number): string | null {
   return appliedCount > 0
-    ? "Vouchers can't be combined with M-Pesa yet - remove them, or take the rest in cash or card."
+    ? "Vouchers can't be combined with an M-Pesa request yet - pick the customer's M-Pesa receipt instead, or take the rest in cash or card."
     : null;
 }
 

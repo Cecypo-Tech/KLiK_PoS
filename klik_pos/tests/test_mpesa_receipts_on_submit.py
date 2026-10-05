@@ -21,6 +21,7 @@ from klik_pos.api.sales_invoice import (
 	queue_sales_invoice,
 	submit_draft_invoice,
 )
+from klik_pos.tests.credit_fixtures import make_credit_note
 from klik_pos.tests.mpesa_fixtures import make_c2b_payment
 from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode, pos_profile_settings
 
@@ -28,6 +29,7 @@ ITEM_GROUP = "TEST-RCPT-GROUP"
 ITEM_CODE = "TEST-RCPT-ITEM"
 CUSTOMER = "TEST-RCPT-CUSTOMER"
 OTHER_CUSTOMER = "TEST-RCPT-OTHER"
+SERVICE_ITEM = "TEST-RCPT-SERVICE"  # what the vouchers' credit notes were for
 
 
 def _ensure_customer(name):
@@ -89,6 +91,14 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 			)
 			item.insert(ignore_permissions=True)
 
+		if not frappe.db.exists("Item", SERVICE_ITEM):
+			item = frappe.new_doc("Item")
+			item.update(
+				{"item_code": SERVICE_ITEM, "item_name": SERVICE_ITEM, "item_group": ITEM_GROUP, "stock_uom": "Nos",
+				 "is_stock_item": 0, "is_sales_item": 1}
+			)
+			item.insert(ignore_permissions=True)
+
 		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 
 		cls.stock_entry = make_stock_entry(
@@ -107,7 +117,7 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 			_remove("Stock Entry", cls.stock_entry.name)
 			for name in frappe.get_all("Bin", filters={"item_code": ITEM_CODE}, pluck="name"):
 				frappe.delete_doc("Bin", name, force=True, ignore_permissions=True)
-			for doctype, name in (("Item", ITEM_CODE), ("Item Group", ITEM_GROUP)):
+			for doctype, name in (("Item", ITEM_CODE), ("Item", SERVICE_ITEM), ("Item Group", ITEM_GROUP)):
 				if frappe.db.exists(doctype, name):
 					frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
 			frappe.db.commit()
@@ -271,6 +281,59 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 
 		self.assertTrue(response["success"], response.get("error"))
 		self._assert_paid_by(name, receipt, self._total())
+
+	# -- with vouchers -----------------------------------------------------------------------
+
+	def _voucher(self, amount):
+		"""A credit note worth `amount` to the customer; removed after the sale that used it."""
+		note = make_credit_note(CUSTOMER, self.company, amount, item=SERVICE_ITEM)
+		original = note.return_against
+		entry = frappe.db.get_value(
+			"Payment Entry Reference", {"reference_name": original, "docstatus": 1}, "parent"
+		)
+		frappe.db.commit()
+		self.addCleanup(_remove, "Sales Invoice", original)
+		self.addCleanup(_remove, "Payment Entry", entry)
+		self.addCleanup(_remove, "Sales Invoice", note.name)
+		return note
+
+	def _assert_voucher_and_receipt_paid(self, invoice_name, receipt, note):
+		"""The receipt covers what the voucher leaves, and the voucher settled its part."""
+		voucher = -flt(note.grand_total)
+		invoice = self._assert_paid_by(invoice_name, receipt, self._total() - voucher)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", note.name, "outstanding_amount")), 0)
+		return invoice
+
+	def test_a_voucher_and_a_receipt_pay_together(self):
+		note = self._voucher(30)
+		receipt = self._receipt(5000)
+		payload = self._payload([receipt])
+		payload["customerCredit"] = [{"invoice": note.name, "amount": 30}]
+
+		response = self._sell(payload)
+
+		self.assertTrue(response["success"], response.get("message"))
+		self.assertEqual(flt(response["customer_credit"]["applied"], 2), 30)
+		self.assertIsNone(response["customer_credit"]["warning"])
+		self._assert_voucher_and_receipt_paid(response["invoice_name"], receipt, note)
+
+	def test_a_voucher_and_a_receipt_pay_a_queued_sale(self):
+		note = self._voucher(30)
+		receipt = self._receipt(5000)
+		rows = [{"invoice": note.name, "amount": 30}]
+		payload = self._payload([receipt], background=True)
+		payload["customerCredit"] = rows
+
+		response = self._sell(payload)
+		self.assertTrue(response["success"], response.get("message"))
+		with pos_profile_settings(self.pos_profile.name, allow_partial_payment=0):
+			result = process_queued_sales_invoice(
+				response["invoice_name"], requested_by="Administrator", customer_credit=rows
+			)
+		frappe.db.commit()
+
+		self.assertTrue(result.get("success"), result)
+		self._assert_voucher_and_receipt_paid(response["invoice_name"], receipt, note)
 
 
 def _remove(doctype, name):
