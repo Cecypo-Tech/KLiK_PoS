@@ -33,6 +33,8 @@ export interface MpesaRegisterPayment {
   transamount: number;
   transid?: string;
   msisdn?: string;
+  /** Safaricom's payment time, "YYYYMMDDHHmmss". */
+  transtime?: string;
   posting_date?: string;
   billrefnumber?: string;
   businessshortcode?: string;

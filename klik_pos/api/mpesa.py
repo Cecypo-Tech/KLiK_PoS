@@ -293,7 +293,7 @@ def get_mpesa_payments(
 		rows = frappe.db.sql(
 			f"""
 			SELECT reg.name, reg.full_name, reg.transamount, reg.transid, reg.msisdn,
-				reg.posting_date, reg.billrefnumber, reg.businessshortcode, reg.creation
+				reg.transtime, reg.posting_date, reg.billrefnumber, reg.businessshortcode, reg.creation
 			FROM `tabMpesa C2B Payment Register` reg
 			LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
 			WHERE {has_money_left}

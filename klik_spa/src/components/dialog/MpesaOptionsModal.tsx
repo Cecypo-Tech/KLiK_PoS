@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import type { MpesaRegisterPayment } from "../../services/mpesa";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
-import { formatDateOnly } from "../../utils/time";
-import { receiptCardState } from "../../utils/mpesaReceipts";
+import { receiptCardState, receiptPaidAt } from "../../utils/mpesaReceipts";
 import { canSendStk } from "../../utils/stkAutoSubmit";
 
 interface MpesaOptionsModalProps {
@@ -168,6 +167,7 @@ export default function MpesaOptionsModal({
               {payments.map((payment) => {
                   const checked = selectedPaymentNames.includes(payment.name);
                   const card = receiptCardState(payment);
+                  const paidAt = receiptPaidAt(payment);
                   return (
                     <label
                       key={payment.name}
@@ -205,8 +205,14 @@ export default function MpesaOptionsModal({
                           </div>
                           <div className="flex items-center justify-between gap-3">
                             <span className="truncate">{payment.billrefnumber || "No reference"}</span>
-                            {payment.posting_date && (
-                              <span className="whitespace-nowrap">{formatDateOnly(payment.posting_date)}</span>
+                            {paidAt && (
+                              <span
+                                className={`whitespace-nowrap ${
+                                  paidAt.today ? "text-emerald-600 dark:text-emerald-400" : "text-orange-600 dark:text-orange-400"
+                                }`}
+                              >
+                                {paidAt.label}
+                              </span>
                             )}
                           </div>
                           {card.kind === "other" && (
