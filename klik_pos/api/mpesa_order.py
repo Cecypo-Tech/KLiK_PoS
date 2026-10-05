@@ -335,14 +335,17 @@ def _receipt_used(push_name):
 	names = frappe.get_all(REGISTER, filters={"transid": transid}, pluck="name")
 	rows = (
 		frappe.db.sql(
-			f"SELECT docstatus, payment_entry FROM `tab{REGISTER}` WHERE name IN %(names)s FOR UPDATE",
+			f"SELECT payment_entry FROM `tab{REGISTER}` WHERE name IN %(names)s FOR UPDATE",
 			{"names": tuple(names)},
 			as_dict=True,
 		)
 		if names
 		else []
 	)
-	if any(row.docstatus != 0 or row.payment_entry for row in rows) or _klik_entry_for_transid(transid):
+	# Spent elsewhere means a Payment Entry: every path that spends a receipt (klik's receipt
+	# pick, the register's own submit, the desk's quick pay) makes one. A row submitted without
+	# one is this push's own - frappe_mpsa_payments consumes it so it is not offered again.
+	if any(row.payment_entry for row in rows) or _klik_entry_for_transid(transid):
 		return transid
 	for name in names:
 		frappe.db.set_value(REGISTER, name, "modified", now_datetime(), update_modified=False)

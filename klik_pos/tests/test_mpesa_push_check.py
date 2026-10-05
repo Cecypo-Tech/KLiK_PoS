@@ -304,7 +304,7 @@ class TestThePushReceipt(PushCase):
 			"paymentMethods": [{"method": "Mpesa-Test", "amount": 450, "custom_reference_text": self.push}]
 		}
 
-		for field, used in (("docstatus", 1), ("payment_entry", "_Test PE used elsewhere")):
+		for field, used in (("payment_entry", "_Test PE used elsewhere"),):
 			with self.subTest(field=field):
 				frappe.db.set_value(REGISTER, receipt, field, used)
 				with (
@@ -319,6 +319,25 @@ class TestThePushReceipt(PushCase):
 				self.assertFalse(result["success"])
 				self.assertEqual(result.get("code"), "mpesa_receipt_used", result)
 				self.assertIn(transid, result["error"])
+
+	def test_the_push_s_own_consumed_receipt_does_not_stop_its_sale(self):
+		"""frappe_mpsa_payments submits a paid push's register row, with no Payment Entry, so it
+		cannot be offered again (FAC.Allparts, 2026-10-05: SO-00368 and SO-00369 refused as
+		"already used by another sale" by their own receipt)."""
+		receipt = self._receipt()
+		frappe.db.set_value(EXPRESS, self.push, "transaction_id", self._transid(receipt))
+		frappe.db.set_value(REGISTER, receipt, {"docstatus": 1, "submit_payment": 0})
+		data = {
+			"paymentMethods": [{"method": "Mpesa-Test", "amount": 450, "custom_reference_text": self.push}]
+		}
+
+		self.assertIsNone(mpesa_order._receipt_used(self.push))
+		with (
+			_at_till(),
+			patch.object(mpesa_order, "_create_invoice_draft", side_effect=RuntimeError("rang up the sale")),
+		):
+			result = mpesa_order.submit_mpesa_order(self.order, data=data)
+		self.assertEqual(result.get("error"), "rang up the sale", result)
 
 	def _consume(self, register):
 		"""The receipt path a till with a stale search result takes: mint its Payment Entry."""
