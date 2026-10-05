@@ -489,7 +489,13 @@ export const CustomerSearchSection = ({
           ? window.innerHeight - buttonRef.current.getBoundingClientRect().top + 8
           : undefined,
         left: buttonRef.current ? buttonRef.current.getBoundingClientRect().left : 0,
-        width: buttonRef.current ? buttonRef.current.getBoundingClientRect().width : 360,
+        // Wider than the box when there is room: a row's phone | email | PIN | town is one line.
+        width: buttonRef.current
+          ? Math.min(
+              Math.max(buttonRef.current.getBoundingClientRect().width, 440),
+              window.innerWidth - buttonRef.current.getBoundingClientRect().left - 8,
+            )
+          : 360,
         zIndex: 999999,
       }}
       className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in duration-200"
@@ -554,17 +560,12 @@ export const CustomerSearchSection = ({
                           {badge.label}
                         </span>
                       )}
-                      {customer.taxId && (
-                        <span className="ml-auto shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
-                          PIN: {customer.taxId}
-                        </span>
-                      )}
                       {isSelected && (
-                        <Check className={`w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-blue-400 ${customer.taxId ? "" : "ml-auto"}`} />
+                        <Check className="w-3.5 h-3.5 shrink-0 ml-auto text-blue-600 dark:text-blue-400" />
                       )}
                     </div>
                     {customerRowDetails(customer) && (
-                      <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                      <div className="mt-1 truncate text-xs tracking-tight text-gray-500 dark:text-gray-400" title={customerRowDetails(customer)}>
                         {customerRowDetails(customer)}
                       </div>
                     )}
