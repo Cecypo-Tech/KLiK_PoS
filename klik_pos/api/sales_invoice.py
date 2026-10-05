@@ -2282,7 +2282,8 @@ def _queue_sales_invoice(data, source_order=None):
 		if not items or len(items) == 0:
 			frappe.throw("At least one item is required")
 
-		if not flt(amount_paid) and not loyalty_redemption and not data.get("customerCredit"):
+		receipts = _picked_receipts(data)
+		if not flt(amount_paid) and not loyalty_redemption and not data.get("customerCredit") and not receipts:
 			# Nothing taken yet (a credit sale). The preview split the cart the cashier showed;
 			# if stock has moved since, billing a different split would go unseen - refuse it.
 			# A paid sale is not re-split at all: its money was taken against the preview.
@@ -2342,6 +2343,17 @@ def _queue_sales_invoice(data, source_order=None):
 			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
 			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
 				doc._klik_customer_credit = credit_sum
+
+		if receipts:
+			if credit_rows:
+				# The receipts are allocated against what payments and advances leave owing;
+				# vouchers settle after submit and would be counted twice. The till blocks this.
+				frappe.throw(_("M-Pesa receipts and customer credit cannot pay the same sale."))
+			from klik_pos.api.mpesa import attach_mpesa_receipts
+
+			# Picked at checkout, recorded only now: the click wrote nothing, so an abandoned
+			# receipt checkout never drew a receipt number.
+			attach_mpesa_receipts(doc, receipts)
 
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
@@ -2413,6 +2425,14 @@ def _queue_sales_invoice(data, source_order=None):
 			if tax_id:
 				doc.db_set("tax_id", tax_id)
 
+			# Payment-Entry-first M-Pesa, as the queue worker does it: the receipts become
+			# advances before submit and are reconciled and consumed after.
+			mpesa_allocation = mpesa_reconciliation = None
+			if doc.get("custom_mpesa_reconciled_payments"):
+				from klik_pos.api.mpesa import _allocate_receipts_before_submit
+
+				mpesa_allocation = _allocate_receipts_before_submit(doc)
+
 			_apply_klik_invoice_flags(doc, is_submitted=True)
 			_enforce_submit_permission(doc)
 			doc.submit()
@@ -2425,6 +2445,11 @@ def _queue_sales_invoice(data, source_order=None):
 					frappe.get_traceback(),
 					f"Failed to cancel reservations after submit for {doc.name}",
 				)
+
+			if doc.get("custom_mpesa_reconciled_payments"):
+				from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
+
+				mpesa_reconciliation = _finalize_mpesa_reconciliation(doc, mpesa_allocation)
 
 			_finalize_submitted_invoice(
 				doc,
@@ -2447,6 +2472,7 @@ def _queue_sales_invoice(data, source_order=None):
 				"invoice": _get_invoice_response_summary(doc),
 				"payment_entry": None,
 				"customer_credit": credit_result,
+				"mpesa_reconciliation": mpesa_reconciliation,
 				"processing_time": round(processing_time, 2),
 			}
 
@@ -3060,6 +3086,9 @@ def parse_invoice_data(data):
 		and checkout_status != "held"
 		and has_positive_priced_item
 		and not loyalty_redemption
+		# Picked M-Pesa receipts pay as advances at submit, where validate_full_payment
+		# checks they cover the sale.
+		and not _picked_receipts(data)
 	):
 		if (
 			flt(amount_paid or 0) <= 0 or not _has_positive_payment_amount(mode_of_payment)
@@ -4442,6 +4471,14 @@ def _populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=False):
 				"included_in_print_rate": included_in_print_rate,
 			},
 		)
+
+def _picked_receipts(data):
+	"""The checkout's M-Pesa receipt picks ({"mode_of_payment", "payments"}), or None."""
+	receipts = (data or {}).get("mpesaReceipts")
+	if isinstance(receipts, str):
+		receipts = json.loads(receipts)
+	return receipts if receipts and receipts.get("payments") else None
+
 
 def _add_payment_entries(doc, mode_of_payment):
 	"""Add payment entries to the invoice."""
@@ -5948,6 +5985,11 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 			# so ERPNext includes both payment rows and loyalty redemption in paid/outstanding amounts.
 			invoice_doc.set("payments", [])
 			_add_payment_entries(invoice_doc, mode_of_payment)
+			receipts = _picked_receipts(_payload)
+			if receipts:
+				from klik_pos.api.mpesa import attach_mpesa_receipts
+
+				attach_mpesa_receipts(invoice_doc, receipts)
 			invoice_doc.calculate_taxes_and_totals()
 
 			invoice_doc.save(ignore_permissions=True)

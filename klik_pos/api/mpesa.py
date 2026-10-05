@@ -23,6 +23,7 @@ one bank line — any overpaid remainder simply stays unallocated on that same
 entry rather than becoming a separate credit voucher.
 """
 
+import json
 from contextlib import contextmanager
 
 import frappe
@@ -396,47 +397,7 @@ def process_mpesa(
 			)
 		)
 
-	names = [n.strip() for n in (mpesa_payments or "").split(",") if n.strip()]
-	if not names:
-		frappe.throw(_("No Mpesa register payments were selected."))
-
-	duplicates = sorted({n for n in names if names.count(n) > 1})
-	if duplicates:
-		frappe.throw(
-			_("The same Mpesa register payment was selected more than once: {0}").format(
-				", ".join(duplicates)
-			)
-		)
-
-	on_invoice = {c.mpesa_c2b_payment_register for c in invoice.get("custom_mpesa_reconciled_payments") or []}
-	picked = []
-	invalid = []
-	for name in names:
-		if not frappe.db.exists("Mpesa C2B Payment Register", name):
-			invalid.append(_("{0} (not found)").format(name))
-			continue
-		bal = _receipt_balance(name)
-		label = bal.transid or name
-		if name in on_invoice:
-			invalid.append(_("{0} (already on this invoice)").format(label))
-		elif bal.state == "spent":
-			invalid.append(_("{0} (nothing left on it)").format(label))
-		elif bal.state not in ("new", "open"):
-			invalid.append(
-				_("{0} (cannot be used: cancelled, or its Payment Entry is not a submitted customer receipt)").format(
-					label
-				)
-			)
-		elif bal.held_by and bal.held_by != invoice.customer:
-			invalid.append(
-				_("{0} (held by {1}; switch the sale to that customer to use it)").format(label, bal.held_by)
-			)
-		else:
-			picked.append((frappe.get_doc("Mpesa C2B Payment Register", name), bal))
-
-	if invalid:
-		frappe.throw(_("Cannot use these M-Pesa receipts: {0}").format("; ".join(invalid)))
-
+	picked = _checked_receipts(_names(mpesa_payments), invoice.customer, _receipts_on(invoice))
 	total_amount = sum(flt(bal.open_amount) for _row, bal in picked)
 
 	payments_added = [
@@ -446,18 +407,7 @@ def process_mpesa(
 
 	# Traceability only: a new receipt's register row stays a draft until the invoice is
 	# submitted (see `_finalize_mpesa_reconciliation`); an open one already names its entry.
-	for row, bal in picked:
-		invoice.append(
-			"custom_mpesa_reconciled_payments",
-			{
-				"mpesa_c2b_payment_register": row.name,
-				"transid": row.transid,
-				"amount": bal.open_amount,
-				"msisdn": row.msisdn,
-				"mode_of_payment": mode_of_payment,
-				"payment_entry": bal.payment_entry,
-			},
-		)
+	_append_receipt_rows(invoice, picked, mode_of_payment)
 
 	invoice.save()
 
@@ -477,6 +427,116 @@ def process_mpesa(
 		result["mpesa_reconciliation"] = _finalize_mpesa_reconciliation(invoice, embed_summary)
 
 	return result
+
+
+def _receipts_on(invoice) -> set[str]:
+	return {c.mpesa_c2b_payment_register for c in invoice.get("custom_mpesa_reconciled_payments") or []}
+
+
+def _checked_receipts(names: list[str], customer: str, on_invoice: set[str] = frozenset()) -> list:
+	"""The picked receipts as (register row, balance), or a refusal naming every bad one.
+
+	The one check behind the pick (check_mpesa_receipts, process_mpesa) and the submit
+	(attach_mpesa_receipts): a receipt picked minutes ago may have been spent at another
+	till since, or the sale switched to a customer the receipt is not held for.
+	"""
+	if not names:
+		frappe.throw(_("No Mpesa register payments were selected."))
+
+	duplicates = sorted({n for n in names if names.count(n) > 1})
+	if duplicates:
+		frappe.throw(
+			_("The same Mpesa register payment was selected more than once: {0}").format(
+				", ".join(duplicates)
+			)
+		)
+
+	picked = []
+	invalid = []
+	for name in names:
+		if not frappe.db.exists("Mpesa C2B Payment Register", name):
+			invalid.append(_("{0} (not found)").format(name))
+			continue
+		bal = _receipt_balance(name)
+		label = bal.transid or name
+		if name in on_invoice:
+			invalid.append(_("{0} (already on this invoice)").format(label))
+		elif bal.state == "spent":
+			invalid.append(_("{0} (nothing left on it)").format(label))
+		elif bal.state not in ("new", "open"):
+			invalid.append(
+				_("{0} (cannot be used: cancelled, or its Payment Entry is not a submitted customer receipt)").format(
+					label
+				)
+			)
+		elif bal.held_by and bal.held_by != customer:
+			invalid.append(
+				_("{0} (held by {1}; switch the sale to that customer to use it)").format(label, bal.held_by)
+			)
+		else:
+			picked.append((frappe.get_doc("Mpesa C2B Payment Register", name), bal))
+
+	if invalid:
+		frappe.throw(_("Cannot use these M-Pesa receipts: {0}").format("; ".join(invalid)))
+	return picked
+
+
+def _append_receipt_rows(invoice, picked: list, mode_of_payment: str) -> None:
+	for row, bal in picked:
+		invoice.append(
+			"custom_mpesa_reconciled_payments",
+			{
+				"mpesa_c2b_payment_register": row.name,
+				"transid": row.transid,
+				"amount": bal.open_amount,
+				"msisdn": row.msisdn,
+				"mode_of_payment": mode_of_payment,
+				"payment_entry": bal.payment_entry,
+			},
+		)
+
+
+def _names(mpesa_payments) -> list[str]:
+	if isinstance(mpesa_payments, str):
+		mpesa_payments = mpesa_payments.split(",")
+	return [str(n).strip() for n in mpesa_payments or [] if str(n).strip()]
+
+
+@frappe.whitelist()
+def check_mpesa_receipts(customer: str, mpesa_payments) -> dict:
+	"""The checkout's receipt pick: refuse what cannot pay this customer's sale, write nothing.
+
+	The picks travel with the submit (attach_mpesa_receipts), so no invoice - and no receipt
+	number - exists until the sale is actually submitted.
+	"""
+	picked = _checked_receipts(_names(mpesa_payments), customer)
+	return {
+		"payments": [
+			{"name": row.name, "transid": row.transid, "amount": flt(bal.open_amount)} for row, bal in picked
+		]
+	}
+
+
+def attach_mpesa_receipts(invoice, receipts) -> None:
+	"""Record the checkout's picked receipts on the invoice about to be submitted.
+
+	`receipts` is the submit payload's {"mode_of_payment", "payments": [register names]}.
+	Re-checked here against the invoice's own customer. A zero payment row for the mode keeps
+	ERPNext's "at least one mode of payment" rule satisfied until the allocation (which keeps
+	that row) turns the receipts into advances.
+	"""
+	if isinstance(receipts, str):
+		receipts = json.loads(receipts)
+	mode = (receipts or {}).get("mode_of_payment")
+	names = _names((receipts or {}).get("payments"))
+	if not names:
+		return
+	if not mode:
+		frappe.throw(_("The M-Pesa receipts came without a mode of payment."))
+	picked = _checked_receipts(names, invoice.customer, _receipts_on(invoice))
+	_append_receipt_rows(invoice, picked, mode)
+	if mode not in {p.mode_of_payment for p in invoice.get("payments") or []}:
+		invoice.append("payments", {"mode_of_payment": mode, "amount": 0})
 
 
 def _pending_mpesa_rows(invoice) -> list:
