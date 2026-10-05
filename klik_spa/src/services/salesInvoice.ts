@@ -393,29 +393,3 @@ export async function submitDraftInvoice(
   return result.message;
 }
 
-/**
- * Remove the draft M-Pesa checkout made, when the cashier leaves without finishing the sale.
- * kept: the server refused because an STK push was sent from it - a payment still on its way
- * (or already made) needs that invoice.
- */
-export async function discardMpesaDraft(invoiceId: string): Promise<{ kept: false } | { kept: true; message: string }> {
-  const response = await fetch('/api/method/klik_pos.api.sales_invoice.discard_mpesa_draft', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Frappe-CSRF-Token': window.csrf_token
-    },
-    body: JSON.stringify({ invoice_id: invoiceId }),
-    credentials: 'include'
-  });
-
-  const result = await response.json();
-
-  if (result.message?.code === 'mpesa_request_sent') {
-    return { kept: true, message: result.message.error };
-  }
-  if (!response.ok || !result.message || result.message.success === false) {
-    throw new Error(extractErrorMessage(result, result.message?.error || 'Failed to discard draft invoice'));
-  }
-  return { kept: false };
-}

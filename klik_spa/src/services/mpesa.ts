@@ -136,36 +136,26 @@ export async function fetchMpesaRegisterPayments(params: {
   return result.message as MpesaPaymentsResponse;
 }
 
-export async function processKlikPosMpesaPayments(payload: {
-  doctype: string;
-  invoice_name: string;
+/** The receipt pick: the server refuses what cannot pay this customer's sale and writes nothing. */
+export async function checkMpesaReceipts(payload: {
   customer: string;
-  mpesa_payments: string;
-  mode_of_payment: string;
-  auto_save?: 0 | 1;
-  auto_submit?: 0 | 1;
-}) {
-  const csrfToken = window.csrf_token;
-  const response = await fetch(
-    "/api/method/klik_pos.api.mpesa.process_mpesa",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Frappe-CSRF-Token": csrfToken,
-      },
-      body: JSON.stringify(payload),
-      credentials: "include",
-    }
-  );
+  mpesa_payments: string[];
+}): Promise<Array<{ name: string; transid: string; amount: number }>> {
+  const response = await fetch("/api/method/klik_pos.api.mpesa.check_mpesa_receipts", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Frappe-CSRF-Token": window.csrf_token,
+    },
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
 
   const result = await response.json();
-  if (!response.ok || !result.message || result.message.success !== true) {
-    const errorMessage = extractErrorMessage(result, "Failed to reconcile Mpesa payments");
-    throw new Error(errorMessage);
+  if (!response.ok || !result.message?.payments) {
+    throw new Error(extractErrorMessage(result, "Failed to check the M-Pesa payments"));
   }
-
-  return result.message as MpesaQuickPayResponse;
+  return result.message.payments;
 }
 
 export async function fetchKlikPosStkStatus(requestName: string) {

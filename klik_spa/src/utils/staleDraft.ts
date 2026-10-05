@@ -13,15 +13,10 @@ export interface StaleDraftNotice {
  * Submit whose reply was lost - so Submit stays blocked. Anything unrecognised is treated
  * as submitted, the side that cannot charge twice.
  */
-export function staleDraftNotice(
-  invoiceId: string,
-  docstatus: number,
-  { wasMpesaDraft = false }: { wasMpesaDraft?: boolean } = {},
-): StaleDraftNotice {
+export function staleDraftNotice(invoiceId: string, docstatus: number): StaleDraftNotice {
   if (docstatus === 2) {
-    const mpesa = wasMpesaDraft ? " The M-Pesa payment on it was cleared; take or reconcile it again." : "";
     return {
-      message: `${invoiceId} was cancelled outside the POS.${mpesa} Submit again to ring this sale up as a new invoice.`,
+      message: `${invoiceId} was cancelled outside the POS. Submit again to ring this sale up as a new invoice.`,
       level: "warning",
       blockSubmit: false,
     };

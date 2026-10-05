@@ -35,13 +35,15 @@ export function uncoveredMpesa(mpesaAmount: number, receiptsOpenTotal: number, s
 }
 
 /**
- * What a receipt-paid draft sends on submit. Money the cashier took besides the receipts
- * (cash added after the pick) must reach the invoice, so those rows go; when the receipts
- * pay the whole sale there are none, and an empty payments list would be refused as a cash
- * sale with no payment - then nothing is sent and the draft keeps what it has.
+ * The receipts picked at checkout, as the submit carries them. The pick itself writes nothing:
+ * the server records them on the invoice only when the sale is submitted, so an abandoned
+ * receipt checkout uses no invoice number.
  */
-export function receiptDraftSubmitData<T extends { paymentMethods: Array<Record<string, unknown>> }>(data: T): T | undefined {
-  return data.paymentMethods.some((p) => Number(p.amount) > 0) ? data : undefined;
+export function receiptPicksPayload(
+  flow: { source: "stk" | "c2b"; modeOfPayment: string; c2bPayments?: Array<{ name: string }> } | null,
+): { mode_of_payment: string; payments: string[] } | null {
+  if (flow?.source !== "c2b" || !flow.c2bPayments?.length) return null;
+  return { mode_of_payment: flow.modeOfPayment, payments: flow.c2bPayments.map((p) => p.name) };
 }
 
 /**

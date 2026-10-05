@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptDraftSubmitData, receiptLeftoverMessage, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -73,18 +73,17 @@ describe("uncoveredMpesa", () => {
   });
 });
 
-describe("receiptDraftSubmitData", () => {
-  const data = (amounts: number[]) => ({ customer: "Walk In", paymentMethods: amounts.map((amount) => ({ method: "Cash", amount })) });
-
-  it("sends the other payment rows when the cashier took money besides the receipts", () => {
-    const d = data([800]);
-    expect(receiptDraftSubmitData(d)).toBe(d);
+describe("receiptPicksPayload", () => {
+  it("carries the picked receipts and their mode to the submit", () => {
+    expect(
+      receiptPicksPayload({ source: "c2b", modeOfPayment: "Mpesa-1", c2bPayments: [{ name: "R1" }, { name: "R2" }] }),
+    ).toEqual({ mode_of_payment: "Mpesa-1", payments: ["R1", "R2"] });
   });
 
-  it("sends nothing when the receipts pay the whole sale, so the draft keeps what it has", () => {
-    // An empty payments list would be refused as "a cash sale with no payment".
-    expect(receiptDraftSubmitData(data([]))).toBeUndefined();
-    expect(receiptDraftSubmitData(data([0]))).toBeUndefined();
+  it("carries nothing for an STK push or before any pick", () => {
+    expect(receiptPicksPayload(null)).toBeNull();
+    expect(receiptPicksPayload({ source: "stk", modeOfPayment: "Mpesa-1" })).toBeNull();
+    expect(receiptPicksPayload({ source: "c2b", modeOfPayment: "Mpesa-1", c2bPayments: [] })).toBeNull();
   });
 });
 
