@@ -31,7 +31,9 @@ import { formatCurrencyWithSymbol } from "../utils/currency";
 import { closingStats } from "../utils/closingSummary";
 import { useClosingSummary } from "../hooks/useClosingSummary";
 import { bankingError, closingBalancePayload, floatModeNames } from "../utils/closingBanking";
-import { isToday, isThisWeek, isThisMonth, isThisYear, formatDateTime, toSortableTimestamp } from "../utils/time";
+import { formatDateTime, toSortableTimestamp } from "../utils/time";
+import { inDateRange } from "../utils/dateRange";
+import { DateRangeFilter } from "../components/DateRangeFilter";
 import { clearAllCache } from "../utils/clearCache";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -43,7 +45,8 @@ export default function ClosingShiftPage() {
   const isMobile = useMediaQuery("(max-width: 1024px)");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [selectedInvoice] = useState<SalesInvoice | null>(null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -96,37 +99,7 @@ export default function ClosingShiftPage() {
     void fetchHeldOrders();
   }, [fetchHeldOrders]);
 
-  const filterInvoiceByDate = (invoiceDateStr: string) => {
-    if (dateFilter === "all") return true;
-    if (dateFilter === "today") {
-      return isToday(invoiceDateStr);
-    }
-
-    if (dateFilter === "yesterday") {
-      const yesterday = new Date();
-      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-      const invoiceDate = new Date(invoiceDateStr);
-      return (
-        invoiceDate.getUTCFullYear() === yesterday.getUTCFullYear() &&
-        invoiceDate.getUTCMonth() === yesterday.getUTCMonth() &&
-        invoiceDate.getUTCDate() === yesterday.getUTCDate()
-      );
-    }
-
-    if (dateFilter === "week") {
-      return isThisWeek(invoiceDateStr);
-    }
-
-    if (dateFilter === "month") {
-      return isThisMonth(invoiceDateStr);
-    }
-
-    if (dateFilter === "year") {
-      return isThisYear(invoiceDateStr);
-    }
-
-    return true;
-  };
+  const filterInvoiceByDate = (invoiceDateStr: string) => inDateRange(invoiceDateStr, fromDate, toDate);
 
   const getStatusBadge = (status: string) => {
     const baseClasses = "px-2 py-1 rounded-full text-xs font-medium";
@@ -190,7 +163,7 @@ export default function ClosingShiftPage() {
       return matchesSearch && matchesPayment && matchesStatus && matchesDate && matchesPOSProfile && matchesOpeningEntry;
     });
 
-  }, [invoices, searchQuery, statusFilter, dateFilter, paymentFilter, isLoading, error, posDetails]);
+  }, [invoices, searchQuery, statusFilter, fromDate, toDate, paymentFilter, isLoading, error, posDetails]);
 
   const { sortedData: sortedInvoices, sortKey: invoiceSortKey, sortDirection: invoiceSortDirection, toggleSort: toggleInvoiceSort } = useTableSort(
     filteredInvoices,
@@ -556,19 +529,15 @@ export default function ClosingShiftPage() {
                   className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
-              <select
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-
-                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              >
-                <option value="all">All Time</option>
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="year">This Year</option>
-              </select>
+              <DateRangeFilter
+                from={fromDate}
+                to={toDate}
+                onChange={(from, to) => {
+                  setFromDate(from);
+                  setToDate(to);
+                }}
+                size="py-2"
+              />
 
               <select
                 value={statusFilter}
@@ -954,18 +923,16 @@ export default function ClosingShiftPage() {
                   className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
-              <select
-                    value={dateFilter}
-                    onChange={(e) => setDateFilter(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="all">All Time</option>
-                    <option value="today">Today</option>
-                    <option value="yesterday">Yesterday</option>
-                    <option value="week">This Week</option>
-                    <option value="month">This Month</option>
-                    <option value="year">This Year</option>
-                  </select>
+              <DateRangeFilter
+                from={fromDate}
+                to={toDate}
+                onChange={(from, to) => {
+                  setFromDate(from);
+                  setToDate(to);
+                }}
+                size="py-2"
+                className="md:col-span-4 lg:col-span-5 md:order-last"
+              />
 
               <select
                 value={statusFilter}
