@@ -33,6 +33,7 @@ import {
   appliedFromReceipts,
   isMpesaPaymentMode,
   receiptPicksPayload,
+  tenderSent,
   receiptLeftoverMessage,
   uncoveredMpesa,
 } from "../../utils/mpesaReceipts";
@@ -378,7 +379,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // settle no credit, so the figures must stop counting them.
   const vouchersBlocked = vouchersBlockedReason({
     isCreditSale,
-    mpesaOrder: Boolean(mpesaOrderName || receiptPicksPayload(mpesaFlow)),
+    mpesaOrder: Boolean(mpesaOrderName),
     editingDraft: Boolean(getOriginalDraftInvoiceId()),
   });
   useEffect(() => {
@@ -984,15 +985,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     // and reaches the server as customerCredit allocations settled after submit.
     // Draft and M-Pesa-order submits have no credit wiring server-side, so those
     // flows carry no credit at all - the tender is hidden and zeroed for them too.
-    const creditFlowBlocked = Boolean(
-      mpesaOrderName || receiptPicksPayload(mpesaFlow) || getOriginalDraftInvoiceId()
-    );
+    // Picked receipts go with the ordinary checkout, which settles credit.
+    const creditFlowBlocked = Boolean(mpesaOrderName || getOriginalDraftInvoiceId());
     const creditAmount = creditFlowBlocked
       ? 0
       : roundCurrency(paymentAmounts[CUSTOMER_CREDIT_METHOD] || 0);
     // With vouchers going to the server, cash goes net of the change handed back: ERPNext
     // books change only when paid exceeds the total, which a voucher sale never does.
-    const tenderRows = tenderNetOfChange(creditAmount).rows.filter((row) => row.amount > 0);
+    const tenderRows = tenderSent(
+      tenderNetOfChange(creditAmount).rows.filter((row) => row.amount > 0),
+      activeMpesaPayment?.method,
+    );
 
     return {
       items: cartItems.map((item) => {
@@ -1010,10 +1013,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         };
       }),
       customer: selectedCustomer,
-      paymentMethods: tenderRows.filter(({ method }) => {
-        if (!activeMpesaPayment) return true;
-        return method !== activeMpesaPayment.method;
-      }).map(({ method, amount }) => {
+      paymentMethods: tenderRows.map(({ method, amount }) => {
         const paymentLine: Record<string, unknown> = {
           method,
           amount: parseFloat((Number(amount) || 0).toFixed(2)),
@@ -1254,11 +1254,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (stkLockedMethod) {
       // Receipts would replace the push's row and flow, orphaning money already asked for.
       toast.error("An M-Pesa push is pending or paid on this sale - receipts can't be added to it.");
-      return;
-    }
-    const voucherReason = vouchersBlockMpesaReason(appliedVouchers.length);
-    if (voucherReason) {
-      toast.error(voucherReason);
       return;
     }
     if (!selectedCustomer?.id && !selectedCustomer?.name) {

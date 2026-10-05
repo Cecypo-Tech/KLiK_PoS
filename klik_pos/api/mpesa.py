@@ -726,7 +726,9 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	payable = flt(invoice.rounded_total) or flt(invoice.grand_total)
 	already_paid = sum(flt(p.amount) for p in invoice.get("payments") or [])
 	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
-	remaining = max(payable - already_paid - already_advanced, 0.0)
+	# Vouchers (customer credit) settle right after submit: their share stays owing for them.
+	reserved = flt(getattr(invoice, "_klik_credit_reserved", 0))
+	remaining = max(payable - already_paid - already_advanced - reserved, 0.0)
 
 	# A receipt the sale turns out not to need - the cashier took cash instead, or picked
 	# one receipt too many - is let go before anything is minted: an entry for it would

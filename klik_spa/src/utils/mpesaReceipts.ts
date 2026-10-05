@@ -78,3 +78,12 @@ export function receiptPaidAt(
   const label = t ? `${formatDateOnly(day)} ${t[4]}:${t[5]}` : formatDateOnly(day);
   return { label, today: day === today };
 }
+
+/**
+ * The tender rows a submit records as payments. Picked receipts reach the invoice as advances,
+ * so their M-Pesa row is left out - of the rows and of the amount paid alike, or the server
+ * counts that money twice.
+ */
+export function tenderSent<T extends { method: string; amount: number }>(rows: T[], receiptMethod?: string | null): T[] {
+  return receiptMethod ? rows.filter((row) => row.method !== receiptMethod) : rows;
+}

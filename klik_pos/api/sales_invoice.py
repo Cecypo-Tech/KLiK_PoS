@@ -2346,24 +2346,27 @@ def _queue_sales_invoice(data, source_order=None):
 
 		# Customer credit: every row checked before anything persists; applied after
 		# submit. The in-memory marker exempts the sale-type cash gate only when the
-		# credit (plus any tender) fully covers the sale - at its rounded total, which is
-		# what the invoice's outstanding is built from.
+		# credit (plus any tender and picked receipts) fully covers the sale - at its
+		# rounded total, which is what the invoice's outstanding is built from.
 		credit_rows = validate_allocations(doc, data.get("customerCredit") or [])
-		if credit_rows:
-			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
-			if flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
-				doc._klik_customer_credit = credit_sum
 
 		if receipts:
-			if credit_rows:
-				# The receipts are allocated against what payments and advances leave owing;
-				# vouchers settle after submit and would be counted twice. The till blocks this.
-				frappe.throw(_("M-Pesa receipts and customer credit cannot pay the same sale."))
 			from klik_pos.api.mpesa import attach_mpesa_receipts
 
 			# Picked at checkout, recorded only now: the click wrote nothing, so an abandoned
 			# receipt checkout never drew a receipt number.
 			attach_mpesa_receipts(doc, receipts)
+
+		if credit_rows:
+			credit_sum = flt(sum(r["amount"] for r in credit_rows), 2)
+			# The receipts are allocated before submit and the credit settles after it: the
+			# allocation leaves the credit's share owing, or the credit would find nothing to pay.
+			doc._klik_credit_reserved = credit_sum
+			receipts_total = sum(flt(c.amount) for c in doc.get("custom_mpesa_reconciled_payments") or [])
+			if flt(flt(doc.paid_amount) + credit_sum + receipts_total, 2) >= flt(
+				doc.rounded_total or doc.grand_total, 2
+			):
+				doc._klik_customer_credit = credit_sum
 
 		if enable_background_submission:
 			_mark_invoice_queued(doc, frappe.session.user)
@@ -2560,6 +2563,10 @@ def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credi
 		if tax_id:
 			doc.tax_id = tax_id
 
+		# The checkout's vouchers settle after submit; the receipts below must leave them their share.
+		credit_sum = flt(sum(flt(r.get("amount")) for r in customer_credit or []), 2)
+		doc._klik_credit_reserved = credit_sum
+
 		# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and the
 		# draft takes what it owes as advances, before submit.
 		mpesa_allocation = None
@@ -2574,9 +2581,11 @@ def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credi
 		# after midnight must not refuse it for a shift that is now stale.
 		frappe.flags.klik_processing_queued_invoice = True
 		# The checkout's in-memory voucher marker did not survive the queue: the vouchers
-		# it validated arrive here, and they pay the sale as they did at checkout.
-		credit_sum = flt(sum(flt(r.get("amount")) for r in customer_credit or []), 2)
-		if credit_sum and flt(flt(doc.paid_amount) + credit_sum, 2) >= flt(doc.rounded_total or doc.grand_total, 2):
+		# it validated arrive here, and they pay the sale as they did at checkout - with the
+		# receipts' advances, allocated just above.
+		if credit_sum and flt(
+			flt(doc.paid_amount) + flt(doc.total_advance) + credit_sum, 2
+		) >= flt(doc.rounded_total or doc.grand_total, 2):
 			doc._klik_customer_credit = credit_sum
 		try:
 			doc.submit()

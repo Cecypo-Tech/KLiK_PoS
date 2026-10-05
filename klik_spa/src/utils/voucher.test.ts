@@ -157,9 +157,9 @@ describe("vouchersBlockMpesaReason", () => {
     expect(vouchersBlockMpesaReason(0)).toBeNull();
   });
 
-  it("refuses M-Pesa while vouchers are applied, saying what to do instead", () => {
+  it("refuses an M-Pesa request while vouchers are applied, saying what to do instead", () => {
     expect(vouchersBlockMpesaReason(2)).toBe(
-      "Vouchers can't be combined with M-Pesa yet - remove them, or take the rest in cash or card.",
+      "Vouchers can't be combined with an M-Pesa request yet - pick the customer's M-Pesa receipt instead, or take the rest in cash or card.",
     );
   });
 });

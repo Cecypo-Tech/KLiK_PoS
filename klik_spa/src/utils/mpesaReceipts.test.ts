@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, receiptPaidAt, uncoveredMpesa } from "./mpesaReceipts";
+import { appliedFromReceipts, isMpesaPaymentMode, receiptCardState, receiptPicksPayload, receiptLeftoverMessage, receiptPaidAt, tenderSent, uncoveredMpesa } from "./mpesaReceipts";
 import type { MpesaRegisterPayment } from "../services/mpesa";
 
 const p = (over: Partial<MpesaRegisterPayment>): MpesaRegisterPayment => ({
@@ -130,5 +130,20 @@ describe("receiptPaidAt", () => {
 
   it("shows nothing without either", () => {
     expect(receiptPaidAt({}, "2026-10-05")).toBeNull();
+  });
+});
+
+describe("tenderSent", () => {
+  const rows = [
+    { method: "Cash", amount: 200 },
+    { method: "Mpesa-1", amount: 770 },
+  ];
+
+  it("leaves out the M-Pesa row the picked receipts pay as advances", () => {
+    expect(tenderSent(rows, "Mpesa-1")).toEqual([{ method: "Cash", amount: 200 }]);
+  });
+
+  it("sends every row when no receipts were picked", () => {
+    expect(tenderSent(rows, null)).toEqual(rows);
   });
 });
