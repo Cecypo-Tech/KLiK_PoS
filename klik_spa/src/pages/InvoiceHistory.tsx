@@ -61,7 +61,8 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { handlePrintInvoice } from "../utils/printHandler";
 import { useCartStore } from "../stores/cartStore";
 import { formatDateTime, toSortableTimestamp } from "../utils/time";
-import { inDateRange, localDay, storedDate } from "../utils/dateRange";
+import { inDateRange, storedDate } from "../utils/dateRange";
+import { DateRangeFilter } from "../components/DateRangeFilter";
 import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "../utils/exportUtils";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -679,51 +680,15 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           onChange={(e) => setCustomerFilter(e.target.value)}
           className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
         />
-        <div className="flex flex-wrap items-center gap-2 md:col-span-4 md:order-last">
-          <input
-            type="date"
-            aria-label="From date"
-            title="From date"
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="min-w-0 flex-1 sm:flex-none sm:w-44 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
-          />
-          <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
-          <input
-            type="date"
-            aria-label="To date"
-            title="To date"
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={(e) => setToDate(e.target.value)}
-            className="min-w-0 flex-1 sm:flex-none sm:w-44 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
-          />
-          {[
-            { label: "Today", day: localDay(0) },
-            { label: "Yesterday", day: localDay(-1) },
-          ].map(({ label, day }) => {
-            const active = fromDate === day && toDate === day;
-            return (
-              <button
-                key={label}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  setFromDate(day);
-                  setToDate(day);
-                }}
-                className={`px-3 py-1.5 rounded-lg border text-sm whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-beveren-500 ${
-                  active
-                    ? "bg-beveren-600 border-beveren-600 text-white"
-                    : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-600"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        <DateRangeFilter
+          from={fromDate}
+          to={toDate}
+          onChange={(from, to) => {
+            setFromDate(from);
+            setToDate(to);
+          }}
+          className="md:col-span-4 md:order-last"
+        />
         
         <select
           value={cashierFilter}
