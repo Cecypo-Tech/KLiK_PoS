@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inDateRange, storedDate } from "./dateRange";
+import { inDateRange, localDay, storedDate } from "./dateRange";
 
 describe("inDateRange", () => {
   it("is unbounded when both ends are empty", () => {
@@ -33,5 +33,17 @@ describe("storedDate", () => {
     expect(storedDate("today")).toBe("");
     expect(storedDate(undefined)).toBe("");
     expect(storedDate(42)).toBe("");
+  });
+});
+
+describe("localDay", () => {
+  it("gives today and yesterday as local calendar days", () => {
+    const now = new Date(2026, 9, 5, 23, 30); // late evening, local time
+    expect(localDay(0, now)).toBe("2026-10-05");
+    expect(localDay(-1, now)).toBe("2026-10-04");
+  });
+
+  it("crosses a month boundary", () => {
+    expect(localDay(-1, new Date(2026, 9, 1, 8))).toBe("2026-09-30");
   });
 });

@@ -61,7 +61,7 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { handlePrintInvoice } from "../utils/printHandler";
 import { useCartStore } from "../stores/cartStore";
 import { formatDateTime, toSortableTimestamp } from "../utils/time";
-import { inDateRange, storedDate } from "../utils/dateRange";
+import { inDateRange, localDay, storedDate } from "../utils/dateRange";
 import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "../utils/exportUtils";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -656,7 +656,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
   // Define render functions before they are used
   const renderFilters = () => (
     <div className="w-full max-w-none bg-white/95 dark:bg-gray-800/95 rounded-xl p-4 border border-gray-200 dark:border-gray-700 mb-4 backdrop-blur">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={14} />
           <input
@@ -679,7 +679,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           onChange={(e) => setCustomerFilter(e.target.value)}
           className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
         />
-        <div className="flex items-center gap-2 md:col-span-2">
+        <div className="flex flex-wrap items-center gap-2 md:col-span-4 md:order-last">
           <input
             type="date"
             aria-label="From date"
@@ -687,7 +687,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
             value={fromDate}
             max={toDate || undefined}
             onChange={(e) => setFromDate(e.target.value)}
-            className="min-w-0 flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
+            className="min-w-0 flex-1 sm:flex-none sm:w-44 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
           />
           <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
           <input
@@ -697,8 +697,32 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
             value={toDate}
             min={fromDate || undefined}
             onChange={(e) => setToDate(e.target.value)}
-            className="min-w-0 flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
+            className="min-w-0 flex-1 sm:flex-none sm:w-44 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white dark:[color-scheme:dark]"
           />
+          {[
+            { label: "Today", day: localDay(0) },
+            { label: "Yesterday", day: localDay(-1) },
+          ].map(({ label, day }) => {
+            const active = fromDate === day && toDate === day;
+            return (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  setFromDate(day);
+                  setToDate(day);
+                }}
+                className={`px-3 py-1.5 rounded-lg border text-sm whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-beveren-500 ${
+                  active
+                    ? "bg-beveren-600 border-beveren-600 text-white"
+                    : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-600"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
         
         <select

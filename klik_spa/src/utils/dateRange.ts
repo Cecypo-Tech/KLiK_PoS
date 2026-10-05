@@ -13,3 +13,10 @@ export function inDateRange(date: string, from: string, to: string): boolean {
 export function storedDate(value: unknown): string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
 }
+
+/** The local calendar day `offset` days from `now` as "yyyy-mm-dd" (0 = today, -1 = yesterday). */
+export function localDay(offset: number, now: Date = new Date()): string {
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+}
