@@ -199,12 +199,12 @@ export default function MpesaOptionsModal({
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                          <div>
-                            {payment.transid || payment.name}
-                            {payment.msisdn ? ` - ${payment.msisdn}` : ""}
-                          </div>
                           <div className="flex items-center justify-between gap-3">
-                            <span className="truncate">{payment.billrefnumber || "No reference"}</span>
+                            <span className="truncate">
+                              {[payment.transid || payment.name, payment.msisdn, payment.billrefnumber || "No reference"]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
                             {paidAt && (
                               <span
                                 className={`whitespace-nowrap ${
