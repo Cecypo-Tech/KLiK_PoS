@@ -169,16 +169,17 @@ def get_walkin_details_by_phone(phone: str):
     digits = re.sub(r"\D", "", phone or "")
     if len(digits) < 9 or not frappe.db.has_column("Sales Invoice", "custom_walkin_phone"):
         return {}
-    local = digits[-9:]
-    # ponytail: the stored forms klik itself writes; a number saved with spaces is not found.
-    forms = (f"0{local}", f"254{local}", f"+254{local}", local)
+    # Stored as the cashier typed it - spaces, dashes, 07... or +254...: compared on its digits.
+    # ponytail: scans the submitted invoices that have a walk-in phone (a few ms for thousands);
+    # store a normalised number with an index if this ever shows.
     rows = frappe.db.sql(
         """SELECT custom_walkin_customer_name AS name, tax_id
         FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND custom_walkin_phone IN %(forms)s
+        WHERE docstatus = 1 AND IFNULL(custom_walkin_phone, '') != ''
+            AND REGEXP_REPLACE(custom_walkin_phone, '[^0-9]', '') LIKE %(tail)s
         ORDER BY creation DESC
         LIMIT 50""",
-        {"forms": forms},
+        {"tail": f"%{digits[-9:]}"},
         as_dict=True,
     )
     found = {}
