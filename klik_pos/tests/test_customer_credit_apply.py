@@ -60,6 +60,58 @@ class TestApply(FrappeTestCase):
 			self.assertEqual(frappe.db.get_value("Journal Entry", je, "docstatus"), 2)
 
 
+CASHIER = "_test-voucher-cashier@example.com"
+
+
+class TestApplyAsCashier(FrappeTestCase):
+	"""A cashier holds no right to Journal Entries, and must not need one to spend a voucher:
+	the till settled nothing and left the sale owing (FAC.Allparts CS-00781, 2026-10-05)."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.addCleanup(frappe.set_user, "Administrator")
+		if not frappe.db.exists("User", CASHIER):
+			frappe.get_doc(
+				{"doctype": "User", "email": CASHIER, "first_name": "Voucher Cashier", "send_welcome_email": 0,
+				 "roles": [{"role": "Sales User"}]}
+			).insert(ignore_permissions=True)
+		self.assertFalse(frappe.has_permission("Journal Entry", "create", user=CASHIER))
+		self.note = make_credit_note(CUSTOMER, COMPANY, 100)
+		self.sale = make_simple_invoice(CUSTOMER, COMPANY, 60)
+
+	def test_a_cashier_spends_a_voucher_without_journal_rights(self):
+		frappe.set_user(CASHIER)
+		result = apply_customer_credit(self.sale.name, [{"invoice": self.note.name, "amount": 60}])
+		frappe.set_user("Administrator")
+
+		self.assertEqual(flt(result["applied"], 2), 60.0)
+		self.assertEqual(_outstanding(self.sale.name), 0.0)
+		self.assertEqual(_outstanding(self.note.name), -40.0)
+		[je] = result["journal_entries"]
+		self.assertEqual(
+			frappe.db.get_value("Journal Entry", je, ["voucher_type", "owner", "docstatus"]),
+			("Credit Note", CASHIER, 1),
+		)
+
+	def test_the_cashier_gains_no_journal_rights(self):
+		frappe.set_user(CASHIER)
+		apply_customer_credit(self.sale.name, [{"invoice": self.note.name, "amount": 60}])
+		self.assertFalse(frappe.has_permission("Journal Entry", "create"))
+
+	def test_no_more_than_the_note_still_holds_is_booked(self):
+		"""A note drained by another sale meanwhile books only what it has left."""
+		other = make_simple_invoice(CUSTOMER, COMPANY, 70)
+		apply_customer_credit(other.name, [{"invoice": self.note.name, "amount": 70}])
+
+		frappe.set_user(CASHIER)
+		result = apply_customer_credit(self.sale.name, [{"invoice": self.note.name, "amount": 60}])
+		frappe.set_user("Administrator")
+
+		self.assertEqual(flt(result["applied"], 2), 30.0)
+		self.assertEqual(_outstanding(self.sale.name), 30.0)
+		self.assertEqual(_outstanding(self.note.name), 0.0)
+
+
 class TestValidation(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
