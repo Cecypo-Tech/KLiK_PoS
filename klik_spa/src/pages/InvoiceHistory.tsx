@@ -65,6 +65,7 @@ import { exportInvoicesToCSV, getExportFilename, type ExportableInvoice } from "
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 import { walkinSubline } from "../utils/walkinLabel";
+import { matchesPaymentFilter } from "../utils/paymentFilter";
 // import InvoiceViewPage from "./InvoiceViewPage";
 
 interface HeldOrderExtras {
@@ -558,7 +559,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
               // not finished with.
               ? ["queued", "processing"].includes(queueStatus.toLowerCase())
               : invoiceStatus === tabStatus;
-      const matchesPayment = paymentFilter === "all" || invoice.paymentMethod === paymentFilter;
+      const matchesPayment = matchesPaymentFilter(invoice, paymentFilter);
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
         || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
@@ -617,7 +618,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
 
     // First apply all filters except status
     const invoicesFilteredByOtherFilters = countSource.filter((invoice) => {
-      const matchesPayment = paymentFilter === "all" || invoice.paymentMethod === paymentFilter;
+      const matchesPayment = matchesPaymentFilter(invoice, paymentFilter);
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
         || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
