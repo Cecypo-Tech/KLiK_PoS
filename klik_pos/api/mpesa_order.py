@@ -22,11 +22,11 @@ from frappe.utils import add_to_date, flt, get_datetime, now_datetime
 from klik_pos.api import sales_order
 from klik_pos.api.mpesa import _klik_entry_for_transid
 from klik_pos.api.sales_invoice import (
+	_create_draft_invoice,
 	_keeping_naming_series,
 	_parse_extra_fields,
-	create_draft_invoice,
+	_submit_draft_invoice,
 	parse_invoice_data,
-	submit_draft_invoice,
 )
 from klik_pos.overrides.loss_of_sale import fold_los_into_quantity
 
@@ -227,7 +227,9 @@ def save_mpesa_order(data):
 
 def _create_invoice_draft(order_id, data):
 	"""The invoice draft submit_draft_invoice finishes; it rebuilds it from the cart anyway."""
-	result = create_draft_invoice(
+	# Inside this checkout's savepoint: the un-retried body, so a lock race unwinds the whole
+	# checkout rather than a retry rolling back past it.
+	result = _create_draft_invoice(
 		{
 			**(data or {}),
 			# Same as the draft M-Pesa used to make up front: it is paid by the submit, so the
@@ -416,7 +418,7 @@ def submit_mpesa_order(order_id, data=None, held_order_id=None, remarks=None):
 
 		draft = _create_invoice_draft(order_id, data)
 		other_held_order = held_order_id if held_order_id and held_order_id != order_id else None
-		result = submit_draft_invoice(draft, data, other_held_order, remarks)
+		result = _submit_draft_invoice(draft, data, other_held_order, remarks)
 		if not result.get("success"):
 			frappe.db.rollback(save_point=SAVEPOINT)
 			return result

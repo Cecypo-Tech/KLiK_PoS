@@ -1,3 +1,4 @@
+import copy
 import json
 import random
 import re
@@ -260,11 +261,57 @@ def _record_failed_checkout_request(state, error):
 	request.insert(ignore_permissions=True)
 
 
+# ---------------------------------------------------------------------------------------
+# Lock races. A busy counter has several tills posting at once, and MySQL settles a lock race
+# by killing one transaction (a deadlock) or giving up on a wait (a lock wait timeout). A
+# checkout, a draft and the queue worker commit nothing before the end, so a full rollback
+# leaves no trace - not even the receipt number - and the same work a moment later is safe.
+#
+# Their failure handlers report errors instead of raising, so each one first calls
+# _raise_lock_race(e): while an attempt is left, that hands the race to _retry_lock_race.
+# ---------------------------------------------------------------------------------------
+
+LOCK_RACE_ATTEMPTS = 3
+LOCK_RACE_ERRORS = (frappe.QueryDeadlockError, frappe.QueryTimeoutError)
+
+
+def _retry_lock_race(fn, *args):
+	"""Run fn, and run it again from a clean transaction when it loses a lock race."""
+	# Retry only from a clean start: inside another retry, or after the caller has written,
+	# the rollback would take work that is not fn's with it.
+	if frappe.flags.klik_lock_race_retry is not None or frappe.db.transaction_writes:
+		return fn(*args)
+	try:
+		for attempt in range(1, LOCK_RACE_ATTEMPTS + 1):
+			retry_left = attempt < LOCK_RACE_ATTEMPTS
+			frappe.flags.klik_lock_race_retry = retry_left
+			try:
+				# A copy each time: an attempt may have changed the payload it was given.
+				return fn(*copy.deepcopy(args))
+			except LOCK_RACE_ERRORS:
+				if not retry_left:
+					raise
+				frappe.db.rollback()
+				# Jittered, so two tills that collided do not collide again.
+				time.sleep(random.uniform(0.5, 2))
+	finally:
+		frappe.flags.klik_lock_race_retry = None
+
+
+def _raise_lock_race(error):
+	"""Hand a lock race to _retry_lock_race while it has an attempt left; else do nothing."""
+	if frappe.flags.klik_lock_race_retry and isinstance(error, LOCK_RACE_ERRORS):
+		raise error
+
+
 def _abort_checkout(state, error):
 	"""Fail a checkout without burning a receipt number. The step order is load-bearing.
 
 	Read the "naming-counter burn guard" comment above before changing anything here.
 	"""
+	# 0. A lock race with an attempt left is retried whole, not failed.
+	_raise_lock_race(error)
+
 	# 1. UNDO - first, always. Everything written before this point is discarded by it.
 	if state.savepoint:
 		# The invoice exists. Undo the half-finished submit but keep the draft and the
@@ -2241,7 +2288,7 @@ def create_and_submit_invoice(data):
 
 @frappe.whitelist()
 def queue_sales_invoice(data):
-	return _queue_sales_invoice(data)
+	return _retry_lock_race(_queue_sales_invoice, data)
 
 
 def _queue_sales_invoice(data, source_order=None):
@@ -2371,6 +2418,7 @@ def _queue_sales_invoice(data, source_order=None):
 			try:
 				_reserve_stock_for_queued_invoice(doc)
 			except Exception as reserve_error:
+				_raise_lock_race(reserve_error)
 				_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(reserve_error))
 				doc.save(ignore_permissions=True)
 				_update_checkout_request(
@@ -2444,7 +2492,8 @@ def _queue_sales_invoice(data, source_order=None):
 
 			try:
 				_cancel_sales_invoice_reservations(doc.name)
-			except Exception:
+			except Exception as e:
+				_raise_lock_race(e)
 				frappe.log_error(
 					frappe.get_traceback(),
 					f"Failed to cancel reservations after submit for {doc.name}",
@@ -2553,34 +2602,23 @@ def _apply_checkout_credit(doc, credit_rows):
 	return result
 
 
-# A busy counter has several workers posting at once, and MySQL settles a lock race by killing
-# one transaction. The worker commits nothing until the end, so a rolled-back attempt left no
-# trace and the same submit a moment later is safe.
-QUEUE_LOCK_ATTEMPTS = 3
-
-
 @frappe.whitelist()
 def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
 	"""Background worker that submits a queued draft sales invoice."""
-	for attempt in range(1, QUEUE_LOCK_ATTEMPTS + 1):
+	try:
+		return _retry_lock_race(_submit_queued_invoice, invoice_name, requested_by, customer_credit)
+	except Exception as e:
+		frappe.db.rollback()
 		try:
-			return _submit_queued_invoice(invoice_name, requested_by, customer_credit)
-		except Exception as e:
-			frappe.db.rollback()
-			if isinstance(e, frappe.QueryDeadlockError | frappe.QueryTimeoutError) and attempt < QUEUE_LOCK_ATTEMPTS:
-				# Jittered, so two workers that collided do not collide again.
-				time.sleep(random.uniform(0.5, 2))
-				continue
-			try:
-				doc = frappe.get_doc("Sales Invoice", invoice_name)
-				attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
-				_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(e), attempts=attempts)
-				doc.save(ignore_permissions=True)
-				_notify_queue_failure(doc, requested_by, str(e))
-			except Exception:
-				frappe.log_error(frappe.get_traceback(), f"Queue failure update error for {invoice_name}")
-			frappe.log_error(frappe.get_traceback(), f"Queued Invoice Submit Error for {invoice_name}")
-			return {"success": False, "message": str(e)}
+			doc = frappe.get_doc("Sales Invoice", invoice_name)
+			attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
+			_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(e), attempts=attempts)
+			doc.save(ignore_permissions=True)
+			_notify_queue_failure(doc, requested_by, str(e))
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), f"Queue failure update error for {invoice_name}")
+		frappe.log_error(frappe.get_traceback(), f"Queued Invoice Submit Error for {invoice_name}")
+		return {"success": False, "message": str(e)}
 
 
 def _submit_queued_invoice(invoice_name, requested_by, customer_credit):
@@ -2627,7 +2665,8 @@ def _submit_queued_invoice(invoice_name, requested_by, customer_credit):
 	doc.reload()
 	try:
 		_cancel_sales_invoice_reservations(doc.name)
-	except Exception:
+	except Exception as e:
+		_raise_lock_race(e)
 		frappe.log_error(
 			frappe.get_traceback(),
 			f"Failed to cancel reservations after submit for {doc.name}",
@@ -2767,6 +2806,10 @@ def retry_failed_sales_invoice(invoice_name):
 
 @frappe.whitelist()
 def create_draft_invoice(data):
+	return _retry_lock_race(_create_draft_invoice, data)
+
+
+def _create_draft_invoice(data):
 	try:
 		if isinstance(data, str):
 			data = json.loads(data)
@@ -2873,6 +2916,7 @@ def create_draft_invoice(data):
 		return {"success": True, "invoice_name": doc.name, "invoice": doc}
 
 	except Exception as e:
+		_raise_lock_race(e)
 		frappe.log_error(frappe.get_traceback(), "Draft Invoice Error")
 		return {"success": False, "message": str(e)}
 	
@@ -5847,6 +5891,10 @@ def delete_draft_invoice(invoice_id):
 
 @frappe.whitelist()
 def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None):
+	return _retry_lock_race(_submit_draft_invoice, invoice_id, data, held_order_id, remarks)
+
+
+def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None):
 	"""
 	Submit a draft sales invoice directly without payment dialog.
 	This converts a draft invoice to submitted status.
@@ -6055,6 +6103,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 			try:
 				_reserve_stock_for_queued_invoice(invoice_doc)
 			except Exception as reserve_error:
+				_raise_lock_race(reserve_error)
 				_update_queue_fields(invoice_doc, QUEUE_STATUSES["failed"], error_message=str(reserve_error))
 				invoice_doc.save(ignore_permissions=True)
 				return {"success": False, "error": str(reserve_error)}
@@ -6101,7 +6150,8 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 				invoice_doc.submit()
 				try:
 					_cancel_sales_invoice_reservations(invoice_doc.name)
-				except Exception:
+				except Exception as e:
+					_raise_lock_race(e)
 					frappe.log_error(
 						frappe.get_traceback(),
 						f"Failed to cancel reservations after submit for {invoice_doc.name}",
@@ -6112,7 +6162,9 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 					from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
 
 					mpesa_reconciliation = _finalize_mpesa_reconciliation(invoice_doc, mpesa_allocation)
-			except Exception:
+			except Exception as e:
+				# A race already lost the whole transaction, savepoints included.
+				_raise_lock_race(e)
 				frappe.db.rollback(save_point="klik_submit_draft")
 				raise
 
@@ -6137,6 +6189,7 @@ def submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=None
 			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		return {"success": False, "error": f"Invoice {invoice_id} not found"}
 	except Exception as e:
+		_raise_lock_race(e)
 		if draft_touched:
 			frappe.db.rollback(save_point="klik_submit_draft_invoice")
 		frappe.log_error(frappe.get_traceback(), f"Error submitting draft invoice {invoice_id}")

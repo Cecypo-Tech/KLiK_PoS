@@ -29,7 +29,11 @@ class TestQueueLockRetry(FrappeTestCase):
 		self.addCleanup(patch.stopall)
 
 	def _run(self, *outcomes):
-		with patch.object(sales_invoice, "_submit_queued_invoice", side_effect=list(outcomes)) as submit:
+		# A worker starts with a clean transaction; this one holds the uncommitted draft.
+		with (
+			patch.object(frappe.db, "transaction_writes", 0),
+			patch.object(sales_invoice, "_submit_queued_invoice", side_effect=list(outcomes)) as submit,
+		):
 			result = sales_invoice.process_queued_sales_invoice(self.draft.name)
 		return result, submit
 
@@ -49,7 +53,7 @@ class TestQueueLockRetry(FrappeTestCase):
 	def test_three_deadlocks_fail_the_sale_and_alert_once(self):
 		result, submit = self._run(_deadlock(), _deadlock(), _deadlock())
 		self.assertFalse(result["success"])
-		self.assertEqual(submit.call_count, sales_invoice.QUEUE_LOCK_ATTEMPTS)
+		self.assertEqual(submit.call_count, sales_invoice.LOCK_RACE_ATTEMPTS)
 		self.notify.assert_called_once()
 		self.assertEqual(frappe.db.get_value("Sales Invoice", self.draft.name, "queue_status"), "Failed")
 
@@ -78,3 +82,42 @@ class TestQueuedSubmitSkipsTheProcessingSave(FrappeTestCase):
 			"Sales Invoice", draft.name, ["docstatus", "queue_status", "queue_attempts"], as_dict=True
 		)
 		self.assertEqual((row.docstatus, row.queue_status, row.queue_attempts), (1, "Submitted", 1))
+
+
+class TestNoRetryAfterTheCallerWrote(FrappeTestCase):
+	def test_a_race_after_earlier_writes_is_not_retried(self):
+		# The rollback would take the caller's own writes with it, so it runs once and fails as before.
+		frappe.set_user("Administrator")
+		_draft()
+		self.assertTrue(frappe.db.transaction_writes)
+		calls = []
+
+		def races():
+			calls.append(1)
+			raise _deadlock()
+
+		with self.assertRaises(frappe.QueryDeadlockError):
+			sales_invoice._retry_lock_race(races)
+		self.assertEqual(len(calls), 1)
+
+	def test_a_nested_call_leaves_the_retry_to_the_outer_one(self):
+		frappe.set_user("Administrator")
+		inner_calls = []
+
+		def inner():
+			inner_calls.append(1)
+			raise _deadlock()
+
+		def outer():
+			return sales_invoice._retry_lock_race(inner)
+
+		with (
+			patch.object(frappe.db, "transaction_writes", 0),
+			patch.object(frappe.db, "rollback"),
+			patch.object(sales_invoice.time, "sleep"),
+			self.assertRaises(frappe.QueryDeadlockError),
+		):
+			sales_invoice._retry_lock_race(outer)
+		# Three outer attempts, one inner run each - not three times three.
+		self.assertEqual(len(inner_calls), sales_invoice.LOCK_RACE_ATTEMPTS)
+		self.assertIsNone(frappe.flags.klik_lock_race_retry)
