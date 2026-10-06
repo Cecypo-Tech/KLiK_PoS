@@ -1,5 +1,7 @@
 import json
+import random
 import re
+import time
 from contextlib import contextmanager
 
 import frappe
@@ -2551,99 +2553,111 @@ def _apply_checkout_credit(doc, credit_rows):
 	return result
 
 
+# A busy counter has several workers posting at once, and MySQL settles a lock race by killing
+# one transaction. The worker commits nothing until the end, so a rolled-back attempt left no
+# trace and the same submit a moment later is safe.
+QUEUE_LOCK_ATTEMPTS = 3
+
+
 @frappe.whitelist()
 def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
 	"""Background worker that submits a queued draft sales invoice."""
-	try:
-		doc = frappe.get_doc("Sales Invoice", invoice_name)
-		tax_id = doc.tax_id
-		if doc.docstatus != 0:
-			_apply_klik_invoice_flags(doc, is_submitted=True)
-			_update_queue_fields(doc, QUEUE_STATUSES["submitted"], None)
-			doc.save(ignore_permissions=True)
-			return {"success": True, "message": "Invoice already submitted"}
+	for attempt in range(1, QUEUE_LOCK_ATTEMPTS + 1):
+		try:
+			return _submit_queued_invoice(invoice_name, requested_by, customer_credit)
+		except Exception as e:
+			frappe.db.rollback()
+			if isinstance(e, frappe.QueryDeadlockError | frappe.QueryTimeoutError) and attempt < QUEUE_LOCK_ATTEMPTS:
+				# Jittered, so two workers that collided do not collide again.
+				time.sleep(random.uniform(0.5, 2))
+				continue
+			try:
+				doc = frappe.get_doc("Sales Invoice", invoice_name)
+				attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
+				_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(e), attempts=attempts)
+				doc.save(ignore_permissions=True)
+				_notify_queue_failure(doc, requested_by, str(e))
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), f"Queue failure update error for {invoice_name}")
+			frappe.log_error(frappe.get_traceback(), f"Queued Invoice Submit Error for {invoice_name}")
+			return {"success": False, "message": str(e)}
 
-		attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
-		_update_queue_fields(doc, QUEUE_STATUSES["processing"], attempts=attempts)
-		doc.save(ignore_permissions=True)
-		if tax_id:
-			doc.tax_id = tax_id
 
-		# The checkout's vouchers settle after submit; the receipts below must leave them their share.
-		credit_sum = flt(sum(flt(r.get("amount")) for r in customer_credit or []), 2)
-		doc._klik_credit_reserved = credit_sum
-
-		# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and the
-		# draft takes what it owes as advances, before submit.
-		mpesa_allocation = None
-		if doc.get("custom_mpesa_reconciled_payments"):
-			from klik_pos.api.mpesa import _allocate_receipts_before_submit
-
-			mpesa_allocation = _allocate_receipts_before_submit(doc)
-
+def _submit_queued_invoice(invoice_name, requested_by, customer_credit):
+	doc = frappe.get_doc("Sales Invoice", invoice_name)
+	if doc.docstatus != 0:
 		_apply_klik_invoice_flags(doc, is_submitted=True)
-		_enforce_submit_permission(doc, user=requested_by or frappe.session.user)
-		# The cashier's shift was valid when this sale was queued; a worker running
-		# after midnight must not refuse it for a shift that is now stale.
-		frappe.flags.klik_processing_queued_invoice = True
-		# The checkout's in-memory voucher marker did not survive the queue: the vouchers
-		# it validated arrive here, and they pay the sale as they did at checkout - with the
-		# receipts' advances, allocated just above.
-		if credit_sum and flt(
-			flt(doc.paid_amount) + flt(doc.total_advance) + credit_sum, 2
-		) >= flt(doc.rounded_total or doc.grand_total, 2):
-			doc._klik_customer_credit = credit_sum
-		try:
-			doc.submit()
-		finally:
-			frappe.flags.klik_processing_queued_invoice = False
-		doc.reload()
-		try:
-			_cancel_sales_invoice_reservations(doc.name)
-		except Exception:
-			frappe.log_error(
-				frappe.get_traceback(),
-				f"Failed to cancel reservations after submit for {doc.name}",
-			)
-		if doc.get("custom_mpesa_reconciled_payments"):
-			from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
-
-			# Deliberately unguarded: a finalize that fails leaves the invoice reading Paid
-			# (the advances already zeroed its outstanding) with its entries unreconciled and
-			# its receipts unconsumed. Let it reach the handler below, which rolls the whole
-			# submission back and tells the cashier.
-			_finalize_mpesa_reconciliation(doc, mpesa_allocation)
-		_update_queue_fields(doc, QUEUE_STATUSES["submitted"], attempts=attempts)
-		if hasattr(doc, "queue_error"):
-			doc.queue_error = ""
+		_update_queue_fields(doc, QUEUE_STATUSES["submitted"], None)
 		doc.save(ignore_permissions=True)
+		return {"success": True, "message": "Invoice already submitted"}
 
-		_finalize_submitted_invoice(
-			doc,
-			flt(doc.paid_amount or 0),
-			_get_payment_methods_from_invoice(doc),
-			getattr(doc, "business_type", None),
-			doc.customer,
+	attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
+	# No save for Processing: nothing commits before the end, so no one could read it, and
+	# the save re-ran validate and rewrote the item-wise tax rows - where the lock races were.
+	_update_queue_fields(doc, QUEUE_STATUSES["processing"], attempts=attempts)
+
+	# The checkout's vouchers settle after submit; the receipts below must leave them their share.
+	credit_sum = flt(sum(flt(r.get("amount")) for r in customer_credit or []), 2)
+	doc._klik_credit_reserved = credit_sum
+
+	# Payment-Entry-first M-Pesa: each recorded receipt becomes a Payment Entry and the
+	# draft takes what it owes as advances, before submit.
+	mpesa_allocation = None
+	if doc.get("custom_mpesa_reconciled_payments"):
+		from klik_pos.api.mpesa import _allocate_receipts_before_submit
+
+		mpesa_allocation = _allocate_receipts_before_submit(doc)
+
+	_apply_klik_invoice_flags(doc, is_submitted=True)
+	_enforce_submit_permission(doc, user=requested_by or frappe.session.user)
+	# The cashier's shift was valid when this sale was queued; a worker running
+	# after midnight must not refuse it for a shift that is now stale.
+	frappe.flags.klik_processing_queued_invoice = True
+	# The checkout's in-memory voucher marker did not survive the queue: the vouchers
+	# it validated arrive here, and they pay the sale as they did at checkout - with the
+	# receipts' advances, allocated just above.
+	if credit_sum and flt(
+		flt(doc.paid_amount) + flt(doc.total_advance) + credit_sum, 2
+	) >= flt(doc.rounded_total or doc.grand_total, 2):
+		doc._klik_customer_credit = credit_sum
+	try:
+		doc.submit()
+	finally:
+		frappe.flags.klik_processing_queued_invoice = False
+	doc.reload()
+	try:
+		_cancel_sales_invoice_reservations(doc.name)
+	except Exception:
+		frappe.log_error(
+			frappe.get_traceback(),
+			f"Failed to cancel reservations after submit for {doc.name}",
 		)
+	if doc.get("custom_mpesa_reconciled_payments"):
+		from klik_pos.api.mpesa import _finalize_mpesa_reconciliation
 
-		credit_result = _apply_checkout_credit(doc, customer_credit or [])
-		if credit_result["warning"]:
-			frappe.logger().warning(f"{invoice_name}: {credit_result['warning']}")
+		# Deliberately unguarded: a finalize that fails leaves the invoice reading Paid
+		# (the advances already zeroed its outstanding) with its entries unreconciled and
+		# its receipts unconsumed. Let it reach the handler below, which rolls the whole
+		# submission back and tells the cashier.
+		_finalize_mpesa_reconciliation(doc, mpesa_allocation)
+	_update_queue_fields(doc, QUEUE_STATUSES["submitted"], attempts=attempts)
+	if hasattr(doc, "queue_error"):
+		doc.queue_error = ""
+	doc.save(ignore_permissions=True)
 
-		return {"success": True, "message": f"Invoice {invoice_name} submitted successfully"}
+	_finalize_submitted_invoice(
+		doc,
+		flt(doc.paid_amount or 0),
+		_get_payment_methods_from_invoice(doc),
+		getattr(doc, "business_type", None),
+		doc.customer,
+	)
 
-	except Exception as e:
-		frappe.db.rollback()
-		try:
-			doc = frappe.get_doc("Sales Invoice", invoice_name)
-			attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
-			_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(e), attempts=attempts)
-			doc.save(ignore_permissions=True)
-			_notify_queue_failure(doc, requested_by, str(e))
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Queue failure update error for {invoice_name}")
-		frappe.log_error(frappe.get_traceback(), f"Queued Invoice Submit Error for {invoice_name}")
-		return {"success": False, "message": str(e)}
+	credit_result = _apply_checkout_credit(doc, customer_credit or [])
+	if credit_result["warning"]:
+		frappe.logger().warning(f"{invoice_name}: {credit_result['warning']}")
+
+	return {"success": True, "message": f"Invoice {invoice_name} submitted successfully"}
 
 
 @frappe.whitelist()
