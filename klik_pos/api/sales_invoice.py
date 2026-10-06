@@ -298,6 +298,19 @@ def _retry_lock_race(fn, *args):
 		frappe.flags.klik_lock_race_retry = None
 
 
+def _rollback_to_savepoint(save_point):
+	"""Undo back to save_point. False when it was already gone, with everything since the
+	transaction began: a deadlock rolls back the whole transaction, savepoints included."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+		return True
+	except Exception as e:
+		if not (e.args and e.args[0] == 1305):  # ER_SP_DOES_NOT_EXIST
+			raise
+		frappe.db.rollback()
+		return False
+
+
 def _raise_lock_race(error):
 	"""Hand a lock race to _retry_lock_race while it has an attempt left; else do nothing."""
 	if frappe.flags.klik_lock_race_retry and isinstance(error, LOCK_RACE_ERRORS):
@@ -316,7 +329,11 @@ def _abort_checkout(state, error):
 	if state.savepoint:
 		# The invoice exists. Undo the half-finished submit but keep the draft and the
 		# number it legitimately consumed, so Invoice History can retry it.
-		frappe.db.rollback(save_point=state.savepoint)
+		if not _rollback_to_savepoint(state.savepoint):
+			# A lock race took the invoice with the whole transaction, and its number went
+			# back with it: there is no draft to retry, so do not name one.
+			state.invoice_name = None
+			state.savepoint = None
 	else:
 		# No invoice was ever written, so the naming counter increment is this checkout's
 		# only trace. A full rollback returns the receipt number to the sequence.
@@ -6165,7 +6182,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 			except Exception as e:
 				# A race already lost the whole transaction, savepoints included.
 				_raise_lock_race(e)
-				frappe.db.rollback(save_point="klik_submit_draft")
+				_rollback_to_savepoint("klik_submit_draft")
 				raise
 
 			if held_order_id:
@@ -6186,11 +6203,11 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 
 	except frappe.DoesNotExistError:
 		if draft_touched:
-			frappe.db.rollback(save_point="klik_submit_draft_invoice")
+			_rollback_to_savepoint("klik_submit_draft_invoice")
 		return {"success": False, "error": f"Invoice {invoice_id} not found"}
 	except Exception as e:
 		_raise_lock_race(e)
 		if draft_touched:
-			frappe.db.rollback(save_point="klik_submit_draft_invoice")
+			_rollback_to_savepoint("klik_submit_draft_invoice")
 		frappe.log_error(frappe.get_traceback(), f"Error submitting draft invoice {invoice_id}")
 		return {"success": False, "error": str(e)}

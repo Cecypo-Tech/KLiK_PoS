@@ -133,6 +133,12 @@ def _validate_loses_lock_race(times):
 		SalesInvoice.validate = original
 
 
+def _lose_the_transaction():
+	"""What MariaDB does to a deadlock victim: the whole transaction, savepoints included, is gone."""
+	frappe.db.rollback()
+	raise frappe.QueryDeadlockError((1213, "Deadlock found when trying to get lock"))
+
+
 @contextmanager
 def _todo_validation_always_fails():
 	"""The same injection for ToDo, used by the site-independent counter tests."""
@@ -596,6 +602,57 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 
 		self.assertEqual(frappe.db.get_value(CHECKOUT_REQUEST_DOCTYPE, request_id, "status"), "Failed")
 		self.assertEqual(self._sell(), before + 1, "the failed checkout burned a receipt number")
+
+	def test_a_race_after_the_invoice_was_saved_fails_cleanly_on_the_last_attempt(self):
+		# The invoice is in, its savepoint armed - and the race takes the transaction with it.
+		# Rolling back to that savepoint then fails ("SAVEPOINT does not exist"): a 500 for the
+		# cashier instead of an answer.
+		from unittest.mock import patch
+
+		before = self._sell()
+		request_id = frappe.generate_hash(length=24)
+		original = checkout_module._CheckoutState.mark_invoice_persisted
+
+		def persisted_then_race(state, invoice_name):
+			original(state, invoice_name)
+			_lose_the_transaction()
+
+		with (
+			patch.object(checkout_module._CheckoutState, "mark_invoice_persisted", persisted_then_race),
+			patch.object(checkout_module.time, "sleep"),
+		):
+			response = queue_sales_invoice(self._payload(request_id))
+		frappe.db.commit()
+
+		self.assertFalse(response["success"])
+		# The invoice went with the transaction; naming it would send the cashier after a ghost.
+		self.assertIsNone(response.get("invoice_name"))
+		row = frappe.db.get_value(CHECKOUT_REQUEST_DOCTYPE, request_id, ["status", "sales_invoice"], as_dict=True)
+		self.assertEqual(row.status, "Failed")
+		self.assertFalse(row.sales_invoice)
+		self.assertEqual(self._sell(), before + 1, "the lost race burned a receipt number")
+
+	def test_a_draft_submit_race_on_the_last_attempt_fails_cleanly(self):
+		from unittest.mock import patch
+
+		from klik_pos.api.sales_invoice import create_draft_invoice, submit_draft_invoice
+
+		frappe.db.commit()
+		draft = create_draft_invoice(self._payload(frappe.generate_hash(length=24)))
+		self.assertTrue(draft["success"], draft.get("message"))
+		name = draft["invoice_name"]
+		self.addCleanup(self._remove_invoice, name)
+		frappe.db.commit()
+
+		with (
+			patch.object(checkout_module, "_enforce_submit_permission", side_effect=lambda *a, **k: _lose_the_transaction()),
+			patch.object(checkout_module.time, "sleep"),
+		):
+			response = submit_draft_invoice(name)
+		frappe.db.commit()
+
+		self.assertFalse(response["success"])
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 0, "the draft was lost")
 
 	def test_a_draft_save_and_its_submit_are_retried(self):
 		from klik_pos.api.sales_invoice import create_draft_invoice, submit_draft_invoice
