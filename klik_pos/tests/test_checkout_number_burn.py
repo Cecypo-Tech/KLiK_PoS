@@ -106,6 +106,34 @@ def _validation_always_fails():
 
 
 @contextmanager
+def _validate_loses_lock_race(times):
+	"""Sales Invoice.validate() loses a lock race the first `times` calls, then runs as usual.
+
+	A real deadlock has already rolled the transaction back by the time it is raised; the
+	retry's full rollback does the same here. The pause between attempts is skipped.
+	"""
+	from unittest.mock import patch
+
+	from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
+
+	original = SalesInvoice.validate
+	left = [times]
+
+	def racing(self):
+		if left[0]:
+			left[0] -= 1
+			raise frappe.QueryDeadlockError((1213, "Deadlock found when trying to get lock"))
+		return original(self)
+
+	SalesInvoice.validate = racing
+	try:
+		with patch.object(checkout_module.time, "sleep"):
+			yield left
+	finally:
+		SalesInvoice.validate = original
+
+
+@contextmanager
 def _todo_validation_always_fails():
 	"""The same injection for ToDo, used by the site-independent counter tests."""
 	from frappe.desk.doctype.todo.todo import ToDo
@@ -538,6 +566,55 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 			[numbers[0], numbers[0] + 1, numbers[0] + 2],
 			f"receipt numbers jumped: {numbers}",
 		)
+
+	def test_a_lock_race_is_retried_without_burning_a_number(self):
+		before = self._sell()
+		request_id = frappe.generate_hash(length=24)
+		payload = self._payload(request_id)
+		invoices_before = frappe.db.count("Sales Invoice")
+
+		with _validate_loses_lock_race(1) as left:
+			response = queue_sales_invoice(payload)
+		self.assertTrue(response["success"], response.get("message"))
+		self.assertEqual(left[0], 0, "the race was never injected")
+		self.addCleanup(self._remove_invoice, response["invoice_name"])
+		frappe.db.commit()
+
+		self.assertEqual(_trailing_number(response["invoice_name"]), before + 1)
+		self.assertEqual(frappe.db.count("Sales Invoice"), invoices_before + 1)
+		self.assertNotEqual(frappe.db.get_value(CHECKOUT_REQUEST_DOCTYPE, request_id, "status"), "Failed")
+
+	def test_a_lock_race_on_every_attempt_fails_cleanly(self):
+		before = self._sell()
+		request_id = frappe.generate_hash(length=24)
+
+		with _validate_loses_lock_race(checkout_module.LOCK_RACE_ATTEMPTS):
+			response = queue_sales_invoice(self._payload(request_id))
+		self.assertFalse(response["success"])
+		self.assertIsNone(response.get("invoice_name"))
+		frappe.db.commit()
+
+		self.assertEqual(frappe.db.get_value(CHECKOUT_REQUEST_DOCTYPE, request_id, "status"), "Failed")
+		self.assertEqual(self._sell(), before + 1, "the failed checkout burned a receipt number")
+
+	def test_a_draft_save_and_its_submit_are_retried(self):
+		from klik_pos.api.sales_invoice import create_draft_invoice, submit_draft_invoice
+
+		frappe.db.commit()
+		with _validate_loses_lock_race(1) as left:
+			draft = create_draft_invoice(self._payload(frappe.generate_hash(length=24)))
+		self.assertTrue(draft["success"], draft.get("message"))
+		self.assertEqual(left[0], 0)
+		name = draft["invoice_name"]
+		self.addCleanup(self._remove_invoice, name)
+		frappe.db.commit()
+
+		with _validate_loses_lock_race(1) as left:
+			submitted = submit_draft_invoice(name)
+		self.assertTrue(submitted["success"], submitted.get("error"))
+		self.assertEqual(left[0], 0)
+		frappe.db.commit()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 1)
 
 	def test_a_failed_checkout_stays_replayable_and_creates_no_duplicate(self):
 		# The rollback must not take the idempotency guard down with it.

@@ -856,6 +856,13 @@ def checkout_held_order(order_id, data=None):
     Accepts the same checkout payload as create_and_submit_invoice.
     Deletes the Sales Order on success.
     """
+    from klik_pos.api.sales_invoice import _retry_lock_race
+
+    # Retried whole: the claim on the held order is part of what a lost race rolls back.
+    return _retry_lock_race(_checkout_held_order, order_id, data)
+
+
+def _checkout_held_order(order_id, data=None):
     try:
         if data and isinstance(data, str):
             data = json.loads(data)
@@ -898,6 +905,9 @@ def checkout_held_order(order_id, data=None):
         return result
 
     except Exception as e:
+        from klik_pos.api.sales_invoice import _raise_lock_race
+
+        _raise_lock_race(e)
         frappe.log_error(frappe.get_traceback(), f"Checkout Held Order Error: {order_id}")
         return {"success": False, "message": str(e)}
 

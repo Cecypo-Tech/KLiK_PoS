@@ -160,13 +160,13 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 				{"method": "Mpesa-Test", "amount": 10, "custom_reference_text": p} for p in paid
 			]
 		}
-		real_submit = mpesa_order.submit_draft_invoice
+		real_submit = mpesa_order._submit_draft_invoice
 		with (
 			_at_till(),
 			patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice),
 			patch.object(
 				mpesa_order,
-				"submit_draft_invoice",
+				"_submit_draft_invoice",
 				side_effect=lambda draft, _data, held, remarks: real_submit(draft, None, held, remarks),
 			),
 		):
@@ -219,7 +219,7 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 			patch.object(mpesa_order, "_create_invoice_draft", side_effect=_draft_invoice),
 			patch.object(
 				mpesa_order,
-				"submit_draft_invoice",
+				"_submit_draft_invoice",
 				return_value={"success": False, "error": "M-Pesa row not backed"},
 			),
 		):
