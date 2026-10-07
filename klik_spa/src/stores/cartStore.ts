@@ -187,7 +187,7 @@ interface CartState {
    */
   pendingRateOverrides: RateOverride[]
   rateOverrideNonce: number
-  requestCustomRate: (itemId: string, rate: number, includesTax?: boolean) => void
+  requestCustomRate: (itemId: string, rate: number, includesTax?: boolean, priceList?: string) => void
   /** Drop the requests up to and including `nonce`, once applied. */
   consumeRateOverrides: (nonce: number) => void
 }
@@ -229,8 +229,8 @@ export const useCartStore = create<CartState>()(
       })),
       pendingRateOverrides: [],
       rateOverrideNonce: 0,
-      requestCustomRate: (itemId, rate, includesTax = false) => set((s) => {
-        const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax });
+      requestCustomRate: (itemId, rate, includesTax = false, priceList) => set((s) => {
+        const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax, priceList });
         return { pendingRateOverrides: next.queue, rateOverrideNonce: next.nonce };
       }),
       consumeRateOverrides: (nonce) => set((s) => ({

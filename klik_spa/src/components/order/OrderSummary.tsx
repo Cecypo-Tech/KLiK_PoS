@@ -33,6 +33,7 @@ import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
 import { roundCurrency } from "../../utils/currencyMath";
 import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import { CART_ROW_GRID } from "./cartTableLayout";
+import { discountForOverride } from "../../utils/rateOverrides";
 
 interface OrderSummaryProps {
   onClearCart?: () => void;
@@ -398,17 +399,16 @@ export default function OrderSummary({
   };
 
   // Fulfills a rate-override request made from outside the cart (the item
-  // list's '*' shortcut) through the exact same path a cashier editing the
-  // Rate field in the cart itself would take - no separate rate-setting logic
-  // to keep in sync with checkout totals, persistence, or the discount reset.
+  // list's '*' shortcut, quick entry) by setting the line's discount entry the
+  // way the cart's own Rate field and price-list switch do - including which
+  // price list the rate came from, so the line's price chip shows it.
   const lastAppliedRateOverrideNonce = useRef(0);
   useEffect(() => {
     const fresh = pendingRateOverrides.filter((o) => o.nonce > lastAppliedRateOverrideNonce.current);
     if (fresh.length === 0) return;
     for (const override of fresh) {
-      const target = cartItems.find((ci) => ci.id === override.itemId);
-      if (target) {
-        handleCustomRateChange(target, override.rate, override.includesTax);
+      if (cartItems.some((ci) => ci.id === override.itemId)) {
+        setItemDiscounts((prev) => ({ ...prev, [override.itemId]: discountForOverride(prev[override.itemId], override) }));
       }
     }
     const last = fresh[fresh.length - 1]?.nonce ?? lastAppliedRateOverrideNonce.current;

@@ -273,7 +273,7 @@ export default function ProductGrid({
   // after is what tells a decline apart from a real add, and highlightItemId
   // names the exact line that was touched - the one this rate belongs on, even
   // if a duplicate line (same item_code, different id) exists.
-  const commitPriceSelection = useCallback(async (item: MenuItem, quantity: number, rate: number | null, includesTax: boolean) => {
+  const commitPriceSelection = useCallback(async (item: MenuItem, quantity: number, rate: number | null, includesTax: boolean, priceList?: string) => {
     if (rate === null) {
       await handleAddToCart(item, quantity);
       return;
@@ -283,7 +283,7 @@ export default function ProductGrid({
     await handleAddToCart(item, quantity);
     const { highlightNonce, highlightItemId } = useCartStore.getState();
     if (highlightNonce === nonceBefore || !highlightItemId) return;
-    requestCustomRate(highlightItemId, rate, includesTax);
+    requestCustomRate(highlightItemId, rate, includesTax, priceList);
   }, [handleAddToCart, requestCustomRate]);
 
   const handleItemKeyDown = useCallback((index: number, item: MenuItem, e: React.KeyboardEvent) => {
@@ -335,7 +335,7 @@ export default function ProductGrid({
           const rate = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
           void commitPriceSelection(item, quantity, rate, isTaxIncludedInBasicRate);
         } else {
-          void commitPriceSelection(item, quantity, currentOption?.rate ?? null, false);
+          void commitPriceSelection(item, quantity, currentOption?.rate ?? null, false, currentOption?.label);
         }
         return;
       }
