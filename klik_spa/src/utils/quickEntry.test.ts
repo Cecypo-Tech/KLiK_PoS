@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reviewOutcome, rowProblem, splitLines, toRows, withMatch, type ResolvedLine, type ReviewRow } from "./quickEntry";
+import { problemsFirst, reviewOutcome, rowProblem, splitLines, toRows, withMatch, type ResolvedLine, type ReviewRow } from "./quickEntry";
 
 const item = (id: string) => ({ id, item_code: id, name: id, price: 100, uom: "Nos" });
 const ok = (text: string, over: Partial<ResolvedLine> = {}): ResolvedLine => ({
@@ -87,5 +87,17 @@ describe("withMatch", () => {
       reason: null,
       skip: false,
     });
+  });
+});
+
+describe("problemsFirst", () => {
+  it("lists the lines that need a look first, each group in line order", () => {
+    const rows = [
+      row(1, ok("A")),
+      row(2, ok("X", { status: "none", item: null, reason: "no" })),
+      row(3, ok("B")),
+      row(4, ok("C", { qty_ambiguous: true })),
+    ];
+    expect(problemsFirst(rows, ctx).map((r) => r.line)).toEqual([2, 4, 1, 3]);
   });
 });

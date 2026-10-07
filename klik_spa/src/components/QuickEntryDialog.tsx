@@ -13,6 +13,7 @@ import { getCSRFToken } from "../utils/csrf";
 import { isItemOutOfStock } from "../utils/stock";
 import {
   MAX_LINES,
+  problemsFirst,
   reviewOutcome,
   rowProblem,
   splitLines,
@@ -146,7 +147,7 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
       const answered = toRows(lines, await resolveLines(lines.map((l) => l.text), context()));
       const ctx = reviewContext();
       if (answered.every((row) => rowProblem(row, ctx) === null)) await addRows(answered);
-      else setRows(answered);
+      else setRows(problemsFirst(answered, ctx));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add the items");
     } finally {

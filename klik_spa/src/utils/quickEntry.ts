@@ -64,6 +64,13 @@ export function rowProblem(row: ReviewRow, ctx: ReviewContext): string | null {
   return null;
 }
 
+/** The review's order: lines that need a look on top, so a long paste does not hide them. Set
+ * once when the review opens - a row the cashier fixes stays where it is. */
+export function problemsFirst(rows: ReviewRow[], ctx: ReviewContext): ReviewRow[] {
+  const flagged = rows.filter((row) => rowProblem(row, ctx) !== null);
+  return [...flagged, ...rows.filter((row) => !flagged.includes(row))];
+}
+
 export function reviewOutcome(rows: ReviewRow[], ctx: ReviewContext) {
   const toAdd: AddEntry[] = [];
   const skipped: ReviewRow[] = [];
