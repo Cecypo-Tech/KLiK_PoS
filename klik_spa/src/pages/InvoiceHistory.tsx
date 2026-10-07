@@ -76,7 +76,18 @@ interface HeldOrderExtras {
   priceBreach?: number;
   /** Kept for an M-Pesa push sent from it: finishing it picks the payment up. */
   mpesaOrder?: boolean;
+  /** What the order would come to if checked out now, on a till that records Loss of Sale:
+   * the order holds what was asked for, out-of-stock lines included. */
+  inStockTotal?: number;
 }
+
+/** "Sh 450 in stock" under a held order's total, when not all of it is. */
+const inStockLine = (invoice: SalesInvoice & HeldOrderExtras) =>
+  invoice.inStockTotal !== undefined && invoice.inStockTotal !== invoice.totalAmount ? (
+    <div className="text-xs text-amber-700 dark:text-amber-400">
+      {formatCurrencyWithSymbol(invoice.inStockTotal, invoice.currency)} in stock
+    </div>
+  ) : null;
 
 const INVOICE_HISTORY_VIEW_MODE_KEY = "invoice-history-view-mode";
 const INVOICE_HISTORY_FILTERS_KEY = "invoice-history-filters";
@@ -247,6 +258,7 @@ export default function InvoiceHistoryPage() {
         approvalState: o.approval_state ?? null,
         priceBreach: Number(o.price_breach) || 0,
         mpesaOrder: Boolean(o.mpesa_order),
+        inStockTotal: o.in_stock_total === undefined || o.in_stock_total === null ? undefined : Number(o.in_stock_total),
       })) as unknown as (SalesInvoice & HeldOrderExtras)[];
       setHeldOrders(mapped);
     } catch {
@@ -827,6 +839,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                     <div className="text-sm font-medium text-gray-900 dark:text-white">
                       {formatCurrencyWithSymbol(invoice.totalAmount, invoice.currency)}
                     </div>
+                    {inStockLine(invoice)}
                     {invoice.giftCardDiscount > 0 && (
                       <div className="text-xs text-orange-600 dark:text-green-400">
                         -{formatCurrencyWithSymbol(invoice.giftCardDiscount, invoice.currency)} discount
@@ -944,7 +957,10 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Amount:</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{formatCurrencyWithSymbol(invoice.totalAmount, invoice.currency)}</span>
+                  <span className="text-right">
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrencyWithSymbol(invoice.totalAmount, invoice.currency)}</span>
+                    {inStockLine(invoice)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Date:</span>
