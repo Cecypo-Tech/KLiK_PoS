@@ -5,13 +5,14 @@ item whose name contains it. Several matches fail the line - guessing would put 
 item on a sale. Only items this till sells can match.
 """
 
+from unittest import TestCase
 from unittest.mock import patch
 
 import frappe
 from erpnext.stock.doctype.item.test_item import make_item
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.api.item.quick_entry import MAX_LINES, match_items
+from klik_pos.api.item.quick_entry import MAX_LINES, parse_line, resolve_lines
 
 GROUP = "_Test KLiK Quick Entry"
 OTHER_GROUP = "_Test KLiK Quick Entry Other"
@@ -37,6 +38,18 @@ class TestQuickEntryMatching(FrappeTestCase):
 					"item_attribute_values": [{"attribute_value": "Small", "abbr": "S"}],
 				}
 			).insert()
+		if not frappe.db.exists("Supplier", "_Test QE Supplier"):
+			frappe.get_doc(
+				{
+					"doctype": "Supplier",
+					"supplier_name": "_Test QE Supplier",
+					"supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}, "name"),
+				}
+			).insert()
+
+		def supplier(part):
+			return {"supplier_items": [{"supplier": "_Test QE Supplier", "supplier_part_no": part}]}
+
 		for code, name, group, extra in (
 			("QE-MIMOSA-01", "Mimosa Juice", GROUP, {}),
 			("QE-TWIST300", "Twist 300ml", GROUP, {}),
@@ -45,6 +58,16 @@ class TestQuickEntryMatching(FrappeTestCase):
 			("QE-MIMOSA-ELSEWHERE", "Mimosa Elsewhere", OTHER_GROUP, {}),
 			("QE-NOT-FOR-SALE", "Not For Sale", GROUP, {"is_sales_item": 0}),
 			("QE-SHIRT", "Shirt Template", GROUP, {"has_variants": 1, "attributes": [{"attribute": "_Test QE Size"}]}),
+			("QE-KY14094", "Steering rack boot", GROUP, {**supplier("51360-QE-T01-B"), "barcodes": [{"barcode": "QE5000000001"}]}),
+			("QE-KY20187", "Stabiliser link", GROUP, supplier("48849-QE090")),
+			("QE-NUMPART", "Numbered part", GROUP, supplier("987654")),
+			("QE-ASIMCO-A", "ASIMCO filter A", GROUP, {"barcodes": [{"barcode": "QE-SAME-TEXT"}]}),
+			("QE-ASIMCO-B", "ASIMCO filter B", GROUP, supplier("QE-SAME-TEXT")),
+			# Another brand of the same part: the supplier part number is shared.
+			("QE-AB-001", "Stabiliser link, other brand", GROUP, supplier("48849-QE090")),
+			("QE-PADS", "Brake pads", GROUP, {}),
+			# Its supplier's part number is another item's code.
+			("QE-PADS-FF", "Brake pads, other brand", GROUP, supplier("QE-PADS")),
 		):
 			if not frappe.db.exists("Item", code):
 				make_item(code, {"item_name": name, "item_group": group, "is_stock_item": 0, **extra})
@@ -56,6 +79,7 @@ class TestQuickEntryMatching(FrappeTestCase):
 			selling_price_list=frappe.db.get_value("Price List", {"selling": 1, "enabled": 1}, "name"),
 			item_groups=[frappe._dict(item_group=GROUP)],
 			custom_enable_service_items=1,
+			currency=frappe.db.get_value("Company", cls.company, "default_currency"),
 		)
 		frappe.db.commit()
 
@@ -65,16 +89,18 @@ class TestQuickEntryMatching(FrappeTestCase):
 		for code in frappe.get_all("Item", filters={"name": ["like", "QE-%"]}, pluck="name"):
 			frappe.delete_doc("Item", code, force=True)
 		frappe.delete_doc("Item Attribute", "_Test QE Size", force=True, ignore_missing=True)
+		frappe.delete_doc("Supplier", "_Test QE Supplier", force=True, ignore_missing=True)
 		frappe.db.commit()
 		super().tearDownClass()
 
-	def _match(self, *queries, till=None):
+	def _match(self, *lines, till=None):
 		till = till or self.till
 		with (
 			patch("klik_pos.api.item.quick_entry.get_current_pos_profile", return_value=till),
 			patch("klik_pos.api.item.item_listing.get_current_pos_profile", return_value=till),
+			patch("klik_pos.api.item.item_tax_details.get_current_pos_profile", return_value=till),
 		):
-			return match_items(list(queries))
+			return resolve_lines(list(lines))
 
 	def _one(self, query):
 		return self._match(query)[0]
@@ -92,7 +118,7 @@ class TestQuickEntryMatching(FrappeTestCase):
 	def test_several_codes_containing_the_text_fail_the_line(self):
 		result = self._one("twist30")
 		self.assertEqual(result["status"], "many")
-		self.assertEqual(sorted(result["candidates"]), ["QE-TWIST300", "QE-TWIST3000"])
+		self.assertEqual(sorted(c["code"] for c in result["candidates"]), ["QE-TWIST300", "QE-TWIST3000"])
 		self.assertIsNone(result["item"])
 
 	def test_the_name_is_tried_when_no_code_has_the_text(self):
@@ -118,17 +144,18 @@ class TestQuickEntryMatching(FrappeTestCase):
 
 	def test_answers_come_back_in_the_order_asked(self):
 		results = self._match("juice", "twist30", "juice")
-		self.assertEqual([r["query"] for r in results], ["juice", "twist30", "juice"])
+		self.assertEqual([r["text"] for r in results], ["juice", "twist30", "juice"])
 		self.assertEqual([r["status"] for r in results], ["ok", "many", "ok"])
 
-	def test_a_huge_paste_is_refused(self):
+	def test_five_hundred_lines_are_fine_and_five_hundred_and_one_are_not(self):
+		self.assertEqual(len(self._match(*["QE-TWIST300"] * MAX_LINES)), MAX_LINES)
 		with self.assertRaises(frappe.ValidationError):
 			self._match(*["x"] * (MAX_LINES + 1))
 
 	def test_an_item_with_variants_asks_for_the_variant(self):
 		result = self._one("QE-SHIRT")
 		self.assertEqual(result["status"], "template")
-		self.assertEqual(result["candidates"], ["QE-SHIRT"])
+		self.assertEqual([c["code"] for c in result["candidates"]], ["QE-SHIRT"])
 
 	def test_an_item_the_till_does_not_offer_is_unavailable(self):
 		"""A service item on a till without service items: matched, but not sellable here."""
@@ -142,7 +169,7 @@ class TestQuickEntryMatching(FrappeTestCase):
 
 	def test_a_payload_that_is_not_a_list_is_refused(self):
 		with self.assertRaises(frappe.ValidationError):
-			match_items('{"a": 1}')
+			resolve_lines('{"a": 1}')
 
 	def test_someone_who_cannot_read_items_matches_nothing(self):
 		user = "quick-entry-no-item-read@example.com"
@@ -152,6 +179,153 @@ class TestQuickEntryMatching(FrappeTestCase):
 			)
 		frappe.set_user(user)
 		try:
-			self.assertEqual(self._one("QE-TWIST300")["status"], "none")
+			for text in ("QE-TWIST300", "QE5000000001", "51360-QE-T01-B"):
+				self.assertEqual(self._one(text)["status"], "none", text)
 		finally:
 			frappe.set_user("Administrator")
+
+
+	def test_codes_barcodes_and_supplier_parts_all_find_the_item(self):
+		for text in ("QE-KY14094", "qe5000000001", "51360-qe-t01-b"):
+			result = self._one(text)
+			self.assertEqual((result["status"], result["item"]["id"]), ("ok", "QE-KY14094"), text)
+
+	def test_tokens_naming_the_same_item_agree(self):
+		result = self._one("51360-QE-T01-B ASIMCO    QE-KY14094    4")
+		self.assertEqual(
+			(result["status"], result["item"]["id"], result["qty"], result["qty_ambiguous"]), ("ok", "QE-KY14094", 4, False)
+		)
+
+	def test_tokens_naming_different_items_conflict(self):
+		result = self._one("QE-KY14094 QE-KY20187 2")
+		self.assertEqual(result["status"], "conflict")
+		self.assertEqual(sorted(c["code"] for c in result["candidates"]), ["QE-KY14094", "QE-KY20187"])
+		self.assertIsNone(result["item"])
+
+	def test_an_item_code_beats_a_part_number_with_the_same_text(self):
+		result = self._one("QE-PADS    QE-PADS    2")
+		self.assertEqual((result["status"], result["item"]["id"]), ("ok", "QE-PADS"))
+
+	def test_tokens_that_agree_on_one_item_settle_a_shared_part_number(self):
+		result = self._one("48849-QE090 ASIMCO    QE-KY20187    4")
+		self.assertEqual((result["status"], result["item"]["id"]), ("ok", "QE-KY20187"))
+
+	def test_a_barcode_and_a_part_number_with_the_same_text_both_count(self):
+		"""Neither is an item code, so neither outranks the other."""
+		result = self._one("QE-SAME-TEXT")
+		self.assertEqual(result["status"], "conflict")
+		self.assertEqual(sorted(c["code"] for c in result["candidates"]), ["QE-ASIMCO-A", "QE-ASIMCO-B"])
+
+	def test_a_shared_part_number_alone_asks_which_item(self):
+		result = self._one("48849-QE090 2")
+		self.assertEqual(result["status"], "conflict")
+		self.assertEqual(sorted(c["code"] for c in result["candidates"]), ["QE-AB-001", "QE-KY20187"])
+
+	def test_the_sample_line_shapes(self):
+		cases = {
+			"QE-TWIST300    QE-TWIST300    2": ("QE-TWIST300", 2),
+			"QE-TWIST300 ASIMCO        2": ("QE-TWIST300", 2),
+			"48849-QE090 ASIMCO    QE-KY20187    4": ("QE-KY20187", 4),
+			"5pcs QE-TWIST300": ("QE-TWIST300", 5),
+			"QE-TWIST300": ("QE-TWIST300", 1),
+		}
+		for text, (code, qty) in cases.items():
+			result = self._one(text)
+			self.assertEqual((result["status"], result["item"]["id"], result["qty"]), ("ok", code, qty), text)
+
+	def test_a_number_is_the_part_when_nothing_else_names_an_item(self):
+		result = self._one("987654 3")
+		self.assertEqual(
+			(result["status"], result["item"]["id"], result["qty"], result["qty_ambiguous"]), ("ok", "QE-NUMPART", 3, False)
+		)
+
+	def test_two_loose_numbers_ask_which_is_the_quantity(self):
+		result = self._one("QE-TWIST300 2 5")
+		self.assertEqual((result["status"], result["qty"], result["qty_ambiguous"]), ("ok", 5, True))
+
+	def test_a_brand_word_alone_goes_to_review(self):
+		result = self._one("QE-NO-SUCH-CODE ASIMCO 2")
+		self.assertEqual(result["status"], "many")
+		self.assertEqual(sorted(c["code"] for c in result["candidates"]), ["QE-ASIMCO-A", "QE-ASIMCO-B"])
+
+	def test_a_zero_quantity_is_invalid(self):
+		self.assertEqual(self._one("QE-TWIST300 0")["status"], "invalid")
+		self.assertEqual(self._one("mimosa, 0")["reason"], "Quantity must be more than 0")
+
+	def test_a_quantity_it_cannot_read_is_not_taken_as_one(self):
+		for text in ("QE-TWIST300 1/2", "QE-TWIST300 4kg"):
+			result = self._one(text)
+			self.assertEqual((result["status"], result["qty_ambiguous"]), ("ok", True), text)
+
+	def test_a_partial_name_from_a_line_of_several_words_is_only_a_suggestion(self):
+		result = self._one("QE-NO-SUCH-CODE JUICE 2")
+		self.assertEqual(result["status"], "many")
+		self.assertEqual([c["code"] for c in result["candidates"]], ["QE-MIMOSA-01"])
+		self.assertIsNone(result["item"])
+
+	def test_a_number_naming_an_item_beside_words_that_missed_is_only_a_suggestion(self):
+		result = self._one("oil filter 987654")
+		self.assertEqual(result["status"], "many")
+		self.assertEqual([c["code"] for c in result["candidates"]], ["QE-NUMPART"])
+
+	def test_the_rate_comes_back(self):
+		self.assertEqual(self._one("QE-TWIST300 @220 3")["rate"], 220)
+
+	def test_the_matched_item_carries_its_tax_details(self):
+		item = self._one("QE-TWIST300")["item"]
+		for field in ("item_tax_template", "item_tax_rate", "tax_templates", "total_tax_rate"):
+			self.assertIn(field, item)
+
+
+class TestQuickEntryParsing(TestCase):
+	def test_parse_line_table(self):
+		cases = [
+			# text, item_tokens, numbers, qty, qty_ambiguous, rate
+			("5pcs AP004", ["AP004"], [], 5, False, None),
+			("5 pcs AP004", ["AP004"], [], 5, False, None),
+			("AP004 5pc", ["AP004"], [], 5, False, None),
+			("ap004 5PCE", ["ap004"], [], 5, False, None),
+			("AP004 x5", ["AP004"], [], 5, False, None),
+			("AP004 x 5", ["AP004"], [], 5, False, None),
+			("5x AP004", ["AP004"], [], 5, False, None),
+			("qty 5 AP004", ["AP004"], [], 5, False, None),
+			("AP004 qty:5", ["AP004"], [], 5, False, None),
+			("AP004 2.5pcs", ["AP004"], [], 2.5, False, None),
+			("AP377\tAP377\t2", ["AP377", "AP377"], ["2"], None, False, None),
+			("51360-TMJ-T01-B ASIMCO    KY14094    4", ["51360-TMJ-T01-B", "ASIMCO", "KY14094"], ["4"], None, False, None),
+			("AP004", ["AP004"], [], None, False, None),
+			("AP004 @220", ["AP004"], [], None, False, 220),
+			("AP004 @ 220 3", ["AP004"], ["3"], None, False, 220),
+			("5pcs AP004 x2", ["AP004"], [], 2, True, None),
+			("5pcs AP004 7", ["AP004"], ["7"], 5, False, None),
+			("BOX 5", ["BOX"], ["5"], None, False, None),
+			("AP004 4nos", ["AP004"], [], 4, False, None),
+			("AP004 4 units", ["AP004"], [], 4, False, None),
+			("AP004 4pcs.", ["AP004"], [], 4, False, None),
+			("AP004 qty 4.", ["AP004"], [], 4, False, None),
+			("AP004 (4)", ["AP004"], ["4"], None, False, None),
+			("AP004 #4", ["AP004"], ["4"], None, False, None),
+			("AP004 .5pcs", ["AP004"], [], 0.5, False, None),
+			# legacy comma lines, read exactly as before
+			("mimosa, 1", ["mimosa"], [], 1, False, None),
+			("twist300, 5, 220", ["twist300"], [], 5, False, 220),
+			("mimosa juice, 2", ["mimosa juice"], [], 2, False, None),
+			("rope, .5", ["rope"], [], 0.5, False, None),
+		]
+		for text, tokens, numbers, qty, ambiguous, rate in cases:
+			parsed = parse_line(text)
+			self.assertEqual(
+				(parsed["item_tokens"], parsed["numbers"], parsed["qty"], parsed["qty_ambiguous"], parsed["rate"], parsed["error"]),
+				(tokens, numbers, qty, ambiguous, rate, None),
+				text,
+			)
+
+	def test_unreadable_values_say_why(self):
+		self.assertEqual(parse_line("mimosa, 0")["error"], "Quantity must be more than 0")
+		self.assertEqual(parse_line("0pcs mimosa")["error"], "Quantity must be more than 0")
+		self.assertEqual(parse_line("mimosa, 1, cheap")["error"], "Rate must be a number")
+		self.assertEqual(parse_line("mimosa, 1, 0")["error"], "Rate must be more than 0 (leave it out for the till's price)")
+		self.assertEqual(parse_line("mimosa @0")["error"], "Rate must be more than 0 (leave it out for the till's price)")
+
+	def test_punctuation_alone_is_not_an_item(self):
+		self.assertEqual(parse_line("AP004 - 2 *")["item_tokens"], ["AP004"])

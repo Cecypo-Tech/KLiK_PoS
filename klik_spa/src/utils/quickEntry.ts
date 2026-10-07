@@ -1,105 +1,89 @@
 /**
- * Quick entry: one "item, qty, rate" per line, typed or pasted into the POS. The item is
- * matched on the server (klik_pos.api.item.quick_entry.match_items); this reads the lines
- * and decides what goes into the cart and what stays in the box, with a reason.
+ * Quick entry: an order pasted into the POS. The server reads and matches every line
+ * (klik_pos.api.item.quick_entry.resolve_lines); this decides which lines are ready for the
+ * cart and which the cashier must look at first. Nothing is added until every line is ready
+ * or skipped.
  */
 
-export interface QuickEntryLine {
+export type LineStatus = "ok" | "many" | "conflict" | "none" | "template" | "unavailable" | "invalid";
+
+export interface ResolvedLine {
+  text: string;
+  status: LineStatus;
+  qty: number;
+  /** The line had more than one number that could be the quantity: qty is a guess. */
+  qty_ambiguous: boolean;
+  /** null: the till's price. */
+  rate: number | null;
+  /** Cart-ready, tax details included; null unless status is ok. */
+  item: Record<string, unknown> | null;
+  candidates: Array<{ code: string; name: string }>;
+  reason: string | null;
+}
+
+export interface ReviewRow extends ResolvedLine {
   /** 1-based line number in the box, blank lines included. */
   line: number;
-  text: string;
-  query: string;
+  skip: boolean;
+}
+
+export interface ReviewContext {
+  allowRateChange: boolean;
+  isOutOfStock: (item: Record<string, unknown>) => boolean;
+}
+
+export interface AddEntry {
+  line: number;
+  item: Record<string, unknown>;
   qty: number;
-  /** null: use the till's price. */
   rate: number | null;
-  error: string | null;
 }
 
-export interface MatchResult {
-  query: string;
-  status: "ok" | "many" | "none" | "template" | "unavailable";
-  item: Record<string, unknown> | null;
-  candidates: string[];
-}
-
-export interface QuickEntryPlan {
-  toAdd: Array<{ line: number; item: Record<string, unknown>; qty: number; rate: number | null }>;
-  failed: Array<{ line: number; text: string; reason: string }>;
-}
-
-const SEPARATOR_LINE = /^[-=_*\s]+$/;
 /** Same as the server's cap (klik_pos.api.item.quick_entry.MAX_LINES). */
-export const MAX_LINES = 50;
+export const MAX_LINES = 500;
+const SEPARATOR_LINE = /^[-=_*\s]+$/;
 
-function parseNumber(value: string): number | null {
-  if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(value)) return null;
-  return Number(value);
+export function splitLines(text: string): Array<{ line: number; text: string }> {
+  return text
+    .split(/\r?\n/)
+    .map((raw, index) => ({ line: index + 1, text: raw.trim() }))
+    .filter(({ text }) => text && !SEPARATOR_LINE.test(text));
 }
 
-export function parseQuickEntry(text: string): QuickEntryLine[] {
-  const lines: QuickEntryLine[] = [];
-  text.split(/\r?\n/).forEach((raw, index) => {
-    const trimmed = raw.trim();
-    if (!trimmed || SEPARATOR_LINE.test(trimmed)) return;
-    // A tab separates as well as a comma: rows copied from a spreadsheet arrive that way.
-    const [query = "", qtyText = "", rateText = "", ...extra] = trimmed.split(/[,\t]/).map((part) => part.trim());
-    const entry: QuickEntryLine = { line: index + 1, text: trimmed, query, qty: 0, rate: null, error: null };
-    const qty = parseNumber(qtyText);
-    const rate = rateText === "" ? null : parseNumber(rateText);
-
-    if (extra.length) entry.error = "Too many values: enter item, qty, rate";
-    else if (!query) entry.error = "Item is missing";
-    else if (!qtyText) entry.error = "Quantity is missing";
-    else if (qty === null) entry.error = "Quantity must be a number";
-    else if (qty <= 0) entry.error = "Quantity must be more than 0";
-    else if (rateText !== "" && rate === null) entry.error = "Rate must be a number";
-    else if (rate !== null && rate <= 0) entry.error = "Rate must be more than 0 (leave it out for the till's price)";
-
-    entry.qty = qty ?? 0;
-    entry.rate = rate;
-    lines.push(entry);
-  });
-  return lines;
+export function toRows(lines: Array<{ line: number; text: string }>, answers: ResolvedLine[]): ReviewRow[] {
+  return lines.map(({ line }, index) => ({ ...(answers[index] as ResolvedLine), line, skip: false }));
 }
 
-export function failureReason(result: MatchResult): string {
-  switch (result.status) {
-    case "many":
-      return `Several items match "${result.query}": ${result.candidates.join(", ")}`;
-    case "template":
-      return `${result.candidates[0]} has variants: enter the variant's code`;
-    case "unavailable":
-      return `${result.candidates[0]} is not available on this till`;
-    default:
-      return `No item matches "${result.query}"`;
+/** Why a row cannot go into the cart as it stands, or null when it can. */
+export function rowProblem(row: ReviewRow, ctx: ReviewContext): string | null {
+  if (row.status !== "ok" || !row.item) return row.reason ?? `No item matches "${row.text}"`;
+  if (!(row.qty > 0)) return "Quantity must be more than 0";
+  if (row.qty_ambiguous) return "Check the quantity: the line has more than one number";
+  if (row.rate !== null && !ctx.allowRateChange) return "This till does not allow changing the price";
+  if (ctx.isOutOfStock(row.item)) return `${String(row.item.id)} is out of stock`;
+  return null;
+}
+
+/** The review's order: lines that need a look on top, so a long paste does not hide them. Set
+ * once when the review opens - a row the cashier fixes stays where it is. */
+export function problemsFirst(rows: ReviewRow[], ctx: ReviewContext): ReviewRow[] {
+  const flagged = rows.filter((row) => rowProblem(row, ctx) !== null);
+  return [...flagged, ...rows.filter((row) => !flagged.includes(row))];
+}
+
+export function reviewOutcome(rows: ReviewRow[], ctx: ReviewContext) {
+  const toAdd: AddEntry[] = [];
+  const skipped: ReviewRow[] = [];
+  const blocked: ReviewRow[] = [];
+  for (const row of rows) {
+    if (row.skip) skipped.push(row);
+    else if (rowProblem(row, ctx)) blocked.push(row);
+    else toAdd.push({ line: row.line, item: row.item as Record<string, unknown>, qty: row.qty, rate: row.rate });
   }
+  return { toAdd, skipped, blocked };
 }
 
-/** `results` answers the lines without a parse error, in order. */
-export function planQuickEntry(
-  lines: QuickEntryLine[],
-  results: MatchResult[],
-  { allowRateChange }: { allowRateChange: boolean }
-): QuickEntryPlan {
-  const plan: QuickEntryPlan = { toAdd: [], failed: [] };
-  let next = 0;
-  for (const entry of lines) {
-    if (entry.error) {
-      plan.failed.push({ line: entry.line, text: entry.text, reason: entry.error });
-      continue;
-    }
-    const result = results[next++];
-    if (!result || result.status !== "ok" || !result.item) {
-      plan.failed.push({
-        line: entry.line,
-        text: entry.text,
-        reason: result ? failureReason(result) : `No item matches "${entry.query}"`,
-      });
-    } else if (entry.rate !== null && !allowRateChange) {
-      plan.failed.push({ line: entry.line, text: entry.text, reason: "This till does not allow changing the price" });
-    } else {
-      plan.toAdd.push({ line: entry.line, item: result.item, qty: entry.qty, rate: entry.rate });
-    }
-  }
-  return plan;
+/** The row re-matched (a candidate picked, a code typed): the new item, the row's own qty and rate. */
+export function withMatch(row: ReviewRow, match: ResolvedLine): ReviewRow {
+  return { ...row, status: match.status, item: match.item, candidates: match.candidates, reason: match.reason, skip: false };
 }
