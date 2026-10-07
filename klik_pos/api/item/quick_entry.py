@@ -29,11 +29,12 @@ CANDIDATES_SHOWN = 5
 
 _NUMBER = r"(?:\d+(?:\.\d+)?|\.\d+)"
 _IS_NUMBER = re.compile(rf"^{_NUMBER}$")
-# A quantity the line marks as one: 5pcs, 5pc, 5pce, 5x, x5, qty5, qty:5.
-_MARKED_QTY = re.compile(rf"^(?:x({_NUMBER})|({_NUMBER})(?:pcs?|pce|x)|qty:?({_NUMBER}))$", re.I)
+_UNITS = r"pcs?|pce|pieces?|nos?|units?"
+# A quantity the line marks as one: 5pcs, 5pc, 5pce, 5nos, 5units, 5x, x5, qty5, qty:5.
+_MARKED_QTY = re.compile(rf"^(?:x({_NUMBER})|({_NUMBER})(?:{_UNITS}|x)|qty:?({_NUMBER}))$", re.I)
 # "5 pcs", "x 5", "qty 5", "@ 220" written apart: joined so each is one token.
 _JOINS = (
-	(re.compile(rf"(?<![\w.])({_NUMBER})\s+(pcs?|pce)\b", re.I), r"\1\2"),
+	(re.compile(rf"(?<![\w.])({_NUMBER})\s+({_UNITS})\b", re.I), r"\1\2"),
 	(re.compile(r"\b(qty:?|x)\s+(?=[\d.])", re.I), r"\1"),
 	(re.compile(r"@\s+"), "@"),
 )
@@ -56,6 +57,8 @@ def parse_line(text):
 		"qty_ambiguous": False,
 		"rate": None,
 		"error": None,
+		# A token with a digit the line could not read ("1/2", "4kg"): the quantity may be in it.
+		"unread": False,
 	}
 	parts = [part.strip() for part in text.split(",")]
 	if 2 <= len(parts) <= 3 and parts[0] and _IS_NUMBER.match(parts[1]):
@@ -70,6 +73,8 @@ def parse_line(text):
 		for pattern, joined in _JOINS:
 			text = pattern.sub(joined, text)
 		for token in re.split(r"[\s,]+", text):
+			# Order punctuation around a value: "(4)", "#4", "4pcs."
+			token = token.lstrip("([#").rstrip(".,;:)]")
 			marked = _MARKED_QTY.match(token)
 			if marked:
 				parsed["qty_ambiguous"] = parsed["qty"] is not None
@@ -80,6 +85,8 @@ def parse_line(text):
 				parsed["numbers"].append(token)
 			elif re.search(r"[A-Za-z]", token) or (re.search(r"\d", token) and "-" in token):
 				parsed["item_tokens"].append(token)
+			elif re.search(r"\d", token):
+				parsed["unread"] = True
 	if parsed["qty"] is not None and parsed["qty"] <= 0:
 		parsed["error"] = _("Quantity must be more than 0")
 	elif parsed["rate"] is not None and parsed["rate"] <= 0:
@@ -149,7 +156,7 @@ def _substring_match(token, allowed_groups):
 
 
 def _answer(parsed, hits, allowed_groups):
-	"""The line's item codes, how they were found, and its quantity.
+	"""The line's item codes, how they were found (exact, number, substring), and its quantity.
 
 	Where the tokens that hit agree on one item ("54560-1HJ0A KY10004": a part number two brands
 	share, and one brand's code), that is the item; where they share none, they conflict."""
@@ -165,6 +172,7 @@ def _answer(parsed, hits, allowed_groups):
 			if hits.get(number.lower()):
 				codes |= hits[number.lower()]
 				numbers.remove(number)
+				how = "number"
 	if not codes:
 		how = "substring"
 		for token in parsed["item_tokens"]:
@@ -176,7 +184,10 @@ def _answer(parsed, hits, allowed_groups):
 	elif numbers:
 		qty, ambiguous = float(numbers[-1]), len(numbers) > 1
 	else:
-		qty, ambiguous = 1.0, False
+		# No quantity found: 1, unless the line holds a digit it could not place ("1/2", "4kg").
+		missed = [t for t in parsed["item_tokens"] if not hits.get(t.lower())]
+		ambiguous = parsed["unread"] or (how == "exact" and any(re.search(r"\d", t) for t in missed))
+		qty = 1.0
 	return sorted(codes), how, qty, ambiguous
 
 
@@ -220,6 +231,9 @@ def resolve_lines(lines, customer=None, price_list=None, warehouse=None):
 			answer.update(status="invalid", reason=p["error"] or _("Quantity must be more than 0"))
 		elif len(codes) > 1:
 			answer["status"] = "conflict" if how == "exact" else "many"
+		elif codes and ((how == "number" and p["item_tokens"]) or (how == "substring" and len(p["item_tokens"]) > 1)):
+			# Words on the line missed and something else found an item: a lead, not an answer.
+			answer.update(status="many", reason=_("Not sure this is the item: pick it to confirm"))
 		elif codes:
 			answer["status"] = "ok"
 		answers.append(answer)
@@ -271,7 +285,7 @@ def resolve_lines(lines, customer=None, price_list=None, warehouse=None):
 		elif answer["status"] == "none":
 			answer["reason"] = _('No item matches "{0}"').format(answer["text"])
 		elif answer["status"] == "many":
-			answer["reason"] = _("Several items match: pick one")
+			answer["reason"] = answer["reason"] or _("Several items match: pick one")
 		elif answer["status"] == "conflict":
 			answer["reason"] = _("The line names different items: pick one")
 		answer["candidates"] = [{"code": c, "name": names.get(c, c)} for c in answer["candidates"]]

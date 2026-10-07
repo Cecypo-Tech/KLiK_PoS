@@ -279,7 +279,7 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
                               <span>
                                 {String(row.item.id)} - {String(row.item.name)}
                               </span>
-                            ) : row.candidates.length > 1 ? (
+                            ) : (row.status === "many" || row.status === "conflict") && row.candidates.length > 0 ? (
                               <select
                                 aria-label={`Item for line ${row.line}`}
                                 disabled={busy}

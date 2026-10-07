@@ -252,6 +252,22 @@ class TestQuickEntryMatching(FrappeTestCase):
 		self.assertEqual(self._one("QE-TWIST300 0")["status"], "invalid")
 		self.assertEqual(self._one("mimosa, 0")["reason"], "Quantity must be more than 0")
 
+	def test_a_quantity_it_cannot_read_is_not_taken_as_one(self):
+		for text in ("QE-TWIST300 1/2", "QE-TWIST300 4kg"):
+			result = self._one(text)
+			self.assertEqual((result["status"], result["qty_ambiguous"]), ("ok", True), text)
+
+	def test_a_partial_name_from_a_line_of_several_words_is_only_a_suggestion(self):
+		result = self._one("QE-NO-SUCH-CODE JUICE 2")
+		self.assertEqual(result["status"], "many")
+		self.assertEqual([c["code"] for c in result["candidates"]], ["QE-MIMOSA-01"])
+		self.assertIsNone(result["item"])
+
+	def test_a_number_naming_an_item_beside_words_that_missed_is_only_a_suggestion(self):
+		result = self._one("oil filter 987654")
+		self.assertEqual(result["status"], "many")
+		self.assertEqual([c["code"] for c in result["candidates"]], ["QE-NUMPART"])
+
 	def test_the_rate_comes_back(self):
 		self.assertEqual(self._one("QE-TWIST300 @220 3")["rate"], 220)
 
@@ -283,6 +299,13 @@ class TestQuickEntryParsing(TestCase):
 			("5pcs AP004 x2", ["AP004"], [], 2, True, None),
 			("5pcs AP004 7", ["AP004"], ["7"], 5, False, None),
 			("BOX 5", ["BOX"], ["5"], None, False, None),
+			("AP004 4nos", ["AP004"], [], 4, False, None),
+			("AP004 4 units", ["AP004"], [], 4, False, None),
+			("AP004 4pcs.", ["AP004"], [], 4, False, None),
+			("AP004 qty 4.", ["AP004"], [], 4, False, None),
+			("AP004 (4)", ["AP004"], ["4"], None, False, None),
+			("AP004 #4", ["AP004"], ["4"], None, False, None),
+			("AP004 .5pcs", ["AP004"], [], 0.5, False, None),
 			# legacy comma lines, read exactly as before
 			("mimosa, 1", ["mimosa"], [], 1, False, None),
 			("twist300, 5, 220", ["twist300"], [], 5, False, 220),
