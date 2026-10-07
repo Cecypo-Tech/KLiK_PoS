@@ -469,6 +469,7 @@ export function useCustomers(searchQuery?: string) {
 }
 
 export function useCustomerDetails(customerId: string | null) {
+  const { posDetails } = usePOSProfileStore();
   const [customer, setCustomer] = useState<Customer | null>(null);
   // Start loading when there is an id to fetch. Initialising to false makes the first render
   // report "not loading, no customer", which reads as not-found until the effect runs.
@@ -502,7 +503,7 @@ export function useCustomerDetails(customerId: string | null) {
             city: apiCustomer.address_data?.city || "",
             state: apiCustomer.address_data?.state || "",
             zipCode: apiCustomer.address_data?.pincode || "",
-            country: apiCustomer.address_data?.country || "Saudi Arabia"
+            country: apiCustomer.address_data?.country || posDetails?.company?.country || ""
           },
           dateOfBirth: "",
           gender: "other",

@@ -278,26 +278,21 @@ def get_customer_info(customer_name: str):
 
         customer_name = urllib.parse.unquote(customer_name)
         pos_profile = get_current_pos_profile()
-        party_details = get_party_details(party=customer_name, party_type="Customer", pos_profile=pos_profile.name)  # This will raise if customer doesn't exist
-        # First try to find by customer_name
-        customers = frappe.get_all(
-            "Customer", filters={"customer_name": customer_name}, fields=["name"]
+        # The ID first: a duplicate customer keeps the same customer_name under the ID
+        # "<name> - 1", so a name-first lookup hands back the duplicate.
+        customer_id = frappe.db.exists("Customer", customer_name) or frappe.db.get_value(
+            "Customer", {"customer_name": customer_name}, "name"
         )
 
-        # If not found by customer_name, try by name (ID)
-        if not customers:
-            customers = frappe.get_all(
-                "Customer", filters={"name": customer_name}, fields=["name"]
-            )
-
-        if not customers:
+        if not customer_id:
             # Log the search attempt for debugging
             frappe.logger().info(
-                f"Customer not found: '{customer_name}'. Searched by customer_name and name."
+                f"Customer not found: '{customer_name}'. Searched by name and customer_name."
             )
             return {"success": False, "error": f"Customer not found: {customer_name}"}
 
-        customer = frappe.get_doc("Customer", customers[0]["name"])
+        party_details = get_party_details(party=customer_id, party_type="Customer", pos_profile=pos_profile.name)
+        customer = frappe.get_doc("Customer", customer_id)
 
         # Get primary contact details
         contact_data = None
