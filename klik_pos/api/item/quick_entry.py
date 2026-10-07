@@ -8,6 +8,8 @@ same scope as its product list - and the matched item comes back exactly as the 
 list would hand it to the cart.
 """
 
+import re
+
 import frappe
 from frappe import _
 
@@ -20,6 +22,66 @@ from .item_listing import get_items
 MAX_LINES = 50
 # Candidates named back for a line that matched several items.
 CANDIDATES_SHOWN = 5
+
+
+_NUMBER = r"(?:\d+(?:\.\d+)?|\.\d+)"
+_IS_NUMBER = re.compile(rf"^{_NUMBER}$")
+# A quantity the line marks as one: 5pcs, 5pc, 5pce, 5x, x5, qty5, qty:5.
+_MARKED_QTY = re.compile(rf"^(?:x({_NUMBER})|({_NUMBER})(?:pcs?|pce|x)|qty:?({_NUMBER}))$", re.I)
+# "5 pcs", "x 5", "qty 5", "@ 220" written apart: joined so each is one token.
+_JOINS = (
+	(re.compile(rf"(?<![\w.])({_NUMBER})\s+(pcs?|pce)\b", re.I), r"\1\2"),
+	(re.compile(r"\b(qty:?|x)\s+(?=[\d.])", re.I), r"\1"),
+	(re.compile(r"@\s+"), "@"),
+)
+_RATE_RULE = "Rate must be more than 0 (leave it out for the till's price)"
+
+
+def parse_line(text):
+	"""What a line says before any item is looked up.
+
+	A marked quantity ("5pcs", "x5") is the quantity wherever it sits. Bare numbers wait: one of
+	them may be the item's own part number, so the quantity is settled once the item is known.
+	"item, qty[, rate]" lines are read as they always were.
+	"""
+	text = str(text or "").strip()
+	parsed = {
+		"text": text,
+		"item_tokens": [],
+		"numbers": [],
+		"qty": None,
+		"qty_ambiguous": False,
+		"rate": None,
+		"error": None,
+	}
+	parts = [part.strip() for part in text.split(",")]
+	if 2 <= len(parts) <= 3 and parts[0] and _IS_NUMBER.match(parts[1]):
+		parsed["item_tokens"] = [parts[0]]
+		parsed["qty"] = float(parts[1])
+		if len(parts) == 3 and parts[2]:
+			if not _IS_NUMBER.match(parts[2]):
+				parsed["error"] = _("Rate must be a number")
+				return parsed
+			parsed["rate"] = float(parts[2])
+	else:
+		for pattern, joined in _JOINS:
+			text = pattern.sub(joined, text)
+		for token in re.split(r"[\s,]+", text):
+			marked = _MARKED_QTY.match(token)
+			if marked:
+				parsed["qty_ambiguous"] = parsed["qty"] is not None
+				parsed["qty"] = float(next(group for group in marked.groups() if group))
+			elif token.startswith("@") and _IS_NUMBER.match(token[1:]):
+				parsed["rate"] = float(token[1:])
+			elif _IS_NUMBER.match(token):
+				parsed["numbers"].append(token)
+			elif re.search(r"[A-Za-z]", token) or (re.search(r"\d", token) and "-" in token):
+				parsed["item_tokens"].append(token)
+	if parsed["qty"] is not None and parsed["qty"] <= 0:
+		parsed["error"] = _("Quantity must be more than 0")
+	elif parsed["rate"] is not None and parsed["rate"] <= 0:
+		parsed["error"] = _(_RATE_RULE)
+	return parsed
 
 
 def _like(text):

@@ -5,13 +5,14 @@ item whose name contains it. Several matches fail the line - guessing would put 
 item on a sale. Only items this till sells can match.
 """
 
+from unittest import TestCase
 from unittest.mock import patch
 
 import frappe
 from erpnext.stock.doctype.item.test_item import make_item
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.api.item.quick_entry import MAX_LINES, match_items
+from klik_pos.api.item.quick_entry import MAX_LINES, match_items, parse_line
 
 GROUP = "_Test KLiK Quick Entry"
 OTHER_GROUP = "_Test KLiK Quick Entry Other"
@@ -155,3 +156,50 @@ class TestQuickEntryMatching(FrappeTestCase):
 			self.assertEqual(self._one("QE-TWIST300")["status"], "none")
 		finally:
 			frappe.set_user("Administrator")
+
+
+class TestQuickEntryParsing(TestCase):
+	def test_parse_line_table(self):
+		cases = [
+			# text, item_tokens, numbers, qty, qty_ambiguous, rate
+			("5pcs AP004", ["AP004"], [], 5, False, None),
+			("5 pcs AP004", ["AP004"], [], 5, False, None),
+			("AP004 5pc", ["AP004"], [], 5, False, None),
+			("ap004 5PCE", ["ap004"], [], 5, False, None),
+			("AP004 x5", ["AP004"], [], 5, False, None),
+			("AP004 x 5", ["AP004"], [], 5, False, None),
+			("5x AP004", ["AP004"], [], 5, False, None),
+			("qty 5 AP004", ["AP004"], [], 5, False, None),
+			("AP004 qty:5", ["AP004"], [], 5, False, None),
+			("AP004 2.5pcs", ["AP004"], [], 2.5, False, None),
+			("AP377\tAP377\t2", ["AP377", "AP377"], ["2"], None, False, None),
+			("51360-TMJ-T01-B ASIMCO    KY14094    4", ["51360-TMJ-T01-B", "ASIMCO", "KY14094"], ["4"], None, False, None),
+			("AP004", ["AP004"], [], None, False, None),
+			("AP004 @220", ["AP004"], [], None, False, 220),
+			("AP004 @ 220 3", ["AP004"], ["3"], None, False, 220),
+			("5pcs AP004 x2", ["AP004"], [], 2, True, None),
+			("5pcs AP004 7", ["AP004"], ["7"], 5, False, None),
+			("BOX 5", ["BOX"], ["5"], None, False, None),
+			# legacy comma lines, read exactly as before
+			("mimosa, 1", ["mimosa"], [], 1, False, None),
+			("twist300, 5, 220", ["twist300"], [], 5, False, 220),
+			("mimosa juice, 2", ["mimosa juice"], [], 2, False, None),
+			("rope, .5", ["rope"], [], 0.5, False, None),
+		]
+		for text, tokens, numbers, qty, ambiguous, rate in cases:
+			parsed = parse_line(text)
+			self.assertEqual(
+				(parsed["item_tokens"], parsed["numbers"], parsed["qty"], parsed["qty_ambiguous"], parsed["rate"], parsed["error"]),
+				(tokens, numbers, qty, ambiguous, rate, None),
+				text,
+			)
+
+	def test_unreadable_values_say_why(self):
+		self.assertEqual(parse_line("mimosa, 0")["error"], "Quantity must be more than 0")
+		self.assertEqual(parse_line("0pcs mimosa")["error"], "Quantity must be more than 0")
+		self.assertEqual(parse_line("mimosa, 1, cheap")["error"], "Rate must be a number")
+		self.assertEqual(parse_line("mimosa, 1, 0")["error"], "Rate must be more than 0 (leave it out for the till's price)")
+		self.assertEqual(parse_line("mimosa @0")["error"], "Rate must be more than 0 (leave it out for the till's price)")
+
+	def test_punctuation_alone_is_not_an_item(self):
+		self.assertEqual(parse_line("AP004 - 2 *")["item_tokens"], ["AP004"])
