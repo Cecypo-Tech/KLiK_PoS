@@ -22,6 +22,7 @@ import {
   buildPriceOptions,
   computePricePopupPosition,
   cyclePriceOptionIndex,
+  linePriceShown,
   resolveActivePriceList,
   type PricePopupPosition,
 } from "../../utils/priceOptions";
@@ -421,23 +422,21 @@ export const CartItemRow = ({
     (priceList) => (!priceList.uom || priceList.uom === item.uom) && Number(priceList.rate || 0) > 0
   );
   const linePriceOptions = buildPriceOptions(linePriceLists, false, 0);
-  const selectedLinePriceLists = linePriceLists.filter(
-    (priceList) => priceList.price_list === itemDiscount.selectedPriceList
-  );
-  const activeLinePriceList =
-    selectedLinePriceLists.find((priceList) => Number(priceList.rate) === Number(itemDiscount.customRate))
-    || selectedLinePriceLists[0];
-  // Until the line is switched it sells on the cart's price list, so that is what it shows.
   const cartPriceListName = resolveActivePriceList(
     cartPriceList,
     (selectedCustomer as { sellingPriceList?: string } | null | undefined)?.sellingPriceList,
     posDetails?.selling_price_list
   );
-  const shownLinePriceList =
-    activeLinePriceList || linePriceLists.find((priceList) => priceList.price_list === cartPriceListName);
+  const {
+    entry: shownLinePriceList,
+    active: activeLinePriceList,
+    customRate: shownCustomRate,
+  } = linePriceShown(linePriceLists, itemDiscount.selectedPriceList, itemDiscount.customRate, cartPriceListName);
   const linePriceListLabel = shownLinePriceList
     ? `${shownLinePriceList.price_list} ${Number(shownLinePriceList.rate || 0).toFixed(2)}`
-    : cartPriceListName || "Price list";
+    : shownCustomRate !== null
+      ? `Custom ${shownCustomRate.toFixed(2)}`
+      : cartPriceListName || "Price list";
 
   const openLinePricePopup = () => {
     const rect = priceTriggerRef.current?.getBoundingClientRect();
