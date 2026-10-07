@@ -671,7 +671,7 @@ export default function PaymentEntriesPage() {
                     type="button"
                     onClick={handleReconcile}
                     disabled={!canReconcile}
-                    className="inline-flex items-center gap-2 rounded-lg bg-beveren-600 px-4 py-2 text-sm font-medium text-white hover:bg-beveren-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                    className="inline-flex items-center gap-2 rounded-lg bg-beveren-600 px-4 py-2 text-sm font-medium text-white hover:bg-beveren-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300"
                   >
                     {isReconciling ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />}
                     <span>Reconcile</span>

@@ -166,7 +166,7 @@ const currency_symbol = posDetails?.currency_symbol
             <button
               onClick={() => handleApplyCoupon(couponCode, 'coupon')}
               disabled={!couponCode.trim()}
-              className="px-3 py-2 bg-beveren-600 text-white rounded-md hover:bg-beveren-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+              className="px-3 py-2 bg-beveren-600 text-white rounded-md hover:bg-beveren-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed text-sm font-medium transition-colors"
             >
               <Check size={14} />
             </button>
@@ -199,7 +199,7 @@ const currency_symbol = posDetails?.currency_symbol
             <button
               onClick={() => handleApplyCoupon(giftCardCode, 'giftcard')}
               disabled={!giftCardCode.trim()}
-              className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+              className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed text-sm font-medium transition-colors"
             >
               <Gift size={14} />
             </button>

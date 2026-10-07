@@ -138,7 +138,7 @@ export default function VoucherPanel({
             type="button"
             onClick={() => void check()}
             disabled={disabled || checking || !creditNote.trim() || !originalInvoice.trim()}
-            className="w-full rounded-lg bg-gray-800 dark:bg-gray-700 px-4 py-2 font-medium text-white hover:bg-gray-900 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full rounded-lg bg-gray-800 dark:bg-gray-700 px-4 py-2 font-medium text-white hover:bg-gray-900 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {checking ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             <span>Check voucher</span>
@@ -163,7 +163,7 @@ export default function VoucherPanel({
                   onClick={() =>
                     onApply({ note: lookup.note as string, original: lookup.original ?? null, available: lookup.available ?? 0 })
                   }
-                  className="rounded-lg bg-beveren-600 px-3 py-1.5 text-white hover:bg-beveren-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  className="rounded-lg bg-beveren-600 px-3 py-1.5 text-white hover:bg-beveren-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed"
                 >
                   {appliedNotes.has(lookup.note) ? "Applied" : "Apply"}
                 </button>
