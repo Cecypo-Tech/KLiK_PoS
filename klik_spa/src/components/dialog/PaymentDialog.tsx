@@ -86,6 +86,7 @@ import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, ge
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader from "./PaymentHeader";
+import { CartCustomerInfoModal } from "../order/WalkinInfoModal";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
 import SalespersonAuthModal from "./SalespersonAuthModal";
@@ -292,6 +293,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Only the mobile overlay can be dismissed; unticking M-Pesa resets it.
   const [mpesaPanelDismissed, setMpesaPanelDismissed] = useState(false);
   const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
   const [mpesaSearchTerm, setMpesaSearchTerm] = useState("");
   const [mpesaRegisterPayments, setMpesaRegisterPayments] = useState<MpesaRegisterPayment[]>([]);
@@ -3301,7 +3303,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           }}
           posDetails={posDetails}
           onCopyOrder={handleCopyOrder}
+          onAdditionalInfo={selectedCustomer ? () => setShowAdditionalInfo(true) : undefined}
         />
+        {showAdditionalInfo && <CartCustomerInfoModal onClose={() => setShowAdditionalInfo(false)} />}
 
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-4">

@@ -22,7 +22,7 @@ import { useCustomerPermission } from "../../hooks/useCustomerPermission";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useProductStore } from "../../stores/productStore";
 import { useCartStore } from "../../stores/cartStore";
-import WalkinInfoModal from "./WalkinInfoModal";
+import { CartCustomerInfoModal } from "./WalkinInfoModal";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import countryList from "react-select-country-list";
 import { parsePhoneNumber } from "react-phone-number-input";
@@ -79,9 +79,7 @@ export const CustomerSearchSection = ({
   const setSelectedPriceList = useCartStore((state) => state.setSelectedPriceList);
   const refreshCartPricing = useCartStore((state) => state.refreshCartPricing);
   const walkinDetails = useCartStore((state) => state.walkinDetails);
-  const setWalkinDetails = useCartStore((state) => state.setWalkinDetails);
   const extraFields = useCartStore((state) => state.extraFields);
-  const setExtraFields = useCartStore((state) => state.setExtraFields);
   const { fields: extraFieldDefs } = useExtraFields();
   const [showWalkinModal, setShowWalkinModal] = useState(false);
   const [overdueData, setOverdueData] = useState<{
@@ -762,26 +760,7 @@ export const CustomerSearchSection = ({
         />
       )}
 
-      {showWalkinModal && selectedCustomer && (
-        <WalkinInfoModal
-          isWalkin={selectedCustomer.isWalkin === 1}
-          initial={walkinDetails}
-          masterDisplay={{
-            name: selectedCustomer.customerName || selectedCustomer.name || "",
-            taxId: selectedCustomer.taxId || "",
-            phone: selectedCustomer.phone || "",
-          }}
-          extraFields={extraFields}
-          onClose={() => setShowWalkinModal(false)}
-          onSave={(d) => {
-            if (selectedCustomer.isWalkin === 1) {
-              setWalkinDetails({ name: d.name, taxId: d.taxId, phone: d.phone });
-            }
-            setExtraFields(d.extraFields);
-            setShowWalkinModal(false);
-          }}
-        />
-      )}
+      {showWalkinModal && selectedCustomer && <CartCustomerInfoModal onClose={() => setShowWalkinModal(false)} />}
       {overdueData && (
         <OverdueWarningModal
           invoices={overdueData.invoices}
