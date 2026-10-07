@@ -176,7 +176,6 @@ def get_item_tax_details(item_code, customer=None, qty=1, uom=None):
                 "tax_rate": tax_rate_precision,
             }
         }
-        print(frappe.as_json(result, indent=2))
         return result
         
     except Exception as e:
