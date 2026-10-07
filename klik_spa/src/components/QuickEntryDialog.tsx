@@ -4,15 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import { X, Zap } from "lucide-react";
 import { toast } from "react-toastify";
 
-import type { CartItem } from "../../types";
+import type { CartItem, MenuItem } from "../../types";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useProductStore } from "../stores/productStore";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { getCSRFToken } from "../utils/csrf";
 import { isItemOutOfStock } from "../utils/stock";
-import { MAX_LINES, parseQuickEntry, planQuickEntry, type MatchResult, type QuickEntryPlan } from "../utils/quickEntry";
-import type { MenuItem } from "../../types";
+import {
+  MAX_LINES,
+  reviewOutcome,
+  rowProblem,
+  splitLines,
+  toRows,
+  withMatch,
+  type ResolvedLine,
+  type ReviewContext,
+  type ReviewRow,
+} from "../utils/quickEntry";
 
 interface QuickEntryDialogProps {
   isOpen: boolean;
@@ -21,12 +30,12 @@ interface QuickEntryDialogProps {
   onNeedSalesperson: () => void;
 }
 
-async function matchItems(queries: string[], context: Record<string, string | undefined>): Promise<MatchResult[]> {
-  const response = await fetch("/api/method/klik_pos.api.item.quick_entry.match_items", {
+async function resolveLines(lines: string[], context: Record<string, string | undefined>): Promise<ResolvedLine[]> {
+  const response = await fetch("/api/method/klik_pos.api.item.quick_entry.resolve_lines", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": getCSRFToken() ?? "" },
-    body: JSON.stringify({ queries, ...context }),
+    body: JSON.stringify({ lines, ...context }),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !Array.isArray(result.message)) {
@@ -40,7 +49,8 @@ async function matchItems(queries: string[], context: Record<string, string | un
 
 export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }: QuickEntryDialogProps) {
   const [text, setText] = useState("");
-  const [failed, setFailed] = useState<QuickEntryPlan["failed"]>([]);
+  /** Set while the cashier reviews the lines; nothing is in the cart yet. */
+  const [rows, setRows] = useState<ReviewRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const posDetails = usePOSProfileStore((s) => s.posDetails);
@@ -63,17 +73,60 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) {
         e.preventDefault();
-        onClose();
+        // Esc in the review goes back to the pasted text; in the text box it closes.
+        if (rows) setRows(null);
+        else onClose();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [isOpen, onClose, busy]);
+  }, [isOpen, onClose, busy, rows]);
 
   if (!isOpen) return null;
 
+  const context = () => {
+    const products = useProductStore.getState();
+    return {
+      customer: products.getEffectiveCustomer()?.id || undefined,
+      price_list: products.getEffectivePriceList() || undefined,
+      warehouse: warehouse || undefined,
+    };
+  };
+  const reviewContext = (): ReviewContext => ({
+    allowRateChange: !!posDetails?.allow_rate_change,
+    isOutOfStock: (item) =>
+      isItemOutOfStock(
+        item as unknown as MenuItem,
+        useProductStore.getState().stockUnavailable,
+        !!posDetails?.custom_enable_loss_of_sale
+      ),
+  });
+
+  /** Everything ready goes in at once; then the box closes. */
+  const addRows = async (ready: ReviewRow[]) => {
+    const outcome = reviewOutcome(ready, reviewContext());
+    const cart = useCartStore.getState();
+    const lineIds = await cart.addManyToCart(
+      outcome.toAdd.map((entry) => ({
+        item: { ...(entry.item as unknown as CartItem), item_code: String(entry.item.id) },
+        qty: entry.qty,
+      }))
+    );
+    // As the item list's '*' shortcut: a typed price is in the till's own tax terms.
+    outcome.toAdd.forEach((entry, i) => {
+      const lineId = lineIds[i];
+      if (lineId && entry.rate !== null) cart.requestCustomRate(lineId, entry.rate, isTaxIncludedInBasicRate);
+    });
+    const added = lineIds.filter(Boolean).length;
+    if (added) toast.success(`Added ${added} line${added === 1 ? "" : "s"} to the cart`);
+    if (outcome.skipped.length) toast.info(`Skipped: ${outcome.skipped.map((r) => r.text).join("; ")}`);
+    setRows(null);
+    setText("");
+    onClose();
+  };
+
   const submit = async () => {
-    const lines = parseQuickEntry(text);
+    const lines = splitLines(text);
     if (lines.length === 0 || busy) return;
     if (lines.length > MAX_LINES) {
       toast.error(`Enter at most ${MAX_LINES} lines at a time`);
@@ -90,56 +143,35 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
     }
     setBusy(true);
     try {
-      const products = useProductStore.getState();
-      const queries = lines.filter((l) => !l.error).map((l) => l.query);
-      const results = queries.length
-        ? await matchItems(queries, {
-            customer: products.getEffectiveCustomer()?.id || undefined,
-            price_list: products.getEffectivePriceList() || undefined,
-            warehouse: warehouse || undefined,
-          })
-        : [];
-      const plan = planQuickEntry(lines, results, { allowRateChange: !!posDetails?.allow_rate_change });
-
-      const cart = useCartStore.getState();
-      const stockUnavailable = useProductStore.getState().stockUnavailable;
-      const textOf = (line: number) => lines.find((l) => l.line === line)?.text ?? "";
-      let added = 0;
-      for (const entry of plan.toAdd) {
-        const code = String(entry.item.id);
-        if (isItemOutOfStock(entry.item as unknown as MenuItem, stockUnavailable, !!posDetails?.custom_enable_loss_of_sale)) {
-          plan.failed.push({ line: entry.line, text: textOf(entry.line), reason: `${code} is out of stock` });
-          continue;
-        }
-        // One at a time: each add reads the cart the previous one left. Pricing is
-        // refreshed once, after the last.
-        const lineId = await cart.addToCartWithQuantity(
-          { ...(entry.item as unknown as CartItem), item_code: code },
-          entry.qty,
-          { refresh: false },
-        );
-        if (!lineId) {
-          // The cart refused it (not enough stock) and said why in its own toast.
-          plan.failed.push({ line: entry.line, text: textOf(entry.line), reason: "Not added: see the message above" });
-          continue;
-        }
-        added += 1;
-        // As the item list's '*' shortcut: a typed price is in the till's own tax terms.
-        if (entry.rate !== null) cart.requestCustomRate(lineId, entry.rate, isTaxIncludedInBasicRate);
-      }
-      if (added) await useCartStore.getState().refreshCartPricing();
-
-      plan.failed.sort((a, b) => a.line - b.line);
-      setFailed(plan.failed);
-      setText(plan.failed.map((f) => f.text).join("\n"));
-      if (added) toast.success(`Added ${added} line${added === 1 ? "" : "s"} to the cart`);
-      if (plan.failed.length === 0) onClose();
+      const answered = toRows(lines, await resolveLines(lines.map((l) => l.text), context()));
+      const ctx = reviewContext();
+      if (answered.every((row) => rowProblem(row, ctx) === null)) await addRows(answered);
+      else setRows(answered);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add the items");
     } finally {
       setBusy(false);
     }
   };
+
+  const updateRow = (line: number, patch: Partial<ReviewRow>) =>
+    setRows((current) => current && current.map((r) => (r.line === line ? { ...r, ...patch } : r)));
+
+  /** Re-match one row from a picked candidate or a typed code; its qty and rate stay. */
+  const rematch = async (line: number, query: string) => {
+    if (!query.trim()) return;
+    setBusy(true);
+    try {
+      const [match] = await resolveLines([query], context());
+      if (match) setRows((current) => current && current.map((r) => (r.line === line ? withMatch(r, match) : r)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not match the item");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const review = rows ? reviewOutcome(rows, reviewContext()) : null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => !busy && onClose()}>
@@ -153,7 +185,7 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
         onKeyDown={(e) => {
           if (e.key !== "Escape") e.stopPropagation();
         }}
-        className="relative z-10 w-[520px] max-w-[92vw] max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700"
+        className={`relative z-10 ${rows ? "w-[960px]" : "w-[520px]"} max-w-[92vw] max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
@@ -174,52 +206,184 @@ export default function QuickEntryDialog({ isOpen, onClose, onNeedSalesperson }:
         </div>
 
         <div className="px-5 py-4 space-y-3">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Enter <span className="font-semibold text-gray-700 dark:text-gray-200">item*, qty*, rate</span> - one
-            per line. Part of the item code is enough when only one item matches; leave the rate out for the till's
-            price.
-          </p>
-          <textarea
-            id="quick-entry-text"
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
-            rows={8}
-            spellCheck={false}
-            disabled={busy}
-            placeholder={"mimosa, 1\ntwist300, 5, 220"}
-            className="w-full px-3 py-2 font-mono text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
-          />
-          {failed.length > 0 && (
-            <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2">
-              <p className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">
-                {failed.length} line{failed.length === 1 ? "" : "s"} not added - fix and add again:
+          {!rows && (
+            <>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Paste the order as it came - codes, part numbers, barcodes, "5pcs", "x5", "@220" for a price. No
+                quantity means 1.
               </p>
-              <ul className="space-y-0.5">
-                {failed.map((f) => (
-                  <li key={`${f.line}-${f.text}`} className="text-xs text-red-700 dark:text-red-300">
-                    <span className="font-mono">{f.text}</span> - {f.reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
+              <textarea
+                id="quick-entry-text"
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    void submit();
+                  }
+                }}
+                rows={8}
+                spellCheck={false}
+                disabled={busy}
+                placeholder={"AP004 2\n5pcs 51360-TMJ-T01-B\nmimosa, 1, 220"}
+                className="w-full px-3 py-2 font-mono text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-gray-400 dark:text-gray-500">Ctrl+Enter to add</span>
+                <button
+                  onClick={() => void submit()}
+                  disabled={busy || !text.trim()}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-beveren-600 text-white hover:bg-beveren-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {busy ? "Adding…" : "Add to cart"}
+                </button>
+              </div>
+            </>
           )}
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-gray-400 dark:text-gray-500">Ctrl+Enter to add</span>
-            <button
-              onClick={() => void submit()}
-              disabled={busy || !text.trim()}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-beveren-600 text-white hover:bg-beveren-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {busy ? "Adding…" : "Add to cart"}
-            </button>
-          </div>
+
+          {rows && review && (
+            <>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                {review.blocked.length
+                  ? `${review.blocked.length} line${review.blocked.length === 1 ? "" : "s"} need a look before anything is added.`
+                  : "All lines ready."}
+              </p>
+              <div className="max-h-[55vh] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                    <tr>
+                      <th className="p-2 text-left">#</th>
+                      <th className="p-2 text-left">Line</th>
+                      <th className="p-2 text-left">Item</th>
+                      <th className="p-2 w-20">Qty</th>
+                      <th className="p-2">Rate</th>
+                      <th className="p-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const problem = row.skip ? null : rowProblem(row, reviewContext());
+                      return (
+                        <tr
+                          key={row.line}
+                          className={`border-t border-gray-100 dark:border-gray-800 text-gray-800 dark:text-gray-200 ${
+                            row.skip ? "opacity-40" : problem ? "bg-amber-50 dark:bg-amber-900/20" : ""
+                          }`}
+                        >
+                          <td className="p-2 text-gray-400">{row.line}</td>
+                          <td className="p-2 font-mono">{row.text}</td>
+                          <td className="p-2">
+                            {row.status === "ok" && row.item ? (
+                              <span>
+                                {String(row.item.id)} - {String(row.item.name)}
+                              </span>
+                            ) : row.candidates.length > 1 ? (
+                              <select
+                                aria-label={`Item for line ${row.line}`}
+                                disabled={busy}
+                                defaultValue=""
+                                onChange={(e) => void rematch(row.line, e.target.value)}
+                                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1"
+                              >
+                                <option value="" disabled>
+                                  Pick the item…
+                                </option>
+                                {row.candidates.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    {c.code} - {c.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                aria-label={`Item code for line ${row.line}`}
+                                disabled={busy}
+                                placeholder="Type the item code, Enter"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void rematch(row.line, e.currentTarget.value);
+                                  }
+                                }}
+                                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 font-mono"
+                              />
+                            )}
+                            {problem && <div className="mt-0.5 text-amber-700 dark:text-amber-300">{problem}</div>}
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              aria-label={`Quantity for line ${row.line}`}
+                              value={row.qty}
+                              disabled={busy}
+                              onChange={(e) => updateRow(row.line, { qty: Number(e.target.value), qty_ambiguous: false })}
+                              // Looking at a flagged quantity and leaving it is confirming it.
+                              onBlur={() => row.qty_ambiguous && updateRow(row.line, { qty_ambiguous: false })}
+                              className={`w-16 rounded border p-1 text-right bg-white dark:bg-gray-800 ${
+                                row.qty_ambiguous
+                                  ? "border-amber-500 ring-1 ring-amber-400"
+                                  : "border-gray-300 dark:border-gray-600"
+                              }`}
+                            />
+                          </td>
+                          <td className="p-2 text-right whitespace-nowrap">
+                            {row.rate !== null && (
+                              <>
+                                {row.rate}
+                                <button
+                                  aria-label="Use the till's price"
+                                  disabled={busy}
+                                  onClick={() => updateRow(row.line, { rate: null })}
+                                  className="ml-1 text-gray-400 hover:text-gray-600"
+                                >
+                                  <X size={12} className="inline" />
+                                </button>
+                              </>
+                            )}
+                          </td>
+                          <td className="p-2 text-right">
+                            <button
+                              disabled={busy}
+                              onClick={() => updateRow(row.line, { skip: !row.skip })}
+                              className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 underline"
+                            >
+                              {row.skip ? "Keep" : "Skip"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between">
+                <button
+                  disabled={busy}
+                  onClick={() => setRows(null)}
+                  className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                >
+                  Back
+                </button>
+                <button
+                  disabled={busy || review.blocked.length > 0 || review.toAdd.length === 0}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await addRows(rows);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-beveren-600 text-white hover:bg-beveren-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {busy ? "Adding…" : `Add ${review.toAdd.length} to cart`}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

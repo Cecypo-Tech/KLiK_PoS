@@ -142,13 +142,8 @@ interface CartState {
 
   addToCart: (item: Omit<CartItem, 'quantity'>) => Promise<void>
   addToCartQueued: (item: Omit<CartItem, 'quantity'>) => Promise<void>
-  /** The cart line the quantity went to, or null when the cart refused it (stock). With
-   * refresh false the caller refreshes pricing once after several adds. */
-  addToCartWithQuantity: (
-    item: Omit<CartItem, 'quantity'>,
-    quantity: number,
-    options?: { refresh?: boolean },
-  ) => Promise<string | null>
+  /** The cart line the quantity went to, or null when the cart refused it (stock). */
+  addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number) => Promise<string | null>
   /** Quick entry's add: many items in one cart update and one pricing refresh. The cart line
    * each entry went to, or null where stock refused it (and a toast said why). */
   addManyToCart: (entries: BulkEntry[]) => Promise<Array<string | null>>
@@ -425,7 +420,7 @@ export const useCartStore = create<CartState>()(
         return run;
       },
 
-      addToCartWithQuantity: async (item, quantity, options) => {
+      addToCartWithQuantity: async (item, quantity) => {
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
@@ -510,7 +505,7 @@ export const useCartStore = create<CartState>()(
           }));
         }
 
-        if (options?.refresh !== false) await get().refreshCartPricing();
+        await get().refreshCartPricing();
         return lineId;
       },
 
