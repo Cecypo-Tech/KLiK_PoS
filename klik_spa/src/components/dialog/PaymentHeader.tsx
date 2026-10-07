@@ -121,17 +121,23 @@ export default function PaymentHeader({
           {backLabel}
         </button>
         {onAdditionalInfo && (
-          <button
-            onClick={onAdditionalInfo}
-            disabled={isProcessingPayment || isHoldingOrder}
-            className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
-            title="Additional Info (F4)"
-            aria-label="Additional Info"
-          >
-            <Contact size={18} />
-          </button>
+          <AdditionalInfoButton onClick={onAdditionalInfo} disabled={isProcessingPayment || isHoldingOrder} />
         )}
       </div>
     </div>
+  );
+}
+/** The POS's Additional Info button (beside New Customer), as checkout shows it. */
+export function AdditionalInfoButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+      title="Additional Info (F4)"
+      aria-label="Additional Info"
+    >
+      <Contact size={18} />
+    </button>
   );
 }

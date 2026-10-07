@@ -13,6 +13,7 @@ import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 import { addEntries, moveLine, type BulkEntry } from '../utils/bulkAdd'
+import { persistedCartState } from '../utils/cartPersist'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -190,6 +191,10 @@ interface CartState {
   requestCustomRate: (itemId: string, rate: number, includesTax?: boolean, priceList?: string) => void
   /** Drop the requests up to and including `nonce`, once applied. */
   consumeRateOverrides: (nonce: number) => void
+  /** The cart customer's Additional Info dialog. One flag and one dialog (mounted in App),
+   * whether the POS's button, F4 or checkout's button opened it - never two at once. */
+  additionalInfoOpen: boolean
+  setAdditionalInfoOpen: (open: boolean) => void
 }
 
 // Serializes rapid-fire adds (e.g. fast barcode scanning) so each add's
@@ -229,6 +234,8 @@ export const useCartStore = create<CartState>()(
       })),
       pendingRateOverrides: [],
       rateOverrideNonce: 0,
+      additionalInfoOpen: false,
+      setAdditionalInfoOpen: (open) => set({ additionalInfoOpen: open }),
       requestCustomRate: (itemId, rate, includesTax = false, priceList) => set((s) => {
         const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax, priceList });
         return { pendingRateOverrides: next.queue, rateOverrideNonce: next.nonce };
@@ -711,11 +718,7 @@ export const useCartStore = create<CartState>()(
       name: 'beveren-cart-storage',
       // expandedCartItemId is transient UI state, not cart data - and a stale
       // expanded row reappearing after a reload would be surprising.
-      partialize: (state) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { expandedCartItemId, pendingRateOverrides, rateOverrideNonce, ...rest } = state;
-        return rest;
-      },
+      partialize: (state) => persistedCartState(state),
     }
   )
 )

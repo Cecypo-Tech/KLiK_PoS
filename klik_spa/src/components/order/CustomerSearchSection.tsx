@@ -22,7 +22,6 @@ import { useCustomerPermission } from "../../hooks/useCustomerPermission";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useProductStore } from "../../stores/productStore";
 import { useCartStore } from "../../stores/cartStore";
-import { CartCustomerInfoModal } from "./WalkinInfoModal";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import countryList from "react-select-country-list";
 import { parsePhoneNumber } from "react-phone-number-input";
@@ -81,7 +80,7 @@ export const CustomerSearchSection = ({
   const walkinDetails = useCartStore((state) => state.walkinDetails);
   const extraFields = useCartStore((state) => state.extraFields);
   const { fields: extraFieldDefs } = useExtraFields();
-  const [showWalkinModal, setShowWalkinModal] = useState(false);
+  const setAdditionalInfoOpen = useCartStore((state) => state.setAdditionalInfoOpen);
   const [overdueData, setOverdueData] = useState<{
     invoices: Array<{
       name: string; due_date: string; grand_total: number;
@@ -199,11 +198,11 @@ export const CustomerSearchSection = ({
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       if (!selectedCustomer) return;
       e.preventDefault();
-      setShowWalkinModal(true);
+      setAdditionalInfoOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedCustomer]);
+  }, [selectedCustomer, setAdditionalInfoOpen]);
 
   useEffect(() => {
     if (isOpen && inputRef.current && !isSelectingRef.current) {
@@ -704,7 +703,7 @@ export const CustomerSearchSection = ({
 
         {selectedCustomer && (
           <button
-            onClick={() => setShowWalkinModal(true)}
+            onClick={() => setAdditionalInfoOpen(true)}
             className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
             title="Additional Info"
           >
@@ -760,7 +759,6 @@ export const CustomerSearchSection = ({
         />
       )}
 
-      {showWalkinModal && selectedCustomer && <CartCustomerInfoModal onClose={() => setShowWalkinModal(false)} />}
       {overdueData && (
         <OverdueWarningModal
           invoices={overdueData.invoices}

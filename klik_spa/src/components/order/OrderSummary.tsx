@@ -657,6 +657,7 @@ export default function OrderSummary({
         <PaymentDialog
           isOpen={showPaymentDialog}
           backLabel="Back to cart"
+          showAdditionalInfo
           onClose={handleClosePaymentDialog}
           cartItems={cartItems.map((item) => ({
             ...item,

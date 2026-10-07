@@ -205,14 +205,18 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
 }
 
 /** The cart customer's Additional Info: the walk-in's name, PIN and phone (a named customer's
- * own, read-only) and the till's extra fields. Opened from the POS (button, F4) and checkout. */
-export function CartCustomerInfoModal({ onClose }: { onClose: () => void }) {
+ * own, read-only) and the till's extra fields. Mounted once, in App; the POS (button, F4) and
+ * checkout open it through the cart store's additionalInfoOpen. */
+export function CartCustomerInfoModal() {
+  const open = useCartStore((state) => state.additionalInfoOpen);
+  const setOpen = useCartStore((state) => state.setAdditionalInfoOpen);
   const customer = useCartStore((state) => state.selectedCustomer);
   const walkinDetails = useCartStore((state) => state.walkinDetails);
   const setWalkinDetails = useCartStore((state) => state.setWalkinDetails);
   const extraFields = useCartStore((state) => state.extraFields);
   const setExtraFields = useCartStore((state) => state.setExtraFields);
-  if (!customer) return null;
+  if (!open || !customer) return null;
+  const onClose = () => setOpen(false);
   return (
     <WalkinInfoModal
       isWalkin={customer.isWalkin === 1}
