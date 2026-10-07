@@ -51,7 +51,7 @@ export function splitLines(text: string): Array<{ line: number; text: string }> 
 }
 
 export function toRows(lines: Array<{ line: number; text: string }>, answers: ResolvedLine[]): ReviewRow[] {
-  return lines.map(({ line }, index) => ({ ...answers[index], line, skip: false }));
+  return lines.map(({ line }, index) => ({ ...(answers[index] as ResolvedLine), line, skip: false }));
 }
 
 /** Why a row cannot go into the cart as it stands, or null when it can. */

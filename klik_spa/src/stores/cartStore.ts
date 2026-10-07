@@ -12,6 +12,7 @@ import { applyLosAdjustments, losToast, planLineQty, type LosAdjustment } from '
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
+import { addEntries, moveLine, type BulkEntry } from '../utils/bulkAdd'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -148,6 +149,9 @@ interface CartState {
     quantity: number,
     options?: { refresh?: boolean },
   ) => Promise<string | null>
+  /** Quick entry's add: many items in one cart update and one pricing refresh. The cart line
+   * each entry went to, or null where stock refused it (and a toast said why). */
+  addManyToCart: (entries: BulkEntry[]) => Promise<Array<string | null>>
   updateQuantity: (id: string, quantity: number) => Promise<void>
   adjustQuantity: (id: string, delta: number) => Promise<void>
   applyCheckoutLosAdjustments: (adjustments: LosAdjustment[]) => Promise<void>
@@ -206,13 +210,8 @@ const shouldInsertNewItemsAtTop = (): boolean => {
 
 // Move the just-modified item to the configured insertion position (Top/Bottom)
 // so a quantity bump from the product list lands where new items appear.
-const reorderToInsertionPosition = (items: CartItem[], id: string): CartItem[] => {
-  const idx = items.findIndex((i) => i.id === id);
-  if (idx === -1) return items;
-  const moved = items[idx];
-  const rest = [...items.slice(0, idx), ...items.slice(idx + 1)];
-  return shouldInsertNewItemsAtTop() ? [moved, ...rest] : [...rest, moved];
-};
+const reorderToInsertionPosition = (items: CartItem[], id: string): CartItem[] =>
+  moveLine(items, id, shouldInsertNewItemsAtTop());
 
 export const useCartStore = create<CartState>()(
   persist(
@@ -513,6 +512,20 @@ export const useCartStore = create<CartState>()(
 
         if (options?.refresh !== false) await get().refreshCartPricing();
         return lineId;
+      },
+
+      addManyToCart: async (entries) => {
+        const result = addEntries(get().cartItems, entries, {
+          limited: hasFiniteAvailableStock,
+          losEnabled: losEnabledFor,
+          insertAtTop: shouldInsertNewItemsAtTop(),
+        });
+        result.warnings.forEach((message) => toast.warning(message));
+        result.refusals.forEach((message) => toast.error(message));
+        const lastId = [...result.lineIds].reverse().find((id): id is string => !!id) ?? null;
+        set((s) => ({ cartItems: result.cartItems, highlightItemId: lastId, highlightNonce: s.highlightNonce + 1 }));
+        if (lastId) await get().refreshCartPricing();
+        return result.lineIds;
       },
 
       updateQuantity: async (id, quantity) => {
