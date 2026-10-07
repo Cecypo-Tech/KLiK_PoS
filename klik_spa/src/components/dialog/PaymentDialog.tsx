@@ -87,6 +87,7 @@ import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, get
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader from "./PaymentHeader";
 import { CartCustomerInfoModal } from "../order/WalkinInfoModal";
+import { blockKey } from "../../utils/blockKey";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
 import SalespersonAuthModal from "./SalespersonAuthModal";
@@ -227,6 +228,14 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [paymentReferences, setPaymentReferences] = useState<Record<string, string>>({});
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isHoldingOrder, setIsHoldingOrder] = useState(false);
+  // The POS's F4 (Additional Info) listens under this window. While the sale is being
+  // submitted or held its payload is already built, so details saved then would be lost.
+  useEffect(() => {
+    if (!isProcessingPayment && !isHoldingOrder) return;
+    const block = blockKey("F4");
+    window.addEventListener("keydown", block, true);
+    return () => window.removeEventListener("keydown", block, true);
+  }, [isProcessingPayment, isHoldingOrder]);
   const [invoiceSubmitted, setInvoiceSubmitted] = useState(false);
   // What the server did with the sale - not what the background checkbox asked for.
   const [submissionQueued, setSubmissionQueued] = useState(false);
