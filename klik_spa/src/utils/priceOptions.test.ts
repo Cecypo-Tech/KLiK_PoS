@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, resolveActivePriceList, seedCustomPrice, typeCustomPrice } from "./priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, linePriceShown, resolveActivePriceList, seedCustomPrice, typeCustomPrice } from "./priceOptions";
 
 describe("buildPriceOptions", () => {
   it("maps each price list entry to an option", () => {
@@ -132,5 +132,33 @@ describe("custom price draft", () => {
   it("ignores keys that are not digits, a dot, or Backspace", () => {
     const draft = seedCustomPrice(450);
     expect(typeCustomPrice(draft, "a")).toBe(draft);
+  });
+});
+
+describe("linePriceShown", () => {
+  const lists = [
+    { price_list: "Cash Price", rate: 450 },
+    { price_list: "Elite Price", rate: 400 },
+  ];
+
+  it("shows the cart's list until the line is switched or priced", () => {
+    expect(linePriceShown(lists, undefined, undefined, "Cash Price")).toEqual({ entry: lists[0], active: undefined, customRate: null });
+  });
+
+  it("shows the list the line was switched to", () => {
+    expect(linePriceShown(lists, "Elite Price", 400, "Cash Price")).toEqual({ entry: lists[1], active: lists[1], customRate: null });
+  });
+
+  it("shows a typed price as custom, not a list at another rate", () => {
+    expect(linePriceShown(lists, "", 399, "Cash Price")).toEqual({ entry: undefined, active: undefined, customRate: 399 });
+    expect(linePriceShown(lists, undefined, 399, "Cash Price").customRate).toBe(399);
+  });
+
+  it("a rate typed after switching lists is custom too", () => {
+    expect(linePriceShown(lists, "Elite Price", 399, "Cash Price").customRate).toBe(399);
+  });
+
+  it("a cleared rate (null, as a recalled order stores it) is no rate", () => {
+    expect(linePriceShown(lists, undefined, null, "Cash Price").entry).toBe(lists[0]);
   });
 });

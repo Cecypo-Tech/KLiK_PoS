@@ -1,4 +1,4 @@
-import { ChevronLeft, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
+import { ChevronLeft, Contact, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
 import { handlePrintInvoice } from "../../utils/printHandler";
 
 interface PaymentHeaderProps {
@@ -15,6 +15,8 @@ interface PaymentHeaderProps {
   finalizeCompletedOrderState: (afterClear?: () => void) => void;
   posDetails: any;
   onCopyOrder: () => void;
+  /** Opens the customer's Additional Info, as the POS's button beside New Customer does. */
+  onAdditionalInfo?: () => void;
 }
 
 export default function PaymentHeader({
@@ -31,6 +33,7 @@ export default function PaymentHeader({
   finalizeCompletedOrderState,
   posDetails,
   onCopyOrder,
+  onAdditionalInfo,
 }: PaymentHeaderProps) {
   if (invoiceSubmitted) {
     return (
@@ -107,15 +110,28 @@ export default function PaymentHeader({
           <ClipboardCopy size={18} />
         </button>
       </div>
-      <button
-        onClick={() => onClose(invoiceSubmitted)}
-        disabled={isProcessingPayment || isHoldingOrder}
-        aria-label={backLabel}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <ChevronLeft size={18} />
-        {backLabel}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onClose(invoiceSubmitted)}
+          disabled={isProcessingPayment || isHoldingOrder}
+          aria-label={backLabel}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ChevronLeft size={18} />
+          {backLabel}
+        </button>
+        {onAdditionalInfo && (
+          <button
+            onClick={onAdditionalInfo}
+            disabled={isProcessingPayment || isHoldingOrder}
+            className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+            title="Additional Info (F4)"
+            aria-label="Additional Info"
+          >
+            <Contact size={18} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

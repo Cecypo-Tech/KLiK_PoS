@@ -86,6 +86,7 @@ import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, ge
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader from "./PaymentHeader";
+import { CartCustomerInfoModal } from "../order/WalkinInfoModal";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
 import SalespersonAuthModal from "./SalespersonAuthModal";
@@ -292,6 +293,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Only the mobile overlay can be dismissed; unticking M-Pesa resets it.
   const [mpesaPanelDismissed, setMpesaPanelDismissed] = useState(false);
   const mpesaOptionsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
   const [mpesaPhoneNumber, setMpesaPhoneNumber] = useState(selectedCustomer?.phone || "");
   const [mpesaSearchTerm, setMpesaSearchTerm] = useState("");
   const [mpesaRegisterPayments, setMpesaRegisterPayments] = useState<MpesaRegisterPayment[]>([]);
@@ -2648,7 +2650,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             type="button"
             onClick={() => void handleApplyLoyaltyRedemption()}
             disabled={locked || isApplyingLoyalty || availablePoints <= 0 || !appliedLoyalty}
-            className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed font-medium"
+            className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed font-medium"
           >
             {isApplyingLoyalty ? "Applying..." : "Apply"}
           </button>
@@ -3206,7 +3208,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       <p className="mt-1">{reconciliation.message}</p>
                     </div>
                   )}
-                  <button id="pos-payment-submit-btn" onClick={handleCompletePayment} disabled={isActionButtonDisabled()} className={`w-full py-4 rounded-lg font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2 ${isB2B ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-green-600 hover:bg-green-700 text-white"}`}>
+                  <button id="pos-payment-submit-btn" onClick={handleCompletePayment} disabled={isActionButtonDisabled()} className={`w-full py-4 rounded-lg font-semibold disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2 ${isB2B ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-green-600 hover:bg-green-700 text-white"}`}>
                     {isProcessingPayment ? (
                       <>
                         <Loader2 size={20} className="animate-spin" />
@@ -3301,7 +3303,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           }}
           posDetails={posDetails}
           onCopyOrder={handleCopyOrder}
+          onAdditionalInfo={selectedCustomer ? () => setShowAdditionalInfo(true) : undefined}
         />
+        {showAdditionalInfo && <CartCustomerInfoModal onClose={() => setShowAdditionalInfo(false)} />}
 
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-4">

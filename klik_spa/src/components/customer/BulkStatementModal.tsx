@@ -281,7 +281,7 @@ export default function BulkStatementModal({ company, onClose }: BulkStatementMo
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            className="inline-flex items-center gap-2 rounded-lg bg-beveren-600 px-4 py-2 text-sm font-medium text-white hover:bg-beveren-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="inline-flex items-center gap-2 rounded-lg bg-beveren-600 px-4 py-2 text-sm font-medium text-white hover:bg-beveren-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300"
           >
             {isSending ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
             <span>Send statements{preview ? ` (up to ${preview.with_email})` : ""}</span>

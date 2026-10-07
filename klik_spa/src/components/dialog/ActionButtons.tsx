@@ -73,7 +73,7 @@ export default function ActionButtons({
       <button
         onClick={onCompletePayment}
         disabled={isActionButtonDisabled()}
-        className={`px-8 py-2 rounded-lg font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 ${isB2B ? "bg-beveren-500 hover:bg-blue-700 text-white" : "bg-beveren-600 hover:bg-beveren-700 text-white"}`}
+        className={`px-8 py-2 rounded-lg font-semibold disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 ${isB2B ? "bg-beveren-500 hover:bg-blue-700 text-white" : "bg-beveren-600 hover:bg-beveren-700 text-white"}`}
       >
         {isProcessingPayment ? (
           <>

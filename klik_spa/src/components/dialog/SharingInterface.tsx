@@ -276,7 +276,7 @@ export default function SharingInterface({
               <div className="text-sm text-gray-900 whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: getProcessedEmailMessage() }} />
             </div>
           </div>
-          <button onClick={sendEmail} disabled={!sharingData.email || isSendingEmail || !modeEnabled} className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300">
+          <button onClick={sendEmail} disabled={!sharingData.email || isSendingEmail || !modeEnabled} className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300">
             {isSendingEmail ? "Sending..." : "Send Email"}
           </button>
           {!modeEnabled && (
@@ -344,7 +344,7 @@ export default function SharingInterface({
               <div className="text-sm text-gray-900 whitespace-pre-wrap">{getProcessedMessage()}</div>
             </div>
           </div>
-          <button onClick={sendWhatsApp} disabled={!sharingData.phone || isSendingWhatsapp || !modeEnabled} className="w-full py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-300">
+          <button onClick={sendWhatsApp} disabled={!sharingData.phone || isSendingWhatsapp || !modeEnabled} className="w-full py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300">
             {isSendingWhatsapp ? "Sending..." : "Send WhatsApp Message"}
           </button>
           {!modeEnabled && (
@@ -387,7 +387,7 @@ export default function SharingInterface({
               </div>
             </div>
           </div>
-          <button onClick={sendSMS} disabled={!sharingData.phone || !modeEnabled} className="w-full py-3 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:bg-gray-300">
+          <button onClick={sendSMS} disabled={!sharingData.phone || !modeEnabled} className="w-full py-3 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300">
             Send SMS
           </button>
           {!modeEnabled && (

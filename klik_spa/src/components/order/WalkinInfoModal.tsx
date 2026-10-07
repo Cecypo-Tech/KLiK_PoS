@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
-import type { WalkinDetails } from "../../stores/cartStore";
+import { useCartStore, type WalkinDetails } from "../../stores/cartStore";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import { AutoComplete } from "../ui/AutoComplete";
@@ -123,7 +123,7 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
       <div className={`w-full ${fields.length ? "max-w-2xl" : "max-w-sm"} rounded-xl bg-white dark:bg-gray-800 p-5 shadow-xl`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white">Additional Info</h3>
@@ -201,5 +201,34 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
         </div>
       </div>
     </div>
+  );
+}
+
+/** The cart customer's Additional Info: the walk-in's name, PIN and phone (a named customer's
+ * own, read-only) and the till's extra fields. Opened from the POS (button, F4) and checkout. */
+export function CartCustomerInfoModal({ onClose }: { onClose: () => void }) {
+  const customer = useCartStore((state) => state.selectedCustomer);
+  const walkinDetails = useCartStore((state) => state.walkinDetails);
+  const setWalkinDetails = useCartStore((state) => state.setWalkinDetails);
+  const extraFields = useCartStore((state) => state.extraFields);
+  const setExtraFields = useCartStore((state) => state.setExtraFields);
+  if (!customer) return null;
+  return (
+    <WalkinInfoModal
+      isWalkin={customer.isWalkin === 1}
+      initial={walkinDetails}
+      masterDisplay={{
+        name: customer.customerName || customer.name || "",
+        taxId: customer.taxId || "",
+        phone: customer.phone || "",
+      }}
+      extraFields={extraFields}
+      onClose={onClose}
+      onSave={(d) => {
+        if (customer.isWalkin === 1) setWalkinDetails({ name: d.name, taxId: d.taxId, phone: d.phone });
+        setExtraFields(d.extraFields);
+        onClose();
+      }}
+    />
   );
 }

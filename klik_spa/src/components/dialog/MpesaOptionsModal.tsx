@@ -114,7 +114,7 @@ export default function MpesaOptionsModal({
                 type="button"
                 onClick={onInitiateStk}
                 disabled={!stkSendable}
-                className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
                 {isProcessing ? <Loader2 size={14} className="animate-spin" /> : null}
                 <span>{stkPaid ? "Paid" : stkPending ? "Waiting…" : "Send"}</span>
@@ -241,7 +241,7 @@ export default function MpesaOptionsModal({
                 stkPaid ||
                 selectedPaymentNames.length === 0
               }
-              className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : null}
               <span>Add Selected Payments</span>

@@ -87,3 +87,23 @@ export function resolveActivePriceList(
 ): string {
   return cartPriceList || customerPriceList || profilePriceList || "";
 }
+
+/**
+ * What a cart line's price chip shows. A line sells on the cart's price list until it is
+ * switched to another (selected) or given a price of its own (customRate). A price of its own
+ * that is not the switched-to list's - typed with '*', quick entry's '@', or in the Rate
+ * field - shows as custom: naming a list beside a rate it does not sell at misleads.
+ */
+export function linePriceShown<T extends { price_list: string; rate: number }>(
+  lists: T[],
+  selected: string | undefined,
+  customRate: number | null | undefined,
+  cartList: string
+): { entry: T | undefined; active: T | undefined; customRate: number | null } {
+  const priced = typeof customRate === "number" && Number.isFinite(customRate);
+  const active = lists.find(
+    (list) => list.price_list === selected && (!priced || Number(list.rate) === customRate)
+  );
+  if (priced && !active) return { entry: undefined, active: undefined, customRate: customRate as number };
+  return { entry: active || lists.find((list) => list.price_list === cartList), active, customRate: null };
+}
