@@ -83,6 +83,7 @@ export default function MobilePaymentPage() {
           onHoldOrder={handleHoldOrder}
           isMobile={true}
           isFullPage={true}
+          showAdditionalInfo
         />
       </div>
 

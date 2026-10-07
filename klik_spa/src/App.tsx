@@ -12,6 +12,7 @@ import RetailSidebar from "./components/RetailSidebar";
 import PermissionHealthBanner from "./components/PermissionHealthBanner";
 import UnresolvedSalesBanner from "./components/UnresolvedSalesBanner";
 import { useQueueFailureAlerts } from "./hooks/useQueueFailureAlerts";
+import { CartCustomerInfoModal } from "./components/order/WalkinInfoModal";
 
 const queryClient = new QueryClient();
 
@@ -57,6 +58,8 @@ function App() {
               <div className="klik-page">
                 <Outlet />
               </div>
+              {/* One Additional Info dialog for the POS and its checkouts, desktop and mobile. */}
+              <CartCustomerInfoModal />
               <ToastContainer position="top-center" autoClose={3000} aria-label="Notification" />
             </ProductProvider>
           </I18nProvider>

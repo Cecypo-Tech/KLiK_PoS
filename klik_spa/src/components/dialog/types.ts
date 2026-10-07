@@ -13,6 +13,9 @@ export interface PaymentDialogProps {
   isFullPage?: boolean;
   /** Names where the back control returns to, e.g. "Back to cart". Defaults to "Back". */
   backLabel?: string;
+  /** A checkout of the POS cart: offers the cart customer's Additional Info. Off when paying
+   * an existing invoice, whose details are not the cart's. */
+  showAdditionalInfo?: boolean;
   initialSharingMode?: string | null;
   externalInvoiceData?: any;
   itemDiscounts?: any;
