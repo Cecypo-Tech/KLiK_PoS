@@ -718,9 +718,12 @@ def _attach_cashier_names(orders):
 
 
 def _attach_in_stock_totals(orders, item_rows):
-    """On a till that records Loss of Sale, what each held order would come to if checked out
-    now (in_stock_total). The order itself still holds what was asked for: checkout splits it
-    against the stock there is then."""
+    """At a till that records Loss of Sale, what each held order would come to if checked out
+    here now (in_stock_total). The order itself still holds what was asked for: checkout splits
+    it by the cashier's till - its setting, its warehouse - against the stock there is then.
+
+    Scaling the total by the value in stock is close, not exact: it is off where lines carry
+    different tax templates, or the order a fixed discount or shipping charge."""
     from klik_pos.overrides.loss_of_sale import (
         PROFILE_FLAG,
         _available,
@@ -729,12 +732,10 @@ def _attach_in_stock_totals(orders, item_rows):
         in_stock_total,
     )
 
-    tills = list({o.custom_pos_profile for o in orders if o.get("custom_pos_profile")})
-    if not tills or not frappe.db.has_column("POS Profile", PROFILE_FLAG):
+    till = _active_till()
+    if not till or not cint(till.get(PROFILE_FLAG)) or not till.get("warehouse"):
         return
-    los_tills = set(frappe.get_all("POS Profile", filters={"name": ["in", tills], PROFILE_FLAG: 1}, pluck="name"))
-    counted = {o.name for o in orders if o.get("custom_pos_profile") in los_tills}
-    rows = [row for row in item_rows if row.parent in counted]
+    rows = sorted(item_rows, key=lambda row: (row.parent, row.idx))
     if not rows:
         return
     eligible = _eligible_item_codes({row.item_code for row in rows})
@@ -742,7 +743,7 @@ def _attach_in_stock_totals(orders, item_rows):
     lines = {}
     for row in rows:
         lines.setdefault(row.parent, []).append({
-            "key": (row.item_code, row.warehouse),
+            "key": (row.item_code, till.warehouse),
             "requested": flt(row.qty),
             "factor": flt(row.conversion_factor) or 1,
             "whole": row.uom in whole,
@@ -853,7 +854,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             all_items = frappe.get_all(
                 "Sales Order Item",
                 filters={"parent": ["in", order_names]},
-                fields=["parent", "item_code", "item_name", "qty", "rate", "uom", "conversion_factor", "warehouse"],
+                fields=["parent", "idx", "item_code", "item_name", "qty", "rate", "uom", "conversion_factor"],
             )
             for row in all_items:
                 items_map.setdefault(row.parent, []).append({
@@ -863,7 +864,11 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
                     "rate": flt(row.rate),
                 })
 
-            _attach_in_stock_totals(orders, all_items)
+            try:
+                _attach_in_stock_totals(orders, all_items)
+            except Exception:
+                # A figure for display: the Held tab lists the orders without it.
+                frappe.log_error(frappe.get_traceback(), "Held order in-stock total")
 
         # Resolve cashier (owner full name) so rows render/filter like invoices.
         owner_ids = list({o.owner for o in orders if o.owner})
