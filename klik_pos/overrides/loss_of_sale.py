@@ -32,6 +32,19 @@ def split_lines(lines, available):
 	return result
 
 
+def in_stock_total(grand_total, lines, available):
+	"""What a held order would come to if checked out now: its total, scaled by the share of its
+	value in stock, so tax and discounts scale with it. lines: split_lines' lines plus rate, and
+	eligible (False: a line Loss of Sale may not shorten, which sells as asked)."""
+	split = iter(split_lines([line for line in lines if line["eligible"]], available))
+	asked = now = 0
+	for line in lines:
+		qty = next(split)[0] if line["eligible"] else flt(line["requested"])
+		asked += flt(line["requested"]) * flt(line["rate"])
+		now += qty * flt(line["rate"])
+	return flt(grand_total) * now / asked if asked else flt(grand_total)
+
+
 def split_cart_items(items, pos_profile):
 	"""The till's cart lines, as parse_invoice_data returns them, split in place against the
 	till's warehouse. Returns one {index, item_code, quantity, los_qty} per line it changed.
