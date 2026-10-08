@@ -600,7 +600,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     if (checkoutExtras.deliveryCharge > 0 && isDeliveryChargeEnabled && !activeShippingRule) {
       setDeliveryCharge(checkoutExtras.deliveryCharge);
     }
-    if (checkoutExtras.deliveryPersonnel) setSelectedDeliveryPersonnel(checkoutExtras.deliveryPersonnel);
+    // The cashier's pick for this sale, else the customer's usual one.
+    const deliveryPersonnel = checkoutExtras.deliveryPersonnel || selectedCustomer?.deliveryPersonnel;
+    if (deliveryPersonnel) setSelectedDeliveryPersonnel(deliveryPersonnel);
     if (checkoutExtras.salesTaxCharges) setSelectedSalesTaxCharges(checkoutExtras.salesTaxCharges);
     setRemarks(checkoutExtras.remarks || "");
     setCheckoutExtrasRestored(true);

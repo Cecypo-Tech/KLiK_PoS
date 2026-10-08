@@ -20,6 +20,7 @@ export interface Customer {
   contactPerson?: string
   taxId?: string
   isWalkin?: number
+  deliveryPersonnel?: string | null
   industry?: string
   employeeCount?: string
   registrationScheme?: string

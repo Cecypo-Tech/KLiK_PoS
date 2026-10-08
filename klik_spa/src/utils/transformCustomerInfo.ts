@@ -29,6 +29,7 @@ export function transformCustomerInfo(customer: any, fallbackCountry = ""): Cust
       customer.contact_person || customer.customer_name || "",
     taxId: customer.vat_number || customer.tax_id || "",
     isWalkin: customer.is_walkin || 0,
+    deliveryPersonnel: customer.delivery_personnel || null,
     industry: customer.industry || "",
     employeeCount: customer.employee_count || "",
     registrationScheme: customer.registration_scheme || "",
