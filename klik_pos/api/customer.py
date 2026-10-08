@@ -337,6 +337,7 @@ def get_customer_info(customer_name: str):
             "address_data": address_data,
             "is_walkin": getattr(customer, "custom_is_walkin", 0),
             "tax_id": customer.tax_id,
+            "delivery_personnel": customer.get("custom_delivery_personnel"),
             "loyalty": get_customer_loyalty_summary(
                 customer.name,
                 company=getattr(pos_profile, "company", None),
