@@ -82,8 +82,8 @@ POS_PROFILE_FEATURE_FIELDS = [
             "Invoice History only. When off (default), every user on this profile sees "
             "only the invoices they rang, and the cashier filter is locked to their own "
             "name. When on, anyone on this till may filter by and read any cashier's "
-            "invoices. This is a property of the till, not of the person: it applies to "
-            "managers too. The Sales Dashboard is unaffected - it never restricts data, "
+            "invoices. Express Admin, System Manager, Sales Master Manager and Sales "
+            "Manager see every invoice of the company regardless. The Sales Dashboard is unaffected - it never restricts data, "
             "and is instead limited to who may open it."
         ),
         "default": "0",

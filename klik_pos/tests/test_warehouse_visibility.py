@@ -67,6 +67,13 @@ class Tills(FrappeTestCase):
 
 
 class TestOpeningAnInvoice(Tills):
+    def setUp(self):
+        super().setUp()
+        # As a cashier: Administrator holds the manager roles, which open the whole company.
+        roles = patch("frappe.get_roles", return_value=["All", "Sales User"])
+        roles.start()
+        self.addCleanup(roles.stop)
+
     def _may(self, till, allow=1, docstatus=1, owner=THEM):
         return _may_read_row(owner, COMPANY, ME, _till_doc(self.mine, allow), docstatus=docstatus, pos_profile=till)
 

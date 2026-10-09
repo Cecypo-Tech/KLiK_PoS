@@ -114,11 +114,32 @@ class TestReadSideFollowsTheRule(FrappeTestCase):
 
 		# The return picker reads the till as the rest of the warehouse rule does.
 		till = frappe._dict({"name": "T", "company": "Dev Co", "custom_allow_viewing_other_cashiers": 0})
+		# As a cashier: Administrator holds the manager roles, which see the whole company.
 		with _till(0), patch.object(si_api, "get_current_pos_profile", return_value=till), \
+			patch("frappe.get_roles", return_value=["All", "Sales User"]), \
 			patch.object(si_api, "_ensure_return_allowed"), \
 			patch.object(si_api.frappe, "get_all", side_effect=spy):
 			si_api.get_customer_invoices_for_return("Walk In")
 		self.assertEqual(captured.get("owner"), frappe.session.user)
+
+	def test_a_manager_returns_from_the_whole_company(self):
+		captured = {}
+		real = frappe.get_all
+
+		def spy(doctype, *a, **kw):
+			if doctype == "Sales Invoice":
+				captured.update(kw.get("filters") or {})
+				captured.setdefault("or", kw.get("or_filters"))
+			return real(doctype, *a, **kw)
+
+		till = frappe._dict({"name": "T", "company": "Dev Co", "custom_allow_viewing_other_cashiers": 0})
+		with _till(0), patch.object(si_api, "get_current_pos_profile", return_value=till), \
+			patch("frappe.get_roles", return_value=["All", "Sales Manager"]), \
+			patch.object(si_api, "_ensure_return_allowed"), \
+			patch.object(si_api.frappe, "get_all", side_effect=spy):
+			si_api.get_customer_invoices_for_return("Walk In")
+		self.assertNotIn("owner", captured)
+		self.assertEqual(captured["or"], [["owner", "=", frappe.session.user], ["company", "=", "Dev Co"]])
 
 
 class TestCollectingFollowsTheRule(FrappeTestCase):
