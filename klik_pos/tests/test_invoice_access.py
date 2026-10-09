@@ -7,8 +7,8 @@ detail page opened anyone's, by URL or from a customer's invoice list.
 
 An invoice now opens for a logged-in user with read permission, and then only if it is
 theirs or their till (custom_allow_viewing_other_cashiers) lets its users read each
-other's. The till decides for managers too; a manager who needs everyone's invoices is
-given a till that allows it. The customer invoice list follows the same rule, so it never
+other's. Managers (Express Admin, System Manager, Sales Master Manager, Sales Manager)
+open any invoice of their till's company. The customer invoice list follows the same rule, so it never
 lists an invoice that will not open.
 """
 
@@ -43,11 +43,19 @@ def _inv(owner, till="Test Till", company="Test Co", docstatus=1):
 	return frappe._dict({"owner": owner, "pos_profile": till, "company": company, "docstatus": docstatus})
 
 
+def _as_cashier(case):
+	"""Run as a cashier: Administrator holds every role, manager ones included."""
+	roles = patch("frappe.get_roles", return_value=["All", "Sales User"])
+	roles.start()
+	case.addCleanup(roles.stop)
+
+
 class TestTheRule(FrappeTestCase):
 	"""_may_read_invoice on its own, so the rule is covered on any site."""
 
 	def setUp(self):
 		frappe.set_user("Administrator")
+		_as_cashier(self)
 
 	def test_my_own_invoice_opens_on_any_till(self):
 		with _till(0, name="Elsewhere"):
@@ -169,6 +177,9 @@ class TestTheTillDecides(FrappeTestCase):
 
 
 class TestCustomerListFollowsTheTill(FrappeTestCase):
+	def setUp(self):
+		_as_cashier(self)
+
 	def _sql_for(self, **kwargs):
 		captured = []
 		real = frappe.db.sql
@@ -204,6 +215,7 @@ class TestNoTillResolvable(FrappeTestCase):
 
 class TestRowsSayWhetherTheyOpen(FrappeTestCase):
 	def test_rows_follow_the_same_rule_as_opening(self):
+		_as_cashier(self)
 		till = frappe._dict({"name": "Test Till", "company": "Test Co", "custom_allow_viewing_other_cashiers": 0})
 		self.assertTrue(_may_read_row("me@example.com", "Test Co", "me@example.com", till))
 		self.assertFalse(_may_read_row("you@example.com", "Test Co", "me@example.com", till))
@@ -216,19 +228,19 @@ class TestRowsSayWhetherTheyOpen(FrappeTestCase):
 
 	def test_history_lists_only_what_opens_where_the_till_allows_others(self):
 		"""Another company's invoices were listed - with no View - on a till that allows
-		reading other cashiers': 150 such rows on dev."""
+		reading other cashiers': 150 such rows on dev. A manager's list is the till's company,
+		and every row of it opens."""
 		frappe.set_user("Administrator")
-		# A till in one company, with another cashier's invoice in a different company.
-		elsewhere = frappe.db.get_value(
-			"Sales Invoice", {"docstatus": 1, "owner": ["!=", "Administrator"]}, ["name", "company"], as_dict=True
+		company = frappe.db.get_value(
+			"Sales Invoice", {"docstatus": 1, "owner": ["!=", "Administrator"]}, "company"
 		)
-		company = elsewhere and frappe.db.get_value("Company", {"name": ["!=", elsewhere.company]}, "name")
-		if not company:
+		if not company or frappe.db.count("Company") < 2:
 			self.skipTest("needs another cashier's invoice and a second company")
 		with _till(1, company=company):
 			result = get_sales_invoices(limit=500, skip_opening_entry_filter=True, surface="history")
 		self.assertTrue(result["success"], result.get("error"))
 		self.assertTrue(result["data"])
+		self.assertTrue(all(r["company"] == company or r["owner"] == "Administrator" for r in result["data"]))
 		self.assertEqual([r["name"] for r in result["data"] if not r["can_open"]], [])
 
 	def test_every_listed_row_carries_can_open(self):
@@ -238,3 +250,56 @@ class TestRowsSayWhetherTheyOpen(FrappeTestCase):
 		self.assertTrue(result["success"], result.get("error"))
 		for row in result["data"]:
 			self.assertIn("can_open", row)
+
+
+class TestManagersSeeTheWholeCompany(FrappeTestCase):
+	"""Allparts: INV-00015, made in the desk from a POS Sales Order, has no till and is not a POS
+	sale, so no till rule ever lists or opens it. A manager (by role, not by till) sees every
+	invoice of the till's company, wherever and however it was made."""
+
+	def _rule(self, *roles, company="Test Co"):
+		with patch("frappe.get_roles", return_value=["All", *roles]), _till(0):
+			return _may_read_invoice(_inv("someone@example.com", till=None, company=company))
+
+	def test_each_manager_role_opens_an_invoice_rung_on_no_till(self):
+		for role in ("Express Admin", "System Manager", "Sales Master Manager", "Sales Manager"):
+			self.assertTrue(self._rule(role), role)
+
+	def test_a_cashier_still_does_not(self):
+		self.assertFalse(self._rule("Sales User"))
+
+	def test_not_another_company_s(self):
+		self.assertFalse(self._rule("Sales Manager", company="Other Co"))
+
+	def _sql_for(self, *roles, **kwargs):
+		captured = []
+		real = frappe.db.sql
+
+		def spy(query, values=None, *a, **kw):
+			captured.append(str(query))
+			return real(query, values, *a, **kw)
+
+		with patch("frappe.get_roles", return_value=["All", *roles]), _till(0), patch("frappe.db.sql", side_effect=spy):
+			get_sales_invoices(limit=1, **kwargs)
+		return " ".join(captured)
+
+	def test_history_lists_the_whole_company_for_a_manager(self):
+		sql = self._sql_for("Sales Master Manager", surface="history", skip_opening_entry_filter=True)
+		self.assertIn("(si.owner = %s OR si.company = %s)", sql)
+		self.assertNotIn("si.pos_profile", sql)
+
+	def test_history_still_holds_a_cashier(self):
+		sql = self._sql_for("Sales User", surface="history", skip_opening_entry_filter=True)
+		self.assertIn("si.owner = ", sql)
+
+
+class TestTheTillIsToldWhoSeesEverything(FrappeTestCase):
+	"""Invoice History locks its cashier filter to one's own name unless told otherwise."""
+
+	def test_user_info_says_whether_this_user_sees_every_invoice(self):
+		from klik_pos.api.user import get_current_user_info
+
+		with patch("frappe.get_roles", return_value=["All", "Sales User"]):
+			self.assertFalse(get_current_user_info()["data"]["can_view_all_invoices"])
+		with patch("frappe.get_roles", return_value=["All", "Sales Master Manager"]):
+			self.assertTrue(get_current_user_info()["data"]["can_view_all_invoices"])

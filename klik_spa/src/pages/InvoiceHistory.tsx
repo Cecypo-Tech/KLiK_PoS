@@ -381,10 +381,11 @@ export default function InvoiceHistoryPage() {
   
   const canProcessReturns = ![0, "0", false].includes(posDetails?.custom_allow_return as 0 | "0" | false);
 
-  // Cross-cashier reading is a property of the till, not of the person: the POS Profile
-  // decides, and it decides for managers too. Absent flag reads as off, matching the
-  // backend, so a site that has not migrated keeps the behaviour it has today.
-  const canViewOtherCashiers = posDetails?.custom_allow_viewing_other_cashiers === 1;
+  // Cross-cashier reading is the POS Profile's call, except for managers (by role), who see
+  // every invoice of the company. Absent flag reads as off, matching the backend, so a site
+  // that has not migrated keeps the behaviour it has today.
+  const canViewOtherCashiers =
+    posDetails?.custom_allow_viewing_other_cashiers === 1 || !!userInfo?.can_view_all_invoices;
   const currentUserCashier = userInfo?.full_name || "";
 
   // Force the cashier filter to the current (non-admin) user once fresh user

@@ -63,7 +63,7 @@ class TestProfileFlag(FrappeTestCase):
 		self.assertFalse(_profile_allows_other_cashiers(None))
 
 	def test_it_is_a_till_property_not_a_role_one(self):
-		"""Even a System Manager is held to their own invoices on a restricted till."""
+		"""The flag ignores roles; managers are let through separately (_is_invoice_manager)."""
 		doc = frappe._dict({"custom_allow_viewing_other_cashiers": 0})
 		with _with_roles("All", "System Manager"):
 			self.assertFalse(_profile_allows_other_cashiers(doc))
@@ -124,7 +124,7 @@ class TestSurfaceShapesTheQuery(FrappeTestCase):
 		self.assertNotIn("WHERE si.", sql)
 
 	def test_history_applies_the_owner_filter_when_the_till_says_so(self):
-		with _with_roles("All", "Express Admin"), _profile(0):
+		with _with_roles("All", "Sales User"), _profile(0):
 			sql = self._sql_for(surface="history", skip_opening_entry_filter=True)
 		self.assertIn("si.owner = ", sql)
 

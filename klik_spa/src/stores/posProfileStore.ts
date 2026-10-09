@@ -79,6 +79,7 @@ export interface UserInfo {
   /** Offer Closing Shift on this till (POS Profile 'Allow Closing Shift', or a manager).
    * Missing on an older backend: offered. */
   can_close_shift?: boolean;
+  can_view_all_invoices?: boolean;
   admin_roles: string[];
   pos_profile: string | null;
   pos_profile_name: string | null;

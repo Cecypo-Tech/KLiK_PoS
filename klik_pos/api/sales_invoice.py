@@ -1476,7 +1476,8 @@ def _profile_allows_other_cashiers(pos_doc):
 	"""Whether this till lets its users read invoices they did not ring.
 
 	A property of the POS Profile rather than of the person: with it off, everyone on the
-	till - managers included - is held to their own invoices in Invoice History. Missing
+	till is held to their own invoices in Invoice History - except managers
+	(INVOICE_MANAGER_ROLES), who see the whole company regardless. Missing
 	profile or missing field reads as off, so a site that has not migrated yet keeps the
 	behaviour it has today rather than silently opening up.
 	"""
@@ -1503,6 +1504,12 @@ def _tills_sharing_warehouse(pos_doc):
 	return tills
 
 
+def _is_invoice_manager(user=None):
+	from klik_pos.api.user import INVOICE_MANAGER_ROLES
+
+	return bool(INVOICE_MANAGER_ROLES & set(frappe.get_roles(user or frappe.session.user)))
+
+
 def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None, shared_tills=None):
 	"""Whether `user` may open a row owned by `owner`: their own, or - where `pos_doc` lets its
 	users read each other's - another cashier's rung on a till selling from the same warehouse.
@@ -1514,6 +1521,8 @@ def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None, 
 		return True
 	if not pos_doc or not company or company != getattr(pos_doc, "company", None):
 		return False
+	if _is_invoice_manager(user):
+		return True
 	if not _profile_allows_other_cashiers(pos_doc):
 		return False
 	tills = shared_tills if shared_tills is not None else _tills_sharing_warehouse(pos_doc)
@@ -1523,9 +1532,9 @@ def _may_read_row(owner, company, user, pos_doc, docstatus=1, pos_profile=None, 
 def _may_read_invoice(invoice):
 	"""Whether the caller may open this invoice in the POS: their own, or another cashier's
 	rung on a till sharing their till's warehouse when that till lets its users read each
-	other's - what the Invoice History list shows, and what held orders follow. The till
-	decides for managers
-	too; with no till resolvable, only their own."""
+	other's - what the Invoice History list shows, and what held orders follow. Managers
+	(INVOICE_MANAGER_ROLES) open any invoice of the till's company; with no till resolvable,
+	only their own."""
 	try:
 		pos_doc = get_current_pos_profile()
 	except Exception:
@@ -1653,7 +1662,13 @@ def get_sales_invoices(
 		shared_tills = (
 			_tills_sharing_warehouse(pos_doc) if pos_doc and _profile_allows_other_cashiers(pos_doc) else None
 		)
-		if surface in ("history", "customer"):
+		manager_sees_company = surface in ("history", "customer") and pos_doc and _is_invoice_manager()
+		if manager_sees_company:
+			# One's own, as everyone; and every invoice of the till's company - other tills',
+			# and desk ones rung on none.
+			conditions.append("(si.owner = %s OR si.company = %s)")
+			params.extend([frappe.session.user, getattr(pos_doc, "company", None)])
+		elif surface in ("history", "customer"):
 			if not shared_tills:
 				conditions.append("si.owner = %s")
 				params.append(frappe.session.user)
@@ -1685,7 +1700,7 @@ def get_sales_invoices(
 				conditions.append(f"si.owner IN ({placeholders})")
 				params.extend(cashier_user_ids)
 
-		if surface != "dashboard" and current_pos_profile and not is_admin_user:
+		if surface != "dashboard" and current_pos_profile and not is_admin_user and not manager_sees_company:
 			if surface in ("history", "customer") and shared_tills:
 				# Not only this till: every till selling from its warehouse.
 				placeholders = ", ".join(["%s"] * len(shared_tills))
@@ -5309,6 +5324,8 @@ def _returnable_scope(filters):
 		pos_doc = get_current_pos_profile()
 	except Exception:
 		pos_doc = None
+	if pos_doc and _is_invoice_manager():
+		return [["owner", "=", frappe.session.user], ["company", "=", pos_doc.company]]
 	if not pos_doc or not _profile_allows_other_cashiers(pos_doc):
 		filters["owner"] = frappe.session.user
 		return None

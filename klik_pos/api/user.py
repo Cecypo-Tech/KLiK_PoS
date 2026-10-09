@@ -14,6 +14,11 @@ ADMIN_ROLES = ["Administrator", "Sales Manager", "System Manager"]
 # erpnext_express the name simply never matches; it is compared, never looked up.
 DASHBOARD_ROLES = [*ADMIN_ROLES, "Express Admin"]
 
+# Roles that see and open every invoice of their till's company in the POS, whatever the till's
+# own flag says and whether or not the invoice was rung on a till (a desk invoice made from a
+# POS Sales Order has none).
+INVOICE_MANAGER_ROLES = {"Express Admin", "System Manager", "Sales Master Manager", "Sales Manager"}
+
 
 @frappe.whitelist()
 def get_user_roles():
@@ -86,6 +91,8 @@ def get_current_user_info():
 				# Whether to offer Closing Shift on this till (POS Profile 'Allow Closing
 				# Shift', or a manager); the closing endpoints check the same.
 				"can_close_shift": may_close_on_till(pos_profile.name if pos_profile else None, user),
+				# Invoice History: every invoice of the company, not only this till's or one's own.
+				"can_view_all_invoices": bool(INVOICE_MANAGER_ROLES & set(user_roles)),
 				"admin_roles": admin_roles,
 				"pos_profile": pos_profile.name if pos_profile else None,
 				"pos_profile_name": pos_profile.name if pos_profile else None,
