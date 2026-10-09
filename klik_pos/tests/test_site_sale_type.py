@@ -4,7 +4,7 @@ Some sites name Sales Invoices from a field of their own (Allparts: custom_sale_
 Cash -> CS-, Credit -> INV-). The name is fixed at insert, before any payment reaches the
 invoice, and a credit sale then looks like an M-Pesa draft - nothing paid on either. Only
 klik knows the cashier chose Credit Sale, so where the site has the field klik fills it.
-klik adds no field of its own: without one, nothing changes.
+klik ships the field (Allparts' definition), so every site records the sale type.
 """
 
 from unittest.mock import patch
@@ -174,3 +174,17 @@ class TestAnExtraFieldDoesNotCarryIt(FrappeTestCase):
 				due_date=frappe.utils.nowdate(),
 			)
 		self.assertEqual(draft.get(FIELD), "Cash")
+
+
+class TestSaleTypeFieldShipped(FrappeTestCase):
+	def test_klik_ships_the_sale_type_field(self):
+		field = frappe.db.get_value(
+			"Custom Field",
+			{"dt": "Sales Invoice", "fieldname": FIELD},
+			["module", "fieldtype", "options", "default", "reqd"],
+			as_dict=True,
+		)
+		self.assertEqual(
+			field,
+			{"module": "KLiK PoS", "fieldtype": "Select", "options": "Cash\nCredit", "default": "Cash", "reqd": 1},
+		)
