@@ -145,18 +145,15 @@ export default function OverdueWarningModal({ invoices, customerName, onClose }:
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex gap-3">
-          <button
-            onClick={copyReminder}
-            className="flex-1 py-2.5 bg-beveren-600 hover:bg-beveren-700 text-white font-semibold rounded-lg transition-all active:scale-[0.98] text-sm"
-          >
-            Copy Reminder
+        <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+            Close
           </button>
           <button
-            onClick={onClose}
-            className="flex-1 py-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold rounded-lg transition-all active:scale-[0.98] text-sm"
+            onClick={copyReminder}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-beveren-600 hover:bg-beveren-700 text-white transition-colors"
           >
-            Close
+            Copy Reminder
           </button>
         </div>
 

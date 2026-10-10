@@ -625,7 +625,7 @@ export default function SingleInvoiceReturn({
           <div className="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 flex-shrink-0 flex justify-end">
             <button
               onClick={finishVoucher}
-              className="px-8 py-3 rounded-lg font-semibold text-base transition-colors shadow-lg bg-orange-600 text-white hover:bg-orange-700 hover:shadow-xl"
+              className="px-5 py-2 rounded-lg text-sm font-semibold transition-colors bg-orange-600 text-white hover:bg-orange-700"
             >
               Done
             </button>
