@@ -32,6 +32,9 @@ add_to_apps_screen = [
 ]
 
 doc_events = {
+	"Sales Order": {
+		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate_order",
+	},
 	"Sales Invoice": {
 		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate",
 		"before_submit": "klik_pos.overrides.sales_invoice.validate_sales_person_on_submit",

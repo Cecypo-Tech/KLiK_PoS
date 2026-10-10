@@ -592,10 +592,16 @@ LOS_QTY_FIELD = {
 
 
 def install_los_qty_field():
-    """LoS Qty on Sales Invoice Item. Returns True when created."""
-    if frappe.db.exists("Custom Field", {"dt": "Sales Invoice Item", "fieldname": LOS_QTY_FIELD["fieldname"]}):
+    """LoS Qty on Sales Invoice Item, and on Sales Order Item for held orders. Returns True when
+    created."""
+    missing = [
+        dt
+        for dt in ("Sales Invoice Item", "Sales Order Item")
+        if not frappe.db.exists("Custom Field", {"dt": dt, "fieldname": LOS_QTY_FIELD["fieldname"]})
+    ]
+    if not missing:
         return False
-    create_custom_fields({"Sales Invoice Item": [LOS_QTY_FIELD]}, update=True)
+    create_custom_fields({dt: [LOS_QTY_FIELD] for dt in missing}, update=True)
     return True
 
 

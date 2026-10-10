@@ -34,18 +34,19 @@ def split_lines(lines, available):
 
 def in_stock_total(grand_total, lines, available):
 	"""What a held order would come to if checked out now: its total, scaled by the share of its
-	value in stock, so tax and discounts scale with it. lines: split_lines' lines plus rate, and
-	eligible (False: a line Loss of Sale may not shorten, which sells as asked)."""
+	value in stock, so tax and discounts scale with it. lines: split_lines' lines plus rate,
+	eligible (False: a line Loss of Sale may not shorten, which sells as asked) and held (the
+	order's own qty, which its total is for; requested when absent)."""
 	split = iter(split_lines([line for line in lines if line["eligible"]], available))
 	asked = now = 0
 	for line in lines:
 		qty = next(split)[0] if line["eligible"] else flt(line["requested"])
-		asked += flt(line["requested"]) * flt(line["rate"])
+		asked += flt(line.get("held", line["requested"])) * flt(line["rate"])
 		now += qty * flt(line["rate"])
 	return flt(grand_total) * now / asked if asked else flt(grand_total)
 
 
-def split_cart_items(items, pos_profile):
+def split_cart_items(items, pos_profile, refuse_if_nothing_sold=True):
 	"""The till's cart lines, as parse_invoice_data returns them, split in place against the
 	till's warehouse. Returns one {index, item_code, quantity, los_qty} per line it changed.
 	Runs before the invoice is built: the builder checks batch stock against these quantities."""
@@ -94,17 +95,33 @@ def split_cart_items(items, pos_profile):
 			changes.append({"index": index, "item_code": item["id"], "quantity": qty, "los_qty": los_qty})
 		item["quantity"] = qty
 		item["los_qty"] = los_qty
-	_refuse_if_nothing_sold([item.get("quantity") for item in items])
+	if refuse_if_nothing_sold:
+		_refuse_if_nothing_sold([item.get("quantity") for item in items])
 	return sorted(changes, key=lambda change: change["index"])
 
 
 def fold_los_into_quantity(items):
-	"""A held order is a Sales Order, which refuses qty-0 lines: hold what was asked for and let
-	checkout split it against the stock there is then."""
+	"""The full ask on each line: qty + LoS as qty, no LoS."""
 	for item in items:
 		item["quantity"] = flt(item.get("quantity")) + flt(item.get("los_qty"))
 		item["los_qty"] = 0
 	return items
+
+
+def split_held_items(items, pos_profile):
+	"""A held order reopened: each line asks for its full qty + LoS again and is split against
+	the stock at this till now - stock may have come in, or more been sold, since it was held.
+	Nothing in stock still opens: checkout is what refuses that."""
+	fold_los_into_quantity(items)
+	if pos_profile:
+		split_cart_items(items, pos_profile, refuse_if_nothing_sold=False)
+	return items
+
+
+def before_validate_order(doc, method=None):
+	"""Sales Order doc_event: a held order keeps the till's split, so a line with nothing in
+	stock is held at qty 0 with its LoS qty."""
+	_allow_los_zero_rows(doc)
 
 
 def _eligible_item_codes(item_codes):
