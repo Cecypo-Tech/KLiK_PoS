@@ -107,7 +107,7 @@ function ProductLineRow({
       )}
       {columns.code && !isMobile && (
         <div className={`${columns.code} items-center min-w-0 ${isDisabled ? "opacity-60" : ""}`}>
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-all">{item.item_code || item.id}</span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-words">{item.item_code || item.id}</span>
         </div>
       )}
       <div className={`${isMobile ? "flex items-center gap-2" : `${columns.name} flex items-center gap-2`}`}>

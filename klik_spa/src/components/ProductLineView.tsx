@@ -82,7 +82,10 @@ export default function ProductLineView({
               {columns.code && (
                 <div className={`${columns.code} text-xs font-semibold text-gray-900 dark:text-white`}>Item Code</div>
               )}
-              <div className={`${columns.name} text-xs font-semibold text-gray-900 dark:text-white`}>Item Name</div>
+              <div className={`${columns.name} text-xs font-semibold text-gray-900 dark:text-white`}>
+                {/* Below xl the code sits under the name, in this one column. */}
+                {columns.code ? <><span className="xl:hidden">Product</span><span className="hidden xl:inline">Item Name</span></> : "Item Name"}
+              </div>
               {showCostColumn && (
                 <div className="col-span-1 text-xs font-semibold text-right text-gray-400 dark:text-gray-500">Cost</div>
               )}
