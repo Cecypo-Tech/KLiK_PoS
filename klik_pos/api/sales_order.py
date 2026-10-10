@@ -19,7 +19,7 @@ from klik_pos.api.sales_invoice import (
     get_current_pos_opening_entry,
     parse_invoice_data,
 )
-from klik_pos.overrides.loss_of_sale import fold_los_into_quantity
+from klik_pos.overrides.loss_of_sale import LOS_FIELD, PROFILE_FLAG as LOS_PROFILE_FLAG, split_held_items
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -344,9 +344,14 @@ def _so_item_row(so, pos_profile, item, warehouse):
     has nothing to build a tax row from, and the held order would still price VAT-bearing
     items as though they carried no item tax at all.
     """
+    # A Loss of Sale till holds the cart's split, so the order (and its print) is for what is
+    # in stock; elsewhere the order holds the full ask.
+    asked = flt(item.get("quantity")) + flt(item.get("los_qty"))
+    los_qty = flt(item.get("los_qty")) if cint(pos_profile.get(LOS_PROFILE_FLAG)) else 0
     row = {
         "item_code": item["id"],
-        "qty": flt(item.get("quantity") or 1),
+        "qty": asked - los_qty if asked else 1,
+        LOS_FIELD: los_qty,
         "rate": flt(item.get("price") or 0),
         "uom": item.get("uom") or "",
         "delivery_date": nowdate(),
@@ -492,9 +497,6 @@ def create_held_order(data):
             _loyalty_redemption,
         ) = parse_invoice_data(data)
 
-        # A held order is a Sales Order, which refuses qty-0 lines: hold what was asked for.
-        fold_los_into_quantity(items)
-
         cart_meta = _build_cart_meta(
             data, items, business_type, salesperson, tax_id,
             delivery_charge, delivery_personnel, sales_and_tax_charges, roundoff_amount,
@@ -583,13 +585,28 @@ def get_held_order_details(order_id):
             )
             item_names = {r.name: r.item_name for r in rows}
 
+        # The full ask, split again against the stock at this till now. An M-Pesa order opens
+        # as held: its push was for the held total.
+        lines = [
+            {
+                "id": row.item_code,
+                "quantity": flt(row.qty),
+                "los_qty": flt(row.get(LOS_FIELD)),
+                "uom": row.uom,
+                "bundle_entries": (item_discounts.get(row.item_code) or {}).get("bundle_entries") or [],
+            }
+            for row in so.items
+        ]
+        split_held_items(lines, None if so.get("custom_klik_mpesa_order") else _active_till())
+
         items = []
-        for row in so.items:
+        for row, line in zip(so.items, lines):
             d = item_discounts.get(row.item_code) or {}
             items.append({
                 "item_code": row.item_code,
                 "item_name": item_names.get(row.item_code) or row.item_code,
-                "quantity": flt(row.qty),
+                "quantity": line["quantity"],
+                "los_qty": line["los_qty"],
                 "price": flt(row.rate),
                 "uom": row.uom or "",
                 "discountAmount": flt(d.get("discountAmount") or 0),
@@ -744,7 +761,8 @@ def _attach_in_stock_totals(orders, item_rows):
     for row in rows:
         lines.setdefault(row.parent, []).append({
             "key": (row.item_code, till.warehouse),
-            "requested": flt(row.qty),
+            "requested": flt(row.qty) + flt(row.get(LOS_FIELD)),
+            "held": flt(row.qty),
             "factor": flt(row.conversion_factor) or 1,
             "whole": row.uom in whole,
             "rate": flt(row.rate),
@@ -854,7 +872,7 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             all_items = frappe.get_all(
                 "Sales Order Item",
                 filters={"parent": ["in", order_names]},
-                fields=["parent", "idx", "item_code", "item_name", "qty", "rate", "uom", "conversion_factor"],
+                fields=["parent", "idx", "item_code", "item_name", "qty", LOS_FIELD, "rate", "uom", "conversion_factor"],
             )
             for row in all_items:
                 items_map.setdefault(row.parent, []).append({

@@ -3,7 +3,9 @@ import { cacheHeldOrder, loadCachedItemsToCart } from './draftInvoiceCache';
 import { transformCustomerInfo } from './transformCustomerInfo';
 import { useCartStore } from '../stores/cartStore';
 import { usePOSProfileStore } from '../stores/posProfileStore';
-import { checkoutExtrasFromHeldOrder, tillFlags } from './heldOrderPayload';
+import { checkoutExtrasFromHeldOrder, heldItemToCartItem, tillFlags } from './heldOrderPayload';
+import { toast } from 'react-toastify';
+import { losToast } from './lossOfSale';
 import type { CartItem, Customer } from '../../types';
 
 // transformCustomerInfo returns the `types/customer` Customer; the cache stores the
@@ -16,26 +18,14 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
     throw new Error(orderData?.message || 'Failed to load held order');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const items: CartItem[] = orderData.items.map((item: any) => ({
-    id: item.item_code,
-    item_code: item.item_code,
-    name: item.item_name,
-    category: '',
-    price: item.price,
-    original_price: item.price,
-    quantity: item.quantity,
-    uom: item.uom || 'Nos',
-    bundle_entries: item.bundle_entries || [],
-    // Persist discount fields so OrderSummary can restore itemDiscounts state
-    discount_amount: item.discountAmount || 0,
-    discount_percentage: item.discountPercentage || 0,
-    custom_rate: item.customRate ?? undefined,
-    custom_rate_includes_tax: item.customRateIncludesTax ?? undefined,
-    item_tax_template: item.item_tax_template || '',
-    item_tax_rate: item.item_tax_rate || {},
-    description: item.description || '',
-  } as unknown as CartItem));
+  const items = orderData.items.map(heldItemToCartItem);
+  // The server split each line's full ask against the stock at this till now.
+  for (const item of items) {
+    if ((item.los_qty ?? 0) > 0) {
+      toast.warning(losToast(item.name, item.uom, { quantity: item.quantity, los_qty: item.los_qty ?? 0 }));
+    }
+  }
+
 
   // Resolve customer object — must be a full Customer (with `id`) so checkout can
   // send customer.id, matching the customer-search selection flow.

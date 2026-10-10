@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_CHECKOUT_EXTRAS, checkoutExtrasFromHeldOrder, heldOrderPayloadExtras, tillFlags,
+  EMPTY_CHECKOUT_EXTRAS, checkoutExtrasFromHeldOrder, heldItemToCartItem, heldOrderPayloadExtras, tillFlags,
 } from "./heldOrderPayload";
 
 const allOn = { deliveryCharge: true, shippingRule: true, discountChange: true };
@@ -114,5 +114,17 @@ describe("checkoutExtrasFromHeldOrder", () => {
 
   it("copes with an order held before any of this existed", () => {
     expect(checkoutExtrasFromHeldOrder({ cart_meta: null }, allOn)).toEqual(EMPTY_CHECKOUT_EXTRAS);
+  });
+});
+
+describe("heldItemToCartItem", () => {
+  it("keeps the Loss of Sale split the server worked out at this till", () => {
+    const line = heldItemToCartItem({ item_code: "F049", item_name: "Filter", quantity: 40, los_qty: 60, price: 450 });
+    expect(line.quantity).toBe(40);
+    expect(line.los_qty).toBe(60);
+  });
+
+  it("an order from before the split opens with no Loss of Sale", () => {
+    expect(heldItemToCartItem({ item_code: "F049", quantity: 100, price: 450 }).los_qty).toBe(0);
   });
 });

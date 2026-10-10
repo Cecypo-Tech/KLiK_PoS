@@ -403,38 +403,50 @@ class TestLossOfSale(FrappeTestCase):
 		self.assertTrue(response["success"], response.get("message"))
 		self.assertEqual(self._rows(response["invoice_name"]), [(STOCKED, 4, 0)])
 
-	def _held_rows(self, save):
-		"""save(payload) -> response with order_name; the order's (item, qty) rows."""
-		response = save(
-			{
-				"customer": {"id": self.customer},
-				"items": [
-					{"id": STOCKED, "quantity": 2, "los_qty": 0, "price": 100, "uom": "Nos"},
-					{"id": EMPTY, "quantity": 0, "los_qty": 6, "price": 100, "uom": "Nos"},
-				],
-				"status": "held",
-			}
-		)
+	def _held_rows(self, save, enabled=1):
+		"""save(payload) -> response with order_name; the order's (item, qty, LoS qty) rows."""
+		with pos_profile_settings(self.profile.name, custom_enable_loss_of_sale=enabled):
+			response = save(
+				{
+					"customer": {"id": self.customer},
+					"items": [
+						{"id": STOCKED, "quantity": 2, "los_qty": 0, "price": 100, "uom": "Nos"},
+						{"id": EMPTY, "quantity": 0, "los_qty": 6, "price": 100, "uom": "Nos"},
+					],
+					"status": "held",
+				}
+			)
 		self.assertTrue(response["success"], response.get("message"))
 		self.addCleanup(
 			lambda: frappe.db.exists("Sales Order", response["order_name"])
 			and (frappe.delete_doc("Sales Order", response["order_name"], force=True, ignore_permissions=True), frappe.db.commit())
 		)
 		return [
-			(r.item_code, r.qty)
+			(r.item_code, r.qty, r.custom_los_qty)
 			for r in frappe.get_all(
-				"Sales Order Item", filters={"parent": response["order_name"]}, fields=["item_code", "qty"], order_by="idx"
+				"Sales Order Item",
+				filters={"parent": response["order_name"]},
+				fields=["item_code", "qty", "custom_los_qty"],
+				order_by="idx",
 			)
 		]
 
-	def test_a_held_order_holds_what_was_asked_for(self):
+	def test_a_held_order_keeps_the_till_s_split(self):
+		"""So its print and total are for what is in stock; reopening it asks for the full qty again."""
 		self._require_shift()
 		from klik_pos.api.sales_order import create_held_order
 
-		self.assertEqual(self._held_rows(create_held_order), [(STOCKED, 2), (EMPTY, 6)])
+		self.assertEqual(self._held_rows(create_held_order), [(STOCKED, 2, 0), (EMPTY, 0, 6)])
+
+	def test_without_loss_of_sale_a_held_order_holds_what_was_asked_for(self):
+		self._require_shift()
+		from klik_pos.api.sales_order import create_held_order
+
+		self.assertEqual(self._held_rows(create_held_order, enabled=0), [(STOCKED, 2, 0), (EMPTY, 6, 0)])
 
 	def test_an_mpesa_order_holds_what_was_asked_for(self):
+		"""Its push is for the order's total: the full ask."""
 		self._require_shift()
 		from klik_pos.api.mpesa_order import save_mpesa_order
 
-		self.assertEqual(self._held_rows(save_mpesa_order), [(STOCKED, 2), (EMPTY, 6)])
+		self.assertEqual(self._held_rows(save_mpesa_order), [(STOCKED, 2, 0), (EMPTY, 6, 0)])

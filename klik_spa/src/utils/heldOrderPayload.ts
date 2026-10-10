@@ -1,3 +1,4 @@
+import type { CartItem } from '../../types';
 /**
  * Everything a held order must carry besides its lines, and how it comes back.
  *
@@ -93,4 +94,29 @@ export function checkoutExtrasFromHeldOrder(
     // The order's own field wins - even emptied in desk; the cart copy only for an older server.
     remarks: typeof details.remarks === "string" ? details.remarks : typeof meta.remarks === "string" ? meta.remarks : "",
   };
+}
+
+/** A held order's line as the cart holds it, its Loss of Sale split included. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function heldItemToCartItem(item: any): CartItem {
+  return {
+    id: item.item_code,
+    item_code: item.item_code,
+    name: item.item_name,
+    category: '',
+    price: item.price,
+    original_price: item.price,
+    quantity: item.quantity,
+    los_qty: Number(item.los_qty) || 0,
+    uom: item.uom || 'Nos',
+    bundle_entries: item.bundle_entries || [],
+    // Persist discount fields so OrderSummary can restore itemDiscounts state
+    discount_amount: item.discountAmount || 0,
+    discount_percentage: item.discountPercentage || 0,
+    custom_rate: item.customRate ?? undefined,
+    custom_rate_includes_tax: item.customRateIncludesTax ?? undefined,
+    item_tax_template: item.item_tax_template || '',
+    item_tax_rate: item.item_tax_rate || {},
+    description: item.description || '',
+  } as unknown as CartItem;
 }
