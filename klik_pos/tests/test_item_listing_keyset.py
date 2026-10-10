@@ -18,9 +18,7 @@ class TestKeysetPaging(ListingQueryCase):
 		while True:
 			params = {"limit": limit, "item_codes": item_codes or fx.EVERY}
 			if cursor:
-				params.update(
-					after_name=cursor["after_name"], after_code=cursor["after_code"], include_count=0
-				)
+				params.update(**cursor, include_count=0)
 			result, codes = self._codes(hide_unavailable, include_service_items=1, stock=stock, **params)
 			requests += 1
 			seen.extend(codes)
@@ -54,8 +52,7 @@ class TestKeysetPaging(ListingQueryCase):
 			False,
 			item_codes=fx.EVERY,
 			limit=2,
-			after_name=first["next_cursor"]["after_name"],
-			after_code=first["next_cursor"]["after_code"],
+			**first["next_cursor"],
 			include_count=0,
 		)
 		self.assertIsNone(later["total_count"])
@@ -103,3 +100,47 @@ class TestCursorPagesStayPermissionScoped(ListingQueryCase):
 			_result, permitted = self._codes(False, include_service_items=1, item_codes=fx.EVERY, **after)
 
 		self.assertEqual(permitted, [code for code in rest if code not in barred])
+
+
+class TestGroupOrder(TestKeysetPaging):
+	"""Browsing lists items group by group - the list view heads each group - and the cursor
+	carries the group, so paging across a group boundary neither repeats nor skips an item."""
+
+	OTHER_GROUP = "TEST-LISTQ-AAA"  # sorts before fx.GROUP
+	MOVED = [fx.TWINS[1], fx.STOCKED]
+
+	def setUp(self):
+		super().setUp()
+		import frappe
+
+		if not frappe.db.exists("Item Group", self.OTHER_GROUP):
+			frappe.get_doc(
+				{"doctype": "Item Group", "item_group_name": self.OTHER_GROUP, "parent_item_group": "All Item Groups"}
+			).insert(ignore_permissions=True)
+		for code in self.MOVED:
+			frappe.db.set_value("Item", code, "item_group", self.OTHER_GROUP, update_modified=False)
+		self.addCleanup(
+			lambda: [frappe.db.set_value("Item", code, "item_group", fx.GROUP, update_modified=False) for code in self.MOVED]
+		)
+
+	def _codes(self, *args, **kwargs):
+		kwargs.setdefault("category", "all")
+		return super()._codes(*args, **kwargs)
+
+	def test_items_come_group_by_group(self):
+		import frappe
+
+		_result, listed = self._codes(False, include_service_items=1, item_codes=fx.EVERY, limit=100)
+		in_db_order = frappe.get_all(
+			"Item", filters={"name": ["in", fx.EVERY]}, order_by="item_group asc, item_name asc, name asc", pluck="name"
+		)
+		self.assertEqual(listed, in_db_order)
+		self.assertEqual(set(listed[:2]), set(self.MOVED))
+
+	def test_the_next_page_marker_carries_the_group(self):
+		first, _codes = self._codes(False, include_service_items=1, item_codes=fx.EVERY, limit=1)
+		self.assertEqual(first["next_cursor"]["after_group"], self.OTHER_GROUP)
+
+	def test_a_search_keeps_its_best_match_order(self):
+		_result, listed = self._codes(False, include_service_items=1, item_codes=fx.EVERY, search="LISTQ", limit=100)
+		self.assertNotEqual(set(listed[:2]), set(self.MOVED))

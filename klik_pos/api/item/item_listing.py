@@ -31,6 +31,7 @@ def get_items(
     include_groups: int = 1,
     after_name: str | None = None,
     after_code: str | None = None,
+    after_group: str | None = None,
     include_count: int = 1,
     compact_tax: int = 0,
 ):
@@ -40,8 +41,11 @@ def get_items(
     `include_groups=0` skips the category bar's groups: the till loads those once from
     get_item_groups and only asks the listing for them while a search is narrowing them.
 
-    Paging: pass the previous page's `next_cursor` back as `after_name` / `after_code` to
-    continue after its last row (offset is then ignored); `include_count=0` skips the
+    Browsing lists items group by group (item group, then name, then code): the list view
+    heads each group. A search is ranked instead.
+
+    Paging: pass the previous page's `next_cursor` back as `after_group` / `after_name` /
+    `after_code` to continue after its last row (offset is then ignored); `include_count=0` skips the
     total, which a till needs once per browse. Without these, paging by offset with a
     count on every page works as before. A search page is ranked, so it pages by offset.
 
@@ -118,12 +122,20 @@ def get_items(
         page_where = where_sql
         page_params = list(where_params)
         if after_code and not search_term:
-            # Continue right after the previous page's last row, on the name index.
-            page_where += "\nAND (i.item_name > %s OR (i.item_name = %s AND i.name > %s))"
-            page_params += [after_name or "", after_name or "", after_code]
+            # Continue right after the previous page's last row. A till loaded before the
+            # cursor carried the group sends none: the last row's own group stands in.
+            if after_group is None:
+                after_group = frappe.db.get_value("Item", after_code, "item_group") or ""
+            # ponytail: no (item_group, item_name, name) index on Item; add one if large
+            # catalogues page slowly.
+            page_where += (
+                "\nAND (i.item_group > %s OR (i.item_group = %s AND"
+                " (i.item_name > %s OR (i.item_name = %s AND i.name > %s))))"
+            )
+            page_params += [after_group, after_group, after_name or "", after_name or "", after_code]
             offset = 0
 
-        order_sql = " ORDER BY i.item_name ASC, i.name ASC"
+        order_sql = " ORDER BY i.item_group ASC, i.item_name ASC, i.name ASC"
         order_params = []
         if search_term:
             # A typed part number or scanned barcode first, then codes starting with it,
@@ -156,7 +168,7 @@ def get_items(
         items = rows[:limit]
         last_row = items[-1] if items else None
         next_cursor = (
-            {"after_name": last_row["item_name"], "after_code": last_row["name"]}
+            {"after_group": last_row["item_group"], "after_name": last_row["item_name"], "after_code": last_row["name"]}
             if has_more and last_row
             else None
         )

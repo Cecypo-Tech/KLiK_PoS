@@ -12,12 +12,21 @@ export function lineViewColumns({ showItemCode, showCost }: { showItemCode: bool
     : { code: "hidden xl:flex xl:col-span-3", name: `${name} xl:col-span-3` };
 }
 
-// ponytail: ERPNext's default root name; a site that renamed its root shows it, harmlessly.
-const ROOT_ITEM_GROUP = "All Item Groups";
-
-/** The item's group, shown beside its name only when it tells the cashier something: never the
- * root group, nor the group the selected tab already names ("all" is the All Items tab). */
-export function groupLabel(category: string | undefined, selectedCategory: string): string | null {
-  if (!category || category === ROOT_ITEM_GROUP || category === selectedCategory) return null;
-  return category;
+/** Where the list view heads a group: index of each group's first item -> its name. The
+ * listing comes group by group while browsing; a search is ranked, so it gets no headers, and
+ * nor does a tab whose own group is all there is. */
+export function groupHeaders(
+  categories: Array<string | undefined>,
+  { searching, selectedCategory }: { searching: boolean; selectedCategory: string },
+): Map<number, string> {
+  const headers = new Map<number, string>();
+  if (searching) return headers;
+  let previous: string | null = null;
+  categories.forEach((category, index) => {
+    const group = category || "Ungrouped";
+    if (group !== previous) headers.set(index, group);
+    previous = group;
+  });
+  if (headers.size === 1 && headers.get(0) === selectedCategory) headers.clear();
+  return headers;
 }

@@ -8,7 +8,6 @@ import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isItemOutOfStock } from "../utils/stock"
 import { formatAvailability } from "../utils/availability"
 import { getItemDisplayName } from "../utils/itemDisplayName"
-import { groupLabel } from "../utils/lineViewColumns"
 
 interface ProductLineRowProps {
   item: MenuItem
@@ -25,8 +24,6 @@ interface ProductLineRowProps {
   showCostColumn: boolean
   /** lineViewColumns: the code column (null: none) and the name column's classes. */
   columns: { code: string | null; name: string }
-  /** The selected group tab ("all": All Items), for groupLabel. */
-  selectedCategory: string
   onAddToCart: (item: MenuItem) => void
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
@@ -49,7 +46,6 @@ function ProductLineRow({
   lossOfSaleEnabled,
   showCostColumn,
   columns,
-  selectedCategory,
   onAddToCart,
   onItemFocus,
   onItemKeyDown,
@@ -66,7 +62,6 @@ function ProductLineRow({
   const showsAdjustedPrice = Math.abs(expectedPrice - basePrice) > 0.004
   const formattedPrice = formatCurrencyWithSymbol(expectedPrice, item.currency_symbol)
   const formattedBasePrice = formatCurrencyWithSymbol(basePrice, item.currency_symbol)
-  const group = groupLabel(item.category, selectedCategory)
   const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0
   const variantCount = item.is_variant_template ? item.variant_count || 0 : 0
   // Beside a VAT-inclusive Rate the cost is shown VAT-inclusive too (valuation itself
@@ -175,9 +170,8 @@ function ProductLineRow({
               {useItemCodeAsName ? item.name : (item.item_code || item.id)}
             </p>
           )}
-          {(group || item.is_product_bundle || item.is_variant_template) && (
+          {(item.is_product_bundle || item.is_variant_template) && (
           <div className={`flex flex-wrap items-center gap-1 mt-0.5 ${isDisabled ? "opacity-60" : ""}`}>
-            {group && <span className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">{group}</span>}
             {item.is_product_bundle && (
               <span className="inline-flex items-center rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-px text-[9px] font-medium leading-none text-amber-700 dark:text-amber-300">
                 Bundle · {bundleCount}

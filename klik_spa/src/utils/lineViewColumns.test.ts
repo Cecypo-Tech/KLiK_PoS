@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupLabel, lineViewColumns } from "./lineViewColumns";
+import { groupHeaders, lineViewColumns } from "./lineViewColumns";
 
 describe("lineViewColumns", () => {
   it("gives the item code its own column on wide screens when the till shows codes", () => {
@@ -22,24 +22,30 @@ describe("lineViewColumns", () => {
   });
 });
 
-describe("groupLabel", () => {
-  it("names the item's group on All Items and in search", () => {
-    expect(groupLabel("Brake Pads", "all")).toBe("Brake Pads");
+describe("groupHeaders", () => {
+  const browsing = { searching: false, selectedCategory: "all" };
+
+  it("heads the first item of each group", () => {
+    expect(groupHeaders(["Brakes", "Brakes", "Filters", "Oils"], browsing)).toEqual(
+      new Map([[0, "Brakes"], [2, "Filters"], [3, "Oils"]]),
+    );
   });
 
-  it("says nothing for the root group", () => {
-    expect(groupLabel("All Item Groups", "all")).toBeNull();
+  it("heads nothing while searching: results stay in best-match order", () => {
+    expect(groupHeaders(["Brakes", "Filters"], { searching: true, selectedCategory: "all" }).size).toBe(0);
   });
 
-  it("says nothing when the selected tab already names it", () => {
-    expect(groupLabel("Brake Pads", "Brake Pads")).toBeNull();
+  it("heads nothing when the tab already names the only group", () => {
+    expect(groupHeaders(["Brakes", "Brakes"], { searching: false, selectedCategory: "Brakes" }).size).toBe(0);
   });
 
-  it("names a sub-group under its parent's tab", () => {
-    expect(groupLabel("Front Pads", "Brake Pads")).toBe("Front Pads");
+  it("heads each sub-group under its parent's tab", () => {
+    expect(groupHeaders(["Front Pads", "Rear Pads"], { searching: false, selectedCategory: "Brakes" })).toEqual(
+      new Map([[0, "Front Pads"], [1, "Rear Pads"]]),
+    );
   });
 
-  it("says nothing for an item with no group", () => {
-    expect(groupLabel(undefined, "all")).toBeNull();
+  it("heads an item with no group as Ungrouped", () => {
+    expect(groupHeaders([undefined], browsing)).toEqual(new Map([[0, "Ungrouped"]]));
   });
 });
