@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { Fragment, useCallback, useMemo, useState } from "react"
 import type { MenuItem } from "../../types"
 import ProductDetailsModal from "./ProductDetailsModal"
 import ProductLineRow from "./ProductLineRow"
 import { usePOSProfileStore } from "../stores/posProfileStore"
-import { lineViewColumns } from "../utils/lineViewColumns"
+import { groupHeaders, lineViewColumns } from "../utils/lineViewColumns"
 import { useProductStore } from "../stores/productStore"
 
 
@@ -46,6 +46,11 @@ export default function ProductLineView({
   const { posDetails } = usePOSProfileStore()
   const showCostColumn = !(posDetails?.restrict_cost_visibility_in_tooltip ?? true)
   const selectedCategory = useProductStore((s) => s.selectedCategory)
+  const searching = useProductStore((s) => s.searchQuery.trim() !== "")
+  const headers = useMemo(
+    () => groupHeaders(items.map((item) => item.category), { searching, selectedCategory }),
+    [items, searching, selectedCategory],
+  )
   const columns = lineViewColumns({ showItemCode, showCost: showCostColumn })
 
   const handleInfoClick = useCallback((item: MenuItem) => {
@@ -100,8 +105,15 @@ export default function ProductLineView({
 
           <div className="divide-y divide-gray-200 dark:divide-gray-600">
             {items.map((item, rowIndex) => (
+              <Fragment key={item.id}>
+              {headers.has(rowIndex) && (
+                // Sticks to the top while its group scrolls by; the next group's header
+                // slides over it.
+                <div className="sticky top-0 z-10 px-3 py-1 bg-gray-100 dark:bg-gray-700 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+                  {headers.get(rowIndex)}
+                </div>
+              )}
               <ProductLineRow
-                key={item.id}
                 item={item}
                 rowIndex={rowIndex}
                 isFocused={focusedIndex === rowIndex}
@@ -115,12 +127,12 @@ export default function ProductLineView({
                 lossOfSaleEnabled={lossOfSaleEnabled}
                 showCostColumn={showCostColumn}
                 columns={columns}
-                selectedCategory={selectedCategory}
                 onAddToCart={onAddToCart}
                 onItemFocus={onItemFocus}
                 onItemKeyDown={onItemKeyDown}
                 onInfoClick={handleInfoClick}
               />
+              </Fragment>
             ))}
           </div>
         </div>

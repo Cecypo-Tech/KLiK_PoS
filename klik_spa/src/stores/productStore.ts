@@ -248,6 +248,7 @@ export const useProductStore = create<ProductStoreState>()(
           // after the previous page's last row.
           if (options?.includeCount === false) params.append('include_count', '0');
           if (options?.cursor) {
+            if (options.cursor.after_group !== undefined) params.append('after_group', options.cursor.after_group);
             params.append('after_name', options.cursor.after_name);
             params.append('after_code', options.cursor.after_code);
           }

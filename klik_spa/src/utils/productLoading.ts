@@ -62,6 +62,8 @@ export function searchFooterLabel(shown: number, total: number): string {
 
 /** Where the next page starts: the previous page's last row (see get_items' next_cursor). */
 export interface PageCursor {
+  /** Absent from a server that pages by name only. */
+  after_group?: string;
   after_name: string;
   after_code: string;
 }

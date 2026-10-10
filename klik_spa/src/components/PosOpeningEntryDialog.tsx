@@ -490,10 +490,10 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                 </div>
               )}
 
-              <div className="flex space-x-3 pt-4">
+              <div className="flex justify-end gap-2 pt-4">
                 <button
                   onClick={onClose}
-                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+                  className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                   disabled={profilesLoading || isCreating || isLoadingPaymentModes}
                 >
                   Cancel
@@ -508,7 +508,7 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
                     !!conflict ||
                     !canOpen(paymentMethods)
                   }
-                  className="flex-1 px-4 py-2 bg-beveren-700 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  className="px-4 py-2 text-sm font-semibold bg-beveren-700 text-white rounded-lg hover:bg-beveren-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                   {profilesLoading ? 'Loading...' :
                    isCreating ? 'Creating...' :
