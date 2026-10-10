@@ -5,6 +5,7 @@ import type { MenuItem } from "../../types"
 import ProductDetailsModal from "./ProductDetailsModal"
 import ProductLineRow from "./ProductLineRow"
 import { usePOSProfileStore } from "../stores/posProfileStore"
+import { lineViewColumns } from "../utils/lineViewColumns"
 
 
 interface ProductLineViewProps {
@@ -43,7 +44,7 @@ export default function ProductLineView({
 
   const { posDetails } = usePOSProfileStore()
   const showCostColumn = !(posDetails?.restrict_cost_visibility_in_tooltip ?? true)
-  const productColSpan = showCostColumn ? "col-span-5" : "col-span-6"
+  const columns = lineViewColumns({ showItemCode, showCost: showCostColumn })
 
   const handleInfoClick = useCallback((item: MenuItem) => {
     setSelectedItem(item)
@@ -78,7 +79,10 @@ export default function ProductLineView({
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mb-2 overflow-visible">
           {!isMobile && (
             <div className="grid grid-cols-12 gap-3 px-3 py-2 bg-gray-50 dark:bg-gray-700 border-b">
-              <div className={`${productColSpan} text-xs font-semibold text-gray-900 dark:text-white`}>Product</div>
+              {columns.code && (
+                <div className={`${columns.code} text-xs font-semibold text-gray-900 dark:text-white`}>Item Code</div>
+              )}
+              <div className={`${columns.name} text-xs font-semibold text-gray-900 dark:text-white`}>Item Name</div>
               {showCostColumn && (
                 <div className="col-span-1 text-xs font-semibold text-right text-gray-400 dark:text-gray-500">Cost</div>
               )}
@@ -105,7 +109,7 @@ export default function ProductLineView({
                 stockUnavailable={stockUnavailable}
                 lossOfSaleEnabled={lossOfSaleEnabled}
                 showCostColumn={showCostColumn}
-                productColSpan={productColSpan}
+                columns={columns}
                 onAddToCart={onAddToCart}
                 onItemFocus={onItemFocus}
                 onItemKeyDown={onItemKeyDown}

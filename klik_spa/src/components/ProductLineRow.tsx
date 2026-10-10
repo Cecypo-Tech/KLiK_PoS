@@ -22,7 +22,8 @@ interface ProductLineRowProps {
   stockUnavailable: boolean
   lossOfSaleEnabled: boolean
   showCostColumn: boolean
-  productColSpan: string
+  /** lineViewColumns: the code column (null: none) and the name column's classes. */
+  columns: { code: string | null; name: string }
   onAddToCart: (item: MenuItem) => void
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
@@ -44,7 +45,7 @@ function ProductLineRow({
   stockUnavailable,
   lossOfSaleEnabled,
   showCostColumn,
-  productColSpan,
+  columns,
   onAddToCart,
   onItemFocus,
   onItemKeyDown,
@@ -104,7 +105,12 @@ function ProductLineRow({
           </div>
         </div>
       )}
-      <div className={`${isMobile ? "flex items-center gap-2" : `${productColSpan} flex items-center gap-2`}`}>
+      {columns.code && !isMobile && (
+        <div className={`${columns.code} items-center min-w-0 ${isDisabled ? "opacity-60" : ""}`}>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-all">{item.item_code || item.id}</span>
+        </div>
+      )}
+      <div className={`${isMobile ? "flex items-center gap-2" : `${columns.name} flex items-center gap-2`}`}>
         {!hideImages && (
           item.image ? (
             <div
@@ -129,7 +135,15 @@ function ProductLineRow({
         <div className="flex-1 min-w-0 relative">
           <div className="flex items-start gap-1">
             <h3 className={`font-medium text-gray-900 dark:text-white break-words ${isMobile ? "text-xs leading-tight" : "text-sm"} ${isDisabled ? "opacity-60" : ""}`}>
-              {getItemDisplayName(item, useItemCodeAsName)}
+              {columns.code && useItemCodeAsName && !isMobile ? (
+                // The code has its own column on wide screens: name the item there.
+                <>
+                  <span className="xl:hidden">{getItemDisplayName(item, true)}</span>
+                  <span className="hidden xl:inline">{getItemDisplayName(item, false)}</span>
+                </>
+              ) : (
+                getItemDisplayName(item, useItemCodeAsName)
+              )}
             </h3>
             <div
               className="relative inline-block flex-shrink-0 mt-px"
@@ -159,7 +173,7 @@ function ProductLineRow({
             </div>
           </div>
           {showItemCode && (
-            <p className={`text-gray-600 dark:text-gray-300 break-words ${isMobile ? "text-xs leading-tight" : "text-xs"} ${isDisabled ? "opacity-60" : ""}`}>
+            <p className={`text-gray-600 dark:text-gray-300 break-words ${isMobile ? "text-xs leading-tight" : "text-xs xl:hidden"} ${isDisabled ? "opacity-60" : ""}`}>
               {useItemCodeAsName ? item.name : (item.item_code || item.id)}
             </p>
           )}
