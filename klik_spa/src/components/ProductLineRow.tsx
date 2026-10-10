@@ -8,6 +8,7 @@ import { formatCurrencyWithSymbol } from "../utils/currency"
 import { isItemOutOfStock } from "../utils/stock"
 import { formatAvailability } from "../utils/availability"
 import { getItemDisplayName } from "../utils/itemDisplayName"
+import { groupLabel } from "../utils/lineViewColumns"
 
 interface ProductLineRowProps {
   item: MenuItem
@@ -24,6 +25,8 @@ interface ProductLineRowProps {
   showCostColumn: boolean
   /** lineViewColumns: the code column (null: none) and the name column's classes. */
   columns: { code: string | null; name: string }
+  /** The selected group tab ("all": All Items), for groupLabel. */
+  selectedCategory: string
   onAddToCart: (item: MenuItem) => void
   onItemFocus?: (index: number) => void
   onItemKeyDown?: (index: number, item: MenuItem, e: React.KeyboardEvent<HTMLDivElement>) => void
@@ -46,6 +49,7 @@ function ProductLineRow({
   lossOfSaleEnabled,
   showCostColumn,
   columns,
+  selectedCategory,
   onAddToCart,
   onItemFocus,
   onItemKeyDown,
@@ -62,15 +66,7 @@ function ProductLineRow({
   const showsAdjustedPrice = Math.abs(expectedPrice - basePrice) > 0.004
   const formattedPrice = formatCurrencyWithSymbol(expectedPrice, item.currency_symbol)
   const formattedBasePrice = formatCurrencyWithSymbol(basePrice, item.currency_symbol)
-  const taxRate = Number(item.tax_info?.total_tax_rate || 0)
-  const taxBadgeLabel = item.tax_info?.has_vat
-    ? `VAT ${taxRate.toFixed(taxRate % 1 === 0 ? 0 : 2)}% ${item.tax_info.is_inclusive ? "Incl" : "Excl"}`
-    : "No VAT"
-  const taxBadgeClass = item.tax_info?.has_vat
-    ? item.tax_info.is_inclusive
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700"
-      : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700"
-    : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-700/50 dark:text-gray-300 dark:border-gray-600"
+  const group = groupLabel(item.category, selectedCategory)
   const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0
   const variantCount = item.is_variant_template ? item.variant_count || 0 : 0
   // Beside a VAT-inclusive Rate the cost is shown VAT-inclusive too (valuation itself
@@ -83,6 +79,27 @@ function ProductLineRow({
     ? `Valuation ${formatCurrencyWithSymbol(valuation, item.currency_symbol)} + ${costTaxRate}% VAT`
     : undefined
   const thumb = isMobile ? 32 : 28
+  const image = (
+    item.image ? (
+      <div
+        className="flex-shrink-0"
+        onMouseEnter={() => !isMobile && setShowZoom(true)}
+        onMouseLeave={() => !isMobile && setShowZoom(false)}
+      >
+        <img
+          src={item.image}
+          alt={item.name}
+          width={thumb}
+          height={thumb}
+          loading="lazy"
+          decoding="async"
+          className={`rounded object-cover ${isMobile ? "w-8 h-8" : "w-7 h-7"} ${isDisabled ? "opacity-60" : ""}`}
+        />
+      </div>
+    ) : (
+      <div className={`flex-shrink-0 rounded bg-gray-100 dark:bg-gray-700 ${isMobile ? "w-8 h-8" : "w-7 h-7"} ${isDisabled ? "opacity-60" : ""}`} />
+    )
+  )
 
   return (
     <div
@@ -106,32 +123,13 @@ function ProductLineRow({
         </div>
       )}
       {columns.code && !isMobile && (
-        <div className={`${columns.code} items-center min-w-0 ${isDisabled ? "opacity-60" : ""}`}>
+        <div className={`${columns.code} items-center gap-2 min-w-0 ${isDisabled ? "opacity-60" : ""}`}>
+          {!hideImages && image}
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-words">{item.item_code || item.id}</span>
         </div>
       )}
       <div className={`${isMobile ? "flex items-center gap-2" : `${columns.name} flex items-center gap-2`}`}>
-        {!hideImages && (
-          item.image ? (
-            <div
-              className="flex-shrink-0"
-              onMouseEnter={() => !isMobile && setShowZoom(true)}
-              onMouseLeave={() => !isMobile && setShowZoom(false)}
-            >
-              <img
-                src={item.image}
-                alt={item.name}
-                width={thumb}
-                height={thumb}
-                loading="lazy"
-                decoding="async"
-                className={`rounded object-cover ${isMobile ? "w-8 h-8" : "w-7 h-7"} ${isDisabled ? "opacity-60" : ""}`}
-              />
-            </div>
-          ) : (
-            <div className={`flex-shrink-0 rounded bg-gray-100 dark:bg-gray-700 ${isMobile ? "w-8 h-8" : "w-7 h-7"} ${isDisabled ? "opacity-60" : ""}`} />
-          )
-        )}
+        {!hideImages && (columns.code && !isMobile ? <div className="xl:hidden flex-shrink-0">{image}</div> : image)}
         <div className="flex-1 min-w-0 relative">
           <div className="flex items-start gap-1">
             <h3 className={`font-medium text-gray-900 dark:text-white break-words ${isMobile ? "text-xs leading-tight" : "text-sm"} ${isDisabled ? "opacity-60" : ""}`}>
@@ -177,16 +175,9 @@ function ProductLineRow({
               {useItemCodeAsName ? item.name : (item.item_code || item.id)}
             </p>
           )}
+          {(group || item.is_product_bundle || item.is_variant_template) && (
           <div className={`flex flex-wrap items-center gap-1 mt-0.5 ${isDisabled ? "opacity-60" : ""}`}>
-            <span className="inline-flex items-center rounded border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700/60 px-1.5 py-px text-[9px] font-medium leading-none text-gray-500 dark:text-gray-400">
-              {item.category}
-            </span>
-            <span
-              className={`inline-flex items-center rounded border px-1.5 py-px text-[9px] font-semibold leading-none ${taxBadgeClass}`}
-              title={item.tax_info?.item_tax_template || item.tax_info?.source || taxBadgeLabel}
-            >
-              {taxBadgeLabel}
-            </span>
+            {group && <span className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">{group}</span>}
             {item.is_product_bundle && (
               <span className="inline-flex items-center rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-px text-[9px] font-medium leading-none text-amber-700 dark:text-amber-300">
                 Bundle · {bundleCount}
@@ -198,6 +189,7 @@ function ProductLineRow({
               </span>
             )}
           </div>
+          )}
         </div>
       </div>
 

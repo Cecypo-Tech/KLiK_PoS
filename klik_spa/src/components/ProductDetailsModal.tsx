@@ -96,6 +96,14 @@ const isSoonExpiry = (d?: string) => {
   return diff >= 0 && diff <= 90
 }
 
+/** The item's tax as its template resolves it: shown here, not on every row of the list. */
+function taxLabel(tax: MenuItem["tax_info"]): string {
+  if (!tax?.has_vat) return "No VAT"
+  const rate = Number(tax.total_tax_rate || 0)
+  const label = `VAT ${rate.toFixed(rate % 1 === 0 ? 0 : 2)}% ${tax.is_inclusive ? "Incl" : "Excl"}`
+  return tax.item_tax_template ? `${label} (${tax.item_tax_template})` : label
+}
+
 function MarginChip({ pct }: { pct: number }) {
   const cls = pct >= 30
     ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
@@ -593,6 +601,10 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
                       <div className="flex justify-between">
                         <span className="text-xs text-gray-500">Category</span>
                         <span className="text-xs text-gray-700 dark:text-gray-300">{item.category || "—"}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-xs text-gray-500">Tax</span>
+                        <span className="text-xs text-right text-gray-700 dark:text-gray-300">{taxLabel(item.tax_info)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-xs text-gray-500">UOM</span>
