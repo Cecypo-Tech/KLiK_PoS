@@ -6,6 +6,7 @@ import ProductDetailsModal from "./ProductDetailsModal"
 import ProductLineRow from "./ProductLineRow"
 import { usePOSProfileStore } from "../stores/posProfileStore"
 import { lineViewColumns } from "../utils/lineViewColumns"
+import { useProductStore } from "../stores/productStore"
 
 
 interface ProductLineViewProps {
@@ -44,6 +45,7 @@ export default function ProductLineView({
 
   const { posDetails } = usePOSProfileStore()
   const showCostColumn = !(posDetails?.restrict_cost_visibility_in_tooltip ?? true)
+  const selectedCategory = useProductStore((s) => s.selectedCategory)
   const columns = lineViewColumns({ showItemCode, showCost: showCostColumn })
 
   const handleInfoClick = useCallback((item: MenuItem) => {
@@ -113,6 +115,7 @@ export default function ProductLineView({
                 lossOfSaleEnabled={lossOfSaleEnabled}
                 showCostColumn={showCostColumn}
                 columns={columns}
+                selectedCategory={selectedCategory}
                 onAddToCart={onAddToCart}
                 onItemFocus={onItemFocus}
                 onItemKeyDown={onItemKeyDown}
