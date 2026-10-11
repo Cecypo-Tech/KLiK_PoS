@@ -669,9 +669,10 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
 
   // Define render functions before they are used
   const renderFilters = () => (
-    <div className="w-full max-w-none bg-white/95 dark:bg-gray-800/95 rounded-xl p-4 border border-gray-200 dark:border-gray-700 mb-4 backdrop-blur">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <div className="relative">
+    <div className="w-full max-w-none bg-white/95 dark:bg-gray-800/95 rounded-xl p-3 border border-gray-200 dark:border-gray-700 mb-4 backdrop-blur">
+      {/* One line on a wide screen; wraps as the window narrows, stacks on a phone. */}
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+        <div className="relative sm:flex-1 sm:min-w-[12rem]">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={14} />
           <input
             type="text"
@@ -691,7 +692,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           placeholder="Filter customer..."
           value={customerFilter}
           onChange={(e) => setCustomerFilter(e.target.value)}
-          className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+          className="sm:w-44 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
         />
         <DateRangeFilter
           from={fromDate}
@@ -700,14 +701,14 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
             setFromDate(from);
             setToDate(to);
           }}
-          className="md:col-span-4 md:order-last"
+          className="sm:order-last"
         />
         
         <select
           value={cashierFilter}
           onChange={(e) => setCashierFilter(e.target.value)}
           disabled={!canViewOtherCashiers}
-          className={`px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white ${
+          className={`sm:w-auto px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white ${
             !canViewOtherCashiers ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
@@ -719,14 +720,14 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           ))}
         </select>
         {!canViewOtherCashiers && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Showing only your transactions</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Showing only your transactions</p>
         )}
         {/* Held orders have no payment yet, and the filter never applies to them. */}
         {activeTab !== "Held" && (
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
-            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+            className="sm:w-auto px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
           >
             <option value="all">All Payments</option>
             {modes.map((mode) => (
@@ -1506,28 +1507,23 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       <div className="flex-1 min-w-0 flex flex-col overflow-visible ml-20">
         {/* Header */}
         <div className="fixed top-0 left-20 right-0 z-50 bg-beveren-50 dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Invoice History</h1>
-              </div>
-              <div className="flex items-center space-x-3">
-                {MULTI_INVOICE_RETURN_ENABLED && canProcessReturns && <button
-                  onClick={handleMultiReturnClick}
-                  className="flex items-center space-x-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-                >
-                  <FileMinus className="w-4 h-4" />
-                  <span>Multi-Invoice Return</span>
-                </button>}
-                <button
-                  onClick={handleExportInvoices}
-                  className="flex items-center space-x-2 px-4 py-2 bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Export</span>
-                </button>
-              </div>
+          <div className="h-16 px-6 flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Invoice History</h1>
+            <div className="flex items-center gap-2">
+              {MULTI_INVOICE_RETURN_ENABLED && canProcessReturns && <button
+                onClick={handleMultiReturnClick}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+              >
+                <FileMinus className="w-4 h-4" />
+                <span>Multi-Invoice Return</span>
+              </button>}
+              <button
+                onClick={handleExportInvoices}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export</span>
+              </button>
             </div>
           </div>
         </div>

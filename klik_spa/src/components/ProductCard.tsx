@@ -58,16 +58,6 @@ function ProductCard({
     basePrice,
     item.currency_symbol,
   );
-  const taxRate = Number(item.tax_info?.total_tax_rate || 0);
-  const taxBadgeLabel = item.tax_info?.has_vat
-    ? `VAT ${taxRate.toFixed(taxRate % 1 === 0 ? 0 : 2)}% ${item.tax_info.is_inclusive ? "Incl" : "Excl"}`
-    : "No VAT";
-  const taxBadgeClass = item.tax_info?.has_vat
-    ? item.tax_info.is_inclusive
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700"
-      : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700"
-    : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-700/50 dark:text-gray-300 dark:border-gray-600";
-
   const handleModalOpen = () => {
     setShowTooltip(false);
     setShowDetailsModal(true);
@@ -227,19 +217,6 @@ function ProductCard({
                 {variantCount} {variantCount === 1 ? "variant" : "variants"}
               </p>
             )}
-          </div>
-          <div className="flex min-w-0 items-center justify-between gap-1">
-            <p
-              className={`min-w-0 truncate text-gray-500 dark:text-gray-400 capitalize ${isMobile ? "text-xs" : "text-xs"}`}
-            >
-              {item.category}
-            </p>
-            <span
-              className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${taxBadgeClass}`}
-              title={item.tax_info?.item_tax_template || item.tax_info?.source || taxBadgeLabel}
-            >
-              {taxBadgeLabel}
-            </span>
           </div>
           <div className="flex min-w-0 items-center justify-end">
             <div className="min-w-0 max-w-full text-right">

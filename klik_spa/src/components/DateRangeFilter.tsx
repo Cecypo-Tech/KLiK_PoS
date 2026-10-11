@@ -22,7 +22,7 @@ export function DateRangeFilter({
   size?: string;
   className?: string;
 }) {
-  const input = `min-w-0 flex-1 sm:flex-none sm:w-44 px-3 ${size} ${FIELD} bg-white dark:bg-gray-700 dark:[color-scheme:dark]`;
+  const input = `min-w-0 flex-1 sm:flex-none sm:w-36 px-2 ${size} ${FIELD} bg-white dark:bg-gray-700 dark:[color-scheme:dark]`;
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       <input
