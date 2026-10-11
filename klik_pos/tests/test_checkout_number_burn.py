@@ -706,6 +706,7 @@ CASHIER = "pos-cashier-burn@example.com"
 CASHIER_ROLE = "Express Sales"
 R_ITEM_GROUP = "TEST-BURN-R-GROUP"
 R_ITEM_CODE = "TEST-BURN-R-ITEM"
+R_TILL = "TEST-BURN-TILL"
 PRICE_FLOOR = 500.0
 
 
@@ -752,16 +753,23 @@ class TestRestrictedSalesUser(FrappeTestCase):
 		cls.ready = False
 		cls.stock_entry = None
 
+		# The cashier's shift goes on a till of its own, copied from a real one. ERPNext allows
+		# one open shift per till, so opening it on a till already in use always failed, and
+		# with no shift open anywhere the class skipped.
 		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-		if not get_current_pos_opening_entry():
+		opening = get_current_pos_opening_entry()
+		source = (opening and frappe.db.get_value("POS Opening Entry", opening, "pos_profile")) or next(
+			iter(frappe.get_all("POS Profile", {"disabled": 0}, pluck="name", order_by="creation", limit=1)),
+			None,
+		)
+		if not source:
 			return
-		from klik_pos.klik_pos.utils import get_current_pos_profile
-
-		try:
-			profile = get_current_pos_profile()
-		except Exception:
-			return
+		if frappe.db.exists("POS Profile", R_TILL):
+			frappe.delete_doc("POS Profile", R_TILL, force=True, ignore_permissions=True)
+		profile = frappe.copy_doc(frappe.get_doc("POS Profile", source))
+		profile.set("applicable_for_users", [])
+		profile.insert(ignore_permissions=True, set_name=R_TILL)
 
 		cls.profile = profile
 		cls.company = profile.company
@@ -884,7 +892,12 @@ class TestRestrictedSalesUser(FrappeTestCase):
 				frappe.delete_doc("Stock Entry", entry.name, force=True, ignore_permissions=True)
 			for name in frappe.get_all("Bin", filters={"item_code": R_ITEM_CODE}, pluck="name"):
 				frappe.delete_doc("Bin", name, force=True, ignore_permissions=True)
-			for doctype, name in (("Item", R_ITEM_CODE), ("Item Group", R_ITEM_GROUP), ("User", CASHIER)):
+			for doctype, name in (
+				("POS Profile", R_TILL),
+				("Item", R_ITEM_CODE),
+				("Item Group", R_ITEM_GROUP),
+				("User", CASHIER),
+			):
 				if frappe.db.exists(doctype, name):
 					frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
 			if frappe.db.exists("Customer", CUSTOMER):
