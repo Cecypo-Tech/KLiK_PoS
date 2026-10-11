@@ -16,7 +16,6 @@ export interface OpeningConflict {
   kind:
     | "own_open"
     | "own_stale"
-    | "own_other_profile"
     | "till_open"
     | "till_stale"
     | "till_needs_manager"
@@ -45,7 +44,7 @@ export interface ConflictNotice {
 
 export function conflictNotice(conflict: OpeningConflict): ConflictNotice {
   const { entry, pos_profile } = conflict;
-  if (conflict.can_close === false && (conflict.kind === "own_stale" || conflict.kind === "own_other_profile")) {
+  if (conflict.can_close === false && conflict.kind === "own_stale") {
     return {
       message: `Your shift ${entry} on ${pos_profile} has to be closed first, and closing is turned off on that till. A manager must close it.`,
       action: "none",
@@ -92,8 +91,8 @@ export function conflictNotice(conflict: OpeningConflict): ConflictNotice {
       };
     default:
       return {
-        message: `Your shift ${entry} on ${pos_profile} is still open. Close it before opening another till.`,
-        action: "close",
+        message: `Shift ${entry} on ${pos_profile} is open.`,
+        action: "none",
       };
   }
 }

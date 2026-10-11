@@ -29,18 +29,6 @@ describe("conflictNotice", () => {
     expect(notice.message).toContain("A manager must close it");
   });
 
-  it("leaves a shift on another till to a manager when that till does not allow closing", () => {
-    const notice = conflictNotice({ ...conflict("own_other_profile"), can_close: false });
-    expect(notice.action).toBe("none");
-    expect(notice.message).toContain("A manager must close it");
-  });
-
-  it("sends a shift open on another till to closing, naming that till", () => {
-    const notice = conflictNotice(conflict("own_other_profile"));
-    expect(notice.action).toBe("close");
-    expect(notice.message).toContain("_Test POS Profile");
-  });
-
   it("offers to join another cashier's shift on this till", () => {
     const notice = conflictNotice({ ...conflict("till_open"), user_name: "Derrick" });
     expect(notice.action).toBe("join");

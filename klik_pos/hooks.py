@@ -50,6 +50,7 @@ doc_events = {
 		"validate": [
 			"klik_pos.api.pos_entry.validate_opening_entry",
 		],
+		"on_submit": "klik_pos.api.pos_entry.remember_opened_shift",
 	},
 	"POS Closing Entry": {
 		"validate": [
@@ -67,6 +68,7 @@ doc_events = {
 
 extend_doctype_class = {
 	"Sales Invoice": "klik_pos.api.sales_invoice.CustomSalesInvoice",
+	"POS Opening Entry": "klik_pos.api.pos_entry.KlikPOSOpeningEntry",
 }
 
 # Migration hooks
