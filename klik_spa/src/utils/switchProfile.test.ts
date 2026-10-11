@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { switchProfileState } from "./switchProfile";
 
-const joined = { joined: true };
-const own = { joined: false };
+const joined = { entry: "S1", joined: true };
+const own = { entry: "S1", joined: false };
 
 describe("switchProfileState", () => {
   it("is hidden for a cashier with one profile", () => {
@@ -13,8 +13,12 @@ describe("switchProfileState", () => {
     expect(switchProfileState({ profileCount: 2, shift: joined, cartCount: 0 })).toEqual({ show: true, blocked: null });
   });
 
-  it("is blocked on a shift the cashier opened", () => {
-    expect(switchProfileState({ profileCount: 2, shift: own, cartCount: 0 }).blocked).toBe("Close this shift to switch");
+  it("is offered on a shift the cashier opened: it stays open for whoever is in it", () => {
+    expect(switchProfileState({ profileCount: 2, shift: own, cartCount: 0 })).toEqual({ show: true, blocked: null });
+  });
+
+  it("is hidden when the cashier is in no shift", () => {
+    expect(switchProfileState({ profileCount: 2, shift: { entry: null }, cartCount: 0 }).show).toBe(false);
   });
 
   it("is blocked while the cart has items", () => {

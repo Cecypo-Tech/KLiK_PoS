@@ -34,6 +34,7 @@ import { bankingError, closingBalancePayload, floatModeNames } from "../utils/cl
 import { formatDateTime, toSortableTimestamp } from "../utils/time";
 import { inDateRange } from "../utils/dateRange";
 import { DateRangeFilter } from "../components/DateRangeFilter";
+import SwitchProfileItem from "../components/SwitchProfileItem";
 import { clearAllCache } from "../utils/clearCache";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
@@ -457,6 +458,8 @@ export default function ClosingShiftPage() {
           <div className="px-4 py-3">
             <div className="flex items-center justify-between">
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">Closing Shift</h1>
+              <div className="flex items-center gap-2">
+              <SwitchProfileItem variant="button" />
               <button
                 onClick={() => setShowCloseModal(true)}
                 className="flex items-center space-x-2 px-3 py-2 bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors text-sm"
@@ -464,6 +467,7 @@ export default function ClosingShiftPage() {
                 <MonitorX className="w-4 h-4" />
                 <span>Close</span>
               </button>
+              </div>
             </div>
           </div>
         </div>
@@ -846,6 +850,8 @@ export default function ClosingShiftPage() {
         <div className="fixed top-0 left-20 right-0 z-50 bg-beveren-50 dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
           <div className="h-16 px-6 flex items-center justify-between">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Closing Shift</h1>
+            <div className="flex items-center gap-2">
+            <SwitchProfileItem variant="button" />
             <button
               onClick={() => setShowCloseModal(true)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors"
@@ -853,6 +859,7 @@ export default function ClosingShiftPage() {
               <MonitorX className="w-4 h-4" />
               <span>Close Shift</span>
             </button>
+            </div>
           </div>
         </div>
 

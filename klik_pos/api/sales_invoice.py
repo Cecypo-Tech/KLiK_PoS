@@ -1432,11 +1432,20 @@ class PartialPaymentValidationError(ValidationError):
 
 def get_current_pos_opening_entry():
 	"""
-	Get the caller's own Open shift, else the till shift they joined.
+	The shift the caller works in: the one they last opened or joined, while it is Open; else
+	their own Open shift (one opened before klik remembered it); none after Switch profile.
 	Returns the opening entry name or None if not found.
 	"""
 	try:
+		from klik_pos.api.shift import JOINED_SHIFT_KEY, LEFT_SHIFT, joined_shift
+
 		user = frappe.session.user
+		if frappe.defaults.get_user_default(JOINED_SHIFT_KEY, user) == LEFT_SHIFT:
+			return None
+		entry = joined_shift(user)
+		if entry:
+			return entry
+
 		opening_entries = frappe.get_all(
 			"POS Opening Entry",
 			filters={"user": user, "docstatus": 1, "status": "Open"},
@@ -1444,13 +1453,7 @@ def get_current_pos_opening_entry():
 			order_by="creation desc",
 			limit_page_length=1,
 		)
-
-		if opening_entries:
-			return opening_entries[0].name
-
-		from klik_pos.api.shift import joined_shift
-
-		return joined_shift(user)
+		return opening_entries[0].name if opening_entries else None
 	except Exception as e:
 		frappe.log_error(f"Error getting current POS opening entry: {e!s}")
 		return None

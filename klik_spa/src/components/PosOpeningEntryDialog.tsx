@@ -227,7 +227,10 @@ const POSOpeningModal: React.FC<POSOpeningModalProps> = ({
   // another cashier's shift is a server round trip first, so it can fail.
   const resolveConflict = async () => {
     if (!notice || !conflict) return;
-    if (notice.action === 'join' || notice.action === 'join_close') {
+    // Your own shift on this till - perhaps one you switched away from - is joined back
+    // into too: the POS works in the shift last opened or joined.
+    const ownShift = conflict.kind === 'own_open' || conflict.kind === 'own_stale';
+    if (notice.action === 'join' || notice.action === 'join_close' || ownShift) {
       setJoining(true);
       const joined = await joinShift(conflict.pos_profile);
       setJoining(false);

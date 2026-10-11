@@ -2,6 +2,7 @@ import json
 import traceback
 
 import frappe
+from erpnext.accounts.doctype.pos_opening_entry.pos_opening_entry import POSOpeningEntry
 from frappe import _
 from frappe.utils import flt, now_datetime, today
 
@@ -192,16 +193,17 @@ def opening_conflict(pos_profile):
 			for s in shifts
 		]
 
+	# Only a shift of their own on this till: one on another till they switched away from
+	# stays open for whoever is in it, and does not stop them working here.
 	own = frappe.get_all(
 		"POS Opening Entry",
-		filters={"user": user, "docstatus": 1, "status": "Open"},
+		filters={"user": user, "pos_profile": pos_profile, "docstatus": 1, "status": "Open"},
 		fields=["name", "user", "pos_profile", "period_start_date"],
 		order_by="period_start_date desc",
+		limit=1,
 	)
 	if own:
-		row = next((s for s in own if s.pos_profile == pos_profile), own[0])
-		if row.pos_profile != pos_profile:
-			return _describe("own_other_profile", row, row.pos_profile)
+		row = own[0]
 		return _describe("own_stale" if _is_stale(row) else "own_open", row, pos_profile)
 
 	shifts = open_shifts_on_till(pos_profile)
@@ -277,17 +279,23 @@ def validate_opening_entry(doc, method):
 	# Continuity with the last closing, and no float on a mode that never holds one.
 	# On the document, so a desk-created opening is held to the same rules as the till's.
 	enforce(doc)
+	# One open shift per till is ERPNext's check_open_pos_exists. One per cashier is not a
+	# rule here: a cashier who switched profiles keeps their shift open on the other till.
 
-	exists = frappe.db.exists(
-		"POS Opening Entry",
-		{
-			"user": doc.user,
-			"status": "Open",
-		},
-	)
-	if exists:
-		cashier_name = frappe.db.get_value("User", doc.user, "full_name") or doc.user
-		frappe.throw(_("Cashier {0} already has an open entry: {1}").format(cashier_name, exists))
+
+def remember_opened_shift(doc, method=None):
+	"""The shift a cashier opens is the one they work in - from the till or the desk."""
+	from klik_pos.api.shift import JOINED_SHIFT_KEY
+	from klik_pos.klik_pos.utils import clear_pos_profile_cache
+
+	frappe.defaults.set_user_default(JOINED_SHIFT_KEY, doc.name, doc.user)
+	clear_pos_profile_cache(user=doc.user)
+
+
+class KlikPOSOpeningEntry(POSOpeningEntry):
+	def check_user_already_assigned(self):
+		"""ERPNext allows a cashier one open shift. klik lets a cashier who switched profiles
+		keep theirs open on the other till; a till still runs one shift at a time."""
 
 
 def validate_closing_entry(doc, method):

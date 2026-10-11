@@ -17,6 +17,7 @@ from klik_pos.api.pos_entry import (
 	current_shift_state,
 	open_pos,
 	opening_conflict,
+	remember_opened_shift,
 	validate_closing_entry,
 )
 from klik_pos.api.sales_invoice import (
@@ -86,26 +87,27 @@ class TestJoining(SharedShiftCase):
 		self.assertIsNone(get_current_pos_opening_entry())
 		self.assertFalse(open_pos())
 
-	def test_my_own_open_shift_wins_over_a_joined_one(self):
+	def test_a_shift_i_open_becomes_the_one_i_work_in(self):
 		other_till = _profile()
 		_assign(other_till, JOINER)
 		_shift(self.till, OPENER)
 		frappe.set_user(JOINER)
 		shift.join_shift(self.till)
 		mine = _shift(other_till, JOINER)
+		remember_opened_shift(frappe.get_doc("POS Opening Entry", mine))
 
 		self.assertEqual(get_current_pos_opening_entry(), mine)
 
-	def test_a_cashier_with_their_own_open_shift_cannot_join_another(self):
+	def test_a_cashier_with_their_own_open_shift_may_join_another(self):
 		other_till = _profile()
 		_assign(other_till, JOINER)
 		mine = _shift(other_till, JOINER)
-		_shift(self.till, OPENER)
+		theirs = _shift(self.till, OPENER)
 		frappe.set_user(JOINER)
 
-		with self.assertRaises(frappe.ValidationError):
-			shift.join_shift(self.till)
-		self.assertEqual(get_current_pos_opening_entry(), mine)
+		shift.join_shift(self.till)
+		self.assertEqual(get_current_pos_opening_entry(), theirs)
+		self.assertEqual(frappe.db.get_value("POS Opening Entry", mine, "status"), "Open")
 
 	def test_joining_a_disabled_till_is_refused(self):
 		_shift(self.till, OPENER)

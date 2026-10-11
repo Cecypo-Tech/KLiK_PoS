@@ -1,15 +1,23 @@
 """Which shift a cashier is working in.
 
 A till (POS Profile) runs one shift at a time. The cashier who opens it owns the POS Opening
-Entry; everyone else on the till joins it. Joining is remembered as a user default and is
-honoured only while that entry is still Open, so closing the shift releases everyone at once
-with nothing to clean up.
+Entry; everyone else on the till joins it. The shift a cashier works in - one they opened or
+joined - is remembered as a user default and is honoured only while that entry is still
+Open, so closing the shift releases everyone at once with nothing to clean up.
+
+A cashier may own an open shift on one till while working on another: Switch profile
+(leave_shift) steps out of a shift and leaves it open for whoever is still in it, or for a
+manager, to close.
 """
 
 import frappe
 from frappe import _
 
+# The shift the cashier works in. Named for joining, which came first; opening a shift sets
+# it too (pos_entry.remember_opened_shift).
 JOINED_SHIFT_KEY = "klik_pos_joined_shift"
+# Stepped out of every shift: the cashier picks a till again, even if one they opened is open.
+LEFT_SHIFT = "__left__"
 
 from klik_pos.api.user import ADMIN_ROLES
 
@@ -89,30 +97,30 @@ def joined_shift(user=None):
 	row = frappe.db.get_value(
 		"POS Opening Entry",
 		{"name": entry, "docstatus": 1, "status": "Open"},
-		["name", "pos_profile", "period_start_date"],
+		["name", "pos_profile", "period_start_date", "user"],
 		as_dict=True,
 	)
 	if not row:
 		return None
 	# A shift a cashier joined stops being "theirs" the moment it goes stale: only a manager
-	# may still act in it, so an ordinary cashier is treated as no longer joined at all.
-	if _is_stale(row) and not is_shift_manager(user):
+	# may still act in it, so an ordinary cashier is treated as no longer joined at all. Their
+	# own stays theirs, so it routes them to closing it.
+	if _is_stale(row) and row.user != user and not is_shift_manager(user):
 		return None
 	return row.name
 
 
 @frappe.whitelist()
 def leave_shift():
-	"""Step out of the shift the caller joined, so they can work on another of their tills.
+	"""Step out of the shift the caller works in, to pick another of their tills.
 
-	The shift stays open for the till. The cashier who opened it can't leave: they own it,
-	and it has to be closed."""
+	The shift stays open: anyone still in it, or a manager, closes it. Its opener can come
+	back to it by picking that till again."""
 	user = frappe.session.user
-	own_shift = frappe.db.exists("POS Opening Entry", {"user": user, "docstatus": 1, "status": "Open"})
-	if own_shift:
-		frappe.throw(_("You opened shift {0}. Close it to switch profiles.").format(own_shift))
+	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 
-	frappe.defaults.clear_user_default(JOINED_SHIFT_KEY, user)
+	if get_current_pos_opening_entry():
+		frappe.defaults.set_user_default(JOINED_SHIFT_KEY, LEFT_SHIFT, user)
 
 	from klik_pos.klik_pos.utils import clear_pos_profile_cache
 
@@ -135,12 +143,6 @@ def join_shift(pos_profile, entry=None):
 			_("You are not assigned to POS Profile {0}.").format(pos_profile), frappe.PermissionError
 		)
 
-	own_shift = frappe.db.exists(
-		"POS Opening Entry", {"user": user, "docstatus": 1, "status": "Open"}
-	)
-	if own_shift:
-		frappe.throw(_("Close your own shift {0} before joining another.").format(own_shift))
-
 	if frappe.db.get_value("POS Profile", pos_profile, "disabled"):
 		frappe.throw(_("POS Profile {0} is disabled.").format(pos_profile))
 
@@ -162,7 +164,8 @@ def join_shift(pos_profile, entry=None):
 				)
 			)
 		chosen = shifts[0]
-		if _is_stale(chosen) and not is_shift_manager(user):
+		# Their own stale shift a cashier may re-enter, to close it.
+		if _is_stale(chosen) and chosen.user != user and not is_shift_manager(user):
 			frappe.throw(
 				_(
 					"Shift {0} on {1} was opened on {2} by {3}. A manager must close it before "
