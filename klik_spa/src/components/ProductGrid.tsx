@@ -1,7 +1,7 @@
 "use client";
 
 import { findScrollParent, loadMoreSkeletonCount, prefetchRootMargin, searchFooterLabel } from "../utils/productLoading";
-import { useEffect, useRef, useCallback, useMemo, useState } from "react";
+import { Fragment, useEffect, useRef, useCallback, useMemo, useState } from "react";
 import type { MenuItem } from "../../types";
 import { useProduct } from "../providers/ProductProvider";
 import ProductCard from "./ProductCard";
@@ -16,6 +16,8 @@ import { isItemOutOfStock } from "../utils/stock";
 import { appendDigit, deleteDigit, bufferToQuantity, OVERFLOW } from "../utils/quantityBuffer";
 import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, type PriceOption, seedCustomPrice, typeCustomPrice } from "../utils/priceOptions";
 import PriceListPopup from "./PriceListPopup";
+import { groupHeaders } from "../utils/lineViewColumns";
+import { useProductStore } from "../stores/productStore";
 
 interface PriceListEntry {
   price_list: string;
@@ -116,6 +118,11 @@ export default function ProductGrid({
         : filteredItems
     ),
     [filteredItems, hideUnavailableItems, stockUnavailable, lossOfSaleEnabled],
+  );
+  const selectedCategory = useProductStore((s) => s.selectedCategory);
+  const gridHeaders = useMemo(
+    () => groupHeaders(inStockItems.map((item) => item.category), { searching: searchQuery.trim() !== "", selectedCategory }),
+    [inStockItems, searchQuery, selectedCategory],
   );
 
   // inStockItems is a fresh array identity every render — productStore's
@@ -640,10 +647,16 @@ export default function ProductGrid({
       )}
       <div className={`grid ${isMobile ? "gap-3 grid-cols-2 sm:grid-cols-2" : "gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4"}`}>
         {inStockItems.map((item, i) => (
+          <Fragment key={item.id}>
+          {gridHeaders.has(i) && (
+            // Above the cards' info buttons (z-70), so they slide under it.
+            <div className="col-span-full sticky top-0 z-[80] -mx-1 px-3 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+              {gridHeaders.get(i)}
+            </div>
+          )}
           <ProductCard
             stockUnavailable={stockUnavailable}
             lossOfSaleEnabled={lossOfSaleEnabled}
-            key={item.id}
             item={item}
             onAddToCart={handleCardAdd}
             isMobile={isMobile}
@@ -656,6 +669,7 @@ export default function ProductGrid({
             onKeyboardAction={handleCardKeyDown}
             quantityBuffer={focusedIndex === i ? displayQuantityBuffer : ""}
           />
+          </Fragment>
         ))}
         {isLoadingMore &&
           Array.from({ length: loadMoreSkeletonCount(isMobile, "grid") }, (_, k) => (

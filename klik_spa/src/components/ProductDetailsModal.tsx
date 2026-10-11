@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { MenuItem } from "../../types"
 import { usePOSProfileStore } from "../stores/posProfileStore"
 import { useCartStore } from "../stores/cartStore"
@@ -219,6 +219,7 @@ function SerialCard({ serial, currencySymbol, showCost }: { serial: SerialEntry;
 }
 
 export default function ProductDetailsModal({ item, onClose }: ProductDetailsModalProps) {
+  const pressedBackdrop = useRef(false)
   const [data, setData] = useState<ItemFullData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<"pricing" | "stock" | "details" | "bundle" | "lens">("pricing")
@@ -319,7 +320,13 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
   ]
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-in fade-in duration-200">
+    // A press that starts on the backdrop closes it; one that starts inside (a text selection
+    // dragged out) does not.
+    <div
+      onMouseDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (pressedBackdrop.current && e.target === e.currentTarget) onClose() }}
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4 animate-in fade-in duration-200"
+    >
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300">
 
         <div className="px-6 py-5 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">

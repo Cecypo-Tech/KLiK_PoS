@@ -517,8 +517,8 @@ export default function ClosingShiftPage() {
           )}
 
           {/* Filters */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 mb-6">
-            <div className="grid grid-cols-1 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700 mb-4">
+            <div className="grid grid-cols-1 gap-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
                 <input
@@ -844,19 +844,15 @@ export default function ClosingShiftPage() {
       <div className="flex-1 flex flex-col overflow-hidden ml-20">
         {/* Header */}
         <div className="fixed top-0 left-20 right-0 z-50 bg-beveren-50 dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Closing Shift</h1>
-              </div>
-              <button
-                onClick={() => setShowCloseModal(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors"
-              >
-                <MonitorX className="w-4 h-4" />
-                <span>Close</span>
-              </button>
-            </div>
+          <div className="h-16 px-6 flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Closing Shift</h1>
+            <button
+              onClick={() => setShowCloseModal(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-beveren-600 text-white rounded-lg hover:bg-beveren-700 transition-colors"
+            >
+              <MonitorX className="w-4 h-4" />
+              <span>Close Shift</span>
+            </button>
           </div>
         </div>
 
@@ -912,15 +908,16 @@ export default function ClosingShiftPage() {
 
           {/* Filters */}
           <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
-            <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              <div className="relative">
+            {/* One line on a wide screen; wraps as the window narrows. */}
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+              <div className="relative sm:flex-1 sm:min-w-[12rem]">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
                 <input
                   type="text"
                   placeholder="Search..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               <DateRangeFilter
@@ -930,14 +927,13 @@ export default function ClosingShiftPage() {
                   setFromDate(from);
                   setToDate(to);
                 }}
-                size="py-2"
-                className="md:col-span-4 lg:col-span-5 md:order-last"
+                className="sm:order-last"
               />
 
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full sm:w-auto px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="all">All Status</option>
                 <option value="Draft">Draft</option>
@@ -954,7 +950,7 @@ export default function ClosingShiftPage() {
               <select
                 value={paymentFilter}
                 onChange={(e) => setPaymentFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full sm:w-auto px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="all">All Payments</option>
                 {modes.map((mode) => (
