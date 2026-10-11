@@ -12,6 +12,7 @@ import { toast } from "react-toastify";
 import { clearCacheAndReload } from "../utils/clearCache";
 import { isItemOutOfStock } from "../utils/stock";
 import CategoryTabs from "./CategoryTabs";
+import SwitchProfileItem from "./SwitchProfileItem";
 import ProductGrid from "./ProductGrid";
 import SearchBar from "./SearchBar";
 import SalespersonAuthModal from "./dialog/SalespersonAuthModal";
@@ -172,7 +173,9 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+      {/* Above the item list's sticky group headers (z-80) and card buttons (z-70), so the
+          user menu that drops from here is never drawn under them. */}
+      <div className="sticky top-0 z-[90] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3 flex-1 max-w-md">
             <SearchBar
@@ -270,11 +273,11 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
                       <span className="text-white font-medium text-base">{initials}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 dark:text-white truncate">{posProfileName}</p>
-                      <div className="flex items-center space-x-1 mt-1">
+                      <p className="font-medium text-gray-900 dark:text-white truncate">{displayName}</p>
+                      <div className="flex items-center gap-1 mt-1 min-w-0" title="POS Profile">
                         <Store size={14} className="text-gray-400 flex-shrink-0" />
-                        <p className="text-sm text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-600 truncate">
-                          {displayName}
+                        <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
+                          Profile: <span className="font-semibold text-gray-900 dark:text-white">{posProfileName}</span>
                         </p>
                       </div>
                     </div>
@@ -282,6 +285,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
                 </div>
 
                 <div className="py-1">
+                  <SwitchProfileItem />
                   <Link
                     to="/settings"
                     onClick={() => setShowUserMenu(false)}

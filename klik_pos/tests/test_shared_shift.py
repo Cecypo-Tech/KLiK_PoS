@@ -309,7 +309,9 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": False, "pos_profile": self.till, "manager": False, "can_close": True},
+				{"entry": entry, "stale": False, "pos_profile": self.till, "manager": False, "can_close": True,
+				 "joined": False, "opened_by": OPENER,
+				 "opened_by_name": frappe.db.get_value("User", OPENER, "full_name")},
 			)
 
 	def test_own_shift_opened_yesterday_is_stale(self):
@@ -319,7 +321,9 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": False, "can_close": True},
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": False, "can_close": True,
+				 "joined": False, "opened_by": OPENER,
+				 "opened_by_name": frappe.db.get_value("User", OPENER, "full_name")},
 			)
 
 	def test_a_joined_shift_opened_yesterday_is_stale(self):
@@ -332,7 +336,9 @@ class TestCurrentShiftState(SharedShiftCase):
 
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": True, "can_close": True},
+				{"entry": entry, "stale": True, "pos_profile": self.till, "manager": True, "can_close": True,
+				 "joined": True, "opened_by": OPENER,
+				 "opened_by_name": frappe.db.get_value("User", OPENER, "full_name")},
 			)
 
 	def test_no_shift_at_all(self):
@@ -341,7 +347,8 @@ class TestCurrentShiftState(SharedShiftCase):
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertEqual(
 				current_shift_state(),
-				{"entry": None, "stale": False, "pos_profile": None, "manager": False, "can_close": True},
+				{"entry": None, "stale": False, "pos_profile": None, "manager": False, "can_close": True,
+				 "joined": False, "opened_by": None, "opened_by_name": None},
 			)
 
 
