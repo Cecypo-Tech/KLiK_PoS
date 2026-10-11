@@ -39,10 +39,13 @@ def current_shift_state():
 			"pos_profile": None,
 			"manager": is_shift_manager(),
 			"can_close": True,
+			"joined": False,
+			"opened_by": None,
+			"opened_by_name": None,
 		}
 
 	row = frappe.db.get_value(
-		"POS Opening Entry", entry, ["name", "pos_profile", "period_start_date"], as_dict=True
+		"POS Opening Entry", entry, ["name", "pos_profile", "period_start_date", "user"], as_dict=True
 	)
 	stale = bool(row) and _is_stale(row)
 	return {
@@ -53,6 +56,10 @@ def current_shift_state():
 		# Whether the caller closes this shift themselves ('Allow Closing Shift', or a
 		# manager); when not, a stale shift waits for a manager.
 		"can_close": may_close_on_till(row.pos_profile if row else None),
+		# Joined, not opened: the cashier can leave it for another till (leave_shift).
+		"joined": bool(row) and row.user != frappe.session.user,
+		"opened_by": row.user if row else None,
+		"opened_by_name": (frappe.db.get_value("User", row.user, "full_name") or row.user) if row else None,
 	}
 
 

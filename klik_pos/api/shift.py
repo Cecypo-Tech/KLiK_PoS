@@ -102,6 +102,25 @@ def joined_shift(user=None):
 
 
 @frappe.whitelist()
+def leave_shift():
+	"""Step out of the shift the caller joined, so they can work on another of their tills.
+
+	The shift stays open for the till. The cashier who opened it can't leave: they own it,
+	and it has to be closed."""
+	user = frappe.session.user
+	own_shift = frappe.db.exists("POS Opening Entry", {"user": user, "docstatus": 1, "status": "Open"})
+	if own_shift:
+		frappe.throw(_("You opened shift {0}. Close it to switch profiles.").format(own_shift))
+
+	frappe.defaults.clear_user_default(JOINED_SHIFT_KEY, user)
+
+	from klik_pos.klik_pos.utils import clear_pos_profile_cache
+
+	clear_pos_profile_cache(user=user)
+	return {"success": True}
+
+
+@frappe.whitelist()
 def join_shift(pos_profile, entry=None):
 	"""Join the shift open on `pos_profile`.
 

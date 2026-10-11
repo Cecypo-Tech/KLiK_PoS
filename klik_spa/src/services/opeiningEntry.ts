@@ -49,6 +49,10 @@ export interface CurrentShiftState {
   pos_profile: string | null;
   /** false: closing is turned off on this till for the caller - a manager closes it. */
   can_close?: boolean;
+  /** Joined someone else's shift (and so may leave it), rather than opened it. */
+  joined?: boolean;
+  opened_by?: string | null;
+  opened_by_name?: string | null;
 }
 
 /**
@@ -97,6 +101,22 @@ export async function joinShift(
     return { ok: false, error: extractErrorMessage(data, "Could not join the shift") };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Could not join the shift" };
+  }
+}
+
+/** Steps out of the shift the caller joined; it stays open for the till. */
+export async function leaveShift(): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/api/method/klik_pos.api.shift.leave_shift", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": window.csrf_token },
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.message?.success) return { ok: true };
+    return { ok: false, error: extractErrorMessage(data, "Could not leave the shift") };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not leave the shift" };
   }
 }
 

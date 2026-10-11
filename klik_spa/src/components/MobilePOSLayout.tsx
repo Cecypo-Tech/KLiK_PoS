@@ -11,6 +11,7 @@ import { clearCacheAndReload } from "../utils/clearCache"
 import ProductGrid from "./ProductGrid"
 import BottomNavigation from "./BottomNavigation"
 import type { MenuItem, CartItem } from "../../types"
+import SwitchProfileItem from "./SwitchProfileItem"
 import SalespersonAuthModal from "./dialog/SalespersonAuthModal"
 import { useSalespersonStore } from "../stores/salespersonStore"
 import { usePosShortcutLayer } from '../hooks/usePosShortcutLayer'
@@ -125,7 +126,7 @@ export default function MobilePOSLayout({
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Mobile Header */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+      <div className="sticky top-0 z-[90] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center space-x-3">
             <img src="/assets/klik_pos/klik_spa/bev_logo.jpeg" alt="KLiK PoS" className="w-8 h-8 rounded-full object-cover" />
@@ -177,11 +178,11 @@ export default function MobilePOSLayout({
                       <span className="text-white font-medium text-sm">{initials}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 dark:text-white truncate">{posProfileName}</p>
-                      <div className="flex items-center space-x-1 mt-1">
+                      <p className="font-medium text-gray-900 dark:text-white truncate">{displayName}</p>
+                      <div className="flex items-center gap-1 mt-1 min-w-0" title="POS Profile">
                         <Store size={12} className="text-gray-400 flex-shrink-0" />
-                        <p className="text-xs text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-600 truncate">
-                          {displayName}
+                        <p className="text-xs text-gray-600 dark:text-gray-300 truncate">
+                          Profile: <span className="font-semibold text-gray-900 dark:text-white">{posProfileName}</span>
                         </p>
                       </div>
                       <p className="text-xs text-beveren-600 dark:text-beveren-400 font-medium mt-1">{user?.role || "User"}</p>
@@ -198,6 +199,7 @@ export default function MobilePOSLayout({
               />
                 {/* Menu items */}
                 <div className="py-1">
+                  <SwitchProfileItem compact />
                   <Link
                     to="/settings"
                     onClick={() => setShowUserMenu(false)}
