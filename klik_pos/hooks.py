@@ -38,10 +38,9 @@ doc_events = {
 	"Sales Invoice": {
 		"before_insert": "klik_pos.overrides.sales_invoice.set_sale_type",
 		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate",
-		"before_submit": [
-			"klik_pos.overrides.sales_invoice.validate_sales_person_on_submit",
-			"klik_pos.overrides.sales_invoice.require_payment_for_cash_sale",
-		],
+		# Cash sales' full-payment check is the opt-in Server Script
+		# "Sales Invoice - Cash Requires Payment" (patches/v16_0/cash_sale_payment_server_script).
+		"before_submit": "klik_pos.overrides.sales_invoice.validate_sales_person_on_submit",
 		# "before_save": [
 		# 	"klik_pos.api.sales_invoice.sync_return_payments_before_save",
 		# ],
