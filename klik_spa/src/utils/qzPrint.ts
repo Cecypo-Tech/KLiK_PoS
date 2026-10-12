@@ -58,3 +58,29 @@ export async function qzReprint(
   }
   return { jobCount: jobs.length };
 }
+
+/**
+ * How many times QZ has printed this document (Printed jobs, not copies) —
+ * the "-3" beside the QZ icon, same as the desk sidebar. 0 on any failure:
+ * a count is decoration and must never raise a toast.
+ */
+export async function qzPrintCount(
+  referenceName: string,
+  referenceDoctype: string = "Sales Invoice",
+): Promise<number> {
+  const query = new URLSearchParams({
+    reference_doctype: referenceDoctype,
+    reference_name: referenceName,
+  });
+  try {
+    const response = await fetch(
+      `/api/method/cecypo_qz_extension.api.queue.print_count?${query}`,
+      { credentials: "include" },
+    );
+    if (!response.ok) return 0;
+    const result = await response.json();
+    return Number(result.message) || 0;
+  } catch {
+    return 0;
+  }
+}

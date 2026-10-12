@@ -42,6 +42,7 @@ import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
 import { extractErrorFromException } from "../utils/errorExtraction";
 import { qzReprint } from "../utils/qzPrint";
 import QzPrintIcon from "../components/QzPrintIcon";
+import { useQzPrintCount } from "../hooks/useQzPrintCount";
 import { toast } from "react-toastify";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import DisplayPrintPreview from "../utils/invoicePrint";
@@ -62,6 +63,10 @@ export default function InvoiceViewPage() {
   const { invoice, isLoading, error, refetch } = useInvoiceDetails(invoiceId);
   const { statistics: customerStats, isLoading: statsLoading } = useCustomerStatistics(invoice?.customer || null);
   const { posDetails } = usePOSProfileStore();
+  const { count: qzCount, recountSoon: recountQz } = useQzPrintCount(
+    invoice?.name || invoice?.id || "",
+    posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true,
+  );
   const canProcessReturns = ![0, "0", false].includes(posDetails?.custom_allow_return as 0 | "0" | false);
   const navigate = useNavigate()
 
@@ -488,10 +493,11 @@ export default function InvoiceViewPage() {
 
                 {(posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true) ? (
                   <button
-                    className="group relative p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-all duration-200"
-                    onClick={() => { void qzReprint(invoice.name || invoice.id || ""); }}
+                    className="group relative flex items-center p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-all duration-200"
+                    onClick={() => { void qzReprint(invoice.name || invoice.id || "").then(recountQz, () => undefined); }}
                   >
                     <QzPrintIcon size={20} />
+                    {qzCount > 0 ? <span className="text-xs font-semibold">-{qzCount}</span> : null}
                     <span className="absolute top-full left-1/2 transform -translate-x-1/2 mt-0.5 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-50">
                       QZ Print
                     </span>

@@ -107,6 +107,7 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { handlePrintInvoice } from "../../utils/printHandler";
 import { qzReprint } from "../../utils/qzPrint";
 import QzPrintIcon from "../QzPrintIcon";
+import { useQzPrintCount } from "../../hooks/useQzPrintCount";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import {
   getEffectiveDisplayRate as getSharedEffectiveDisplayRate,
@@ -344,6 +345,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const navigate = useNavigate();
   const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule, checkoutExtras, setCheckoutExtras } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
+  const { count: qzCount, recountSoon: recountQz } = useQzPrintCount(
+    invoiceData?.name || invoiceData?.id || "",
+    posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true,
+  );
   const posCompanyName =
     typeof posDetails?.company === "string"
       ? posDetails.company
@@ -3046,10 +3051,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                           toast.error("Reprinting is not allowed for this invoice");
                           return;
                         }
-                        void qzReprint(invoiceData?.name || invoiceData?.id || "");
+                        void qzReprint(invoiceData?.name || invoiceData?.id || "").then(recountQz, () => undefined);
                       }}
                     >
-                      <QzPrintIcon size={18} />
+                      <span className="flex items-center">
+                        <QzPrintIcon size={18} />
+                        {qzCount > 0 ? <span className="text-xs font-semibold">-{qzCount}</span> : null}
+                      </span>
                       <span>Reprint</span>
                     </button>
                   ) : ""}
