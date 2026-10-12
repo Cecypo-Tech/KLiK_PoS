@@ -1,5 +1,6 @@
 import { ChevronLeft, Contact, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
 import { handlePrintInvoice } from "../../utils/printHandler";
+import QzPrintIcon from "../QzPrintIcon";
 
 interface PaymentHeaderProps {
   invoiceSubmitted: boolean;
@@ -17,6 +18,10 @@ interface PaymentHeaderProps {
   onCopyOrder: () => void;
   /** Opens the customer's Additional Info, as the POS's button beside New Customer does. */
   onAdditionalInfo?: () => void;
+  /** QZ reprint; absent when the POS Profile has QZ printing off. */
+  onQzReprint?: () => void;
+  /** Times QZ has printed this invoice, shown as QZ-n. */
+  qzCount?: number;
 }
 
 export default function PaymentHeader({
@@ -34,6 +39,8 @@ export default function PaymentHeader({
   posDetails,
   onCopyOrder,
   onAdditionalInfo,
+  onQzReprint,
+  qzCount = 0,
 }: PaymentHeaderProps) {
   if (invoiceSubmitted) {
     return (
@@ -63,6 +70,16 @@ export default function PaymentHeader({
           >
             <Printer size={20} />
           </button>
+          {onQzReprint && (
+            <button
+              className="flex items-center p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg"
+              title="QZ Print"
+              onClick={onQzReprint}
+            >
+              <QzPrintIcon size={20} />
+              {qzCount > 0 ? <span className="text-xs font-semibold">-{qzCount}</span> : null}
+            </button>
+          )}
           <button
             className={`p-2 rounded-lg ${sharingMode === "email" ? "bg-blue-100 text-blue-700" : "text-blue-600 hover:bg-blue-100"} dark:text-blue-400 dark:hover:bg-blue-900`}
             title="Email"
