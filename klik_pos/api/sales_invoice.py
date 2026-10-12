@@ -2326,6 +2326,30 @@ def queue_sales_invoice(data):
 	return _retry_lock_race(_queue_sales_invoice, data)
 
 
+def _refuse_crossing_credit_limit(doc):
+	"""ERPNext checks the credit limit on submit. A queued sale is saved - its number taken -
+	before the worker submits it, so check here, while the checkout still rolls back
+	(Allparts INV-00224). Same conditions as SalesInvoice.check_credit_limit, with this
+	sale's unpaid part added since it is not on the books yet."""
+	from erpnext.selling.doctype.customer.customer import check_credit_limit
+
+	if doc.get("is_return"):
+		return
+	bypass = frappe.db.get_value(
+		"Customer Credit Limit",
+		{"parent": doc.customer, "parenttype": "Customer", "company": doc.company},
+		"bypass_credit_limit_check",
+	)
+	if not bypass and all(d.sales_order or d.delivery_note for d in doc.items):
+		return
+	try:
+		check_credit_limit(doc.customer, doc.company, bypass, extra_amount=flt(doc.outstanding_amount))
+	except ValidationError as error:
+		# The till shows the server message, not the exception: replace ERPNext's.
+		frappe.clear_last_message()
+		frappe.throw(f"{error}<br>" + _("Hold the order instead, or take payment."))
+
+
 def _queue_sales_invoice(data, source_order=None):
 	"""queue_sales_invoice's body. source_order is set only by checkout_held_order: a
 	client must not be able to name another order whose price approval it wants."""
@@ -2442,6 +2466,7 @@ def _queue_sales_invoice(data, source_order=None):
 		_reserve_checkout_credit(doc, credit_rows)
 
 		if enable_background_submission:
+			_refuse_crossing_credit_limit(doc)
 			_mark_invoice_queued(doc, frappe.session.user)
 			doc.save(ignore_permissions=True)
 			_refuse_unapproved_price_breach(doc)
