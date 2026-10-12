@@ -345,10 +345,19 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const navigate = useNavigate();
   const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule, checkoutExtras, setCheckoutExtras } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
+  const qzEnabled =
+    posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true;
   const { count: qzCount, recountSoon: recountQz } = useQzPrintCount(
     invoiceData?.name || invoiceData?.id || "",
-    posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true,
+    qzEnabled,
   );
+  const handleQzReprint = () => {
+    if (invoiceData?.custom_is_printed && posDetails?.custom_prevent_invoice_reprinting) {
+      toast.error("Reprinting is not allowed for this invoice");
+      return;
+    }
+    void qzReprint(invoiceData?.name || invoiceData?.id || "").then(recountQz, () => undefined);
+  };
   const posCompanyName =
     typeof posDetails?.company === "string"
       ? posDetails.company
@@ -3041,18 +3050,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     <Printer size={18} />
                     <span>Print</span>
                   </button>
-                  {(posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true) ? (
+                  {qzEnabled ? (
                     <button
                       className="flex items-center space-x-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                      onClick={() => {
-                        const alreadyPrinted = Boolean(invoiceData?.custom_is_printed);
-                        const preventReprint = Boolean(posDetails?.custom_prevent_invoice_reprinting);
-                        if (alreadyPrinted && preventReprint) {
-                          toast.error("Reprinting is not allowed for this invoice");
-                          return;
-                        }
-                        void qzReprint(invoiceData?.name || invoiceData?.id || "").then(recountQz, () => undefined);
-                      }}
+                      onClick={handleQzReprint}
                     >
                       <span className="flex items-center">
                         <QzPrintIcon size={18} />
@@ -3333,6 +3334,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           posDetails={posDetails}
           onCopyOrder={handleCopyOrder}
           onAdditionalInfo={canOpenAdditionalInfo ? () => setAdditionalInfoOpen(true) : undefined}
+          onQzReprint={qzEnabled ? handleQzReprint : undefined}
+          qzCount={qzCount}
         />
 
         <div className="flex flex-1 min-h-0">
