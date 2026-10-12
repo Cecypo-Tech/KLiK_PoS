@@ -14,7 +14,10 @@ from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import sales_invoice
 from klik_pos.api.sales_invoice import _set_site_sale_type, build_sales_invoice_doc
-from klik_pos.overrides.sales_invoice import require_payment_for_cash_sale, set_sale_type
+from frappe.utils.safe_exec import safe_exec
+
+from klik_pos.overrides.sales_invoice import set_sale_type
+from klik_pos.patches.v16_0 import cash_sale_payment_server_script as cash_script
 
 FIELD = "custom_sale_type"
 CUSTOMER = "_Test Customer"
@@ -228,12 +231,15 @@ class TestSetSaleType(FrappeTestCase):
 
 
 class TestCashSaleNeedsPayment(FrappeTestCase):
-	"""before_submit: a Cash sale submitted from the desk or API is fully paid."""
+	"""The opt-in Server Script: a desk Cash sale submitted from the desk or API is fully paid."""
 
-	def test_an_unpaid_cash_sale_is_refused(self):
+	def _run(self, doc):
+		safe_exec(cash_script.SCRIPT, None, {"doc": doc})
+
+	def test_an_unpaid_desk_cash_sale_is_refused(self):
 		doc = _invoice(outstanding_amount=100, **{FIELD: "Cash"})
 		with _web_request(), self.assertRaises(frappe.ValidationError):
-			require_payment_for_cash_sale(doc)
+			self._run(doc)
 
 	def test_these_pass(self):
 		cases = {
@@ -241,26 +247,23 @@ class TestCashSaleNeedsPayment(FrappeTestCase):
 			"paid": _invoice(outstanding_amount=0.004, **{FIELD: "Cash"}),
 			"return": _invoice(outstanding_amount=-100, is_return=1, **{FIELD: "Cash"}),
 			"consolidated": _invoice(outstanding_amount=100, is_consolidated=1, **{FIELD: "Cash"}),
+			"till": _invoice(outstanding_amount=100, custom_is_created_from_klik=1, **{FIELD: "Cash"}),
 		}
 		with _web_request():
 			for case, doc in cases.items():
 				with self.subTest(case):
-					require_payment_for_cash_sale(doc)
-
-	def test_a_voucher_covering_the_balance_is_payment(self):
-		"""A customer-credit voucher settles the sale right after submit (checkout's marker)."""
-		doc = _invoice(outstanding_amount=100, **{FIELD: "Cash"})
-		doc._klik_customer_credit = 100
-		with _web_request():
-			require_payment_for_cash_sale(doc)
-
-	def test_a_voucher_short_of_the_balance_is_not(self):
-		doc = _invoice(outstanding_amount=100, **{FIELD: "Cash"})
-		doc._klik_customer_credit = 60
-		with _web_request(), self.assertRaises(frappe.ValidationError):
-			require_payment_for_cash_sale(doc)
+					self._run(doc)
 
 	def test_no_request_is_not_enforced(self):
 		doc = _invoice(outstanding_amount=100, **{FIELD: "Cash"})
 		with patch.object(frappe.local, "request", None, create=True):
-			require_payment_for_cash_sale(doc)
+			self._run(doc)
+
+	def test_the_patch_ships_it_disabled_and_keeps_a_site_s_own(self):
+		existing = frappe.db.get_value("Server Script", cash_script.NAME, ["disabled", "script"])
+		if not existing:
+			cash_script.execute()
+			self.assertEqual(frappe.db.get_value("Server Script", cash_script.NAME, "disabled"), 1)
+		frappe.db.set_value("Server Script", cash_script.NAME, "script", "# site's own")
+		cash_script.execute()
+		self.assertEqual(frappe.db.get_value("Server Script", cash_script.NAME, "script"), "# site's own")
