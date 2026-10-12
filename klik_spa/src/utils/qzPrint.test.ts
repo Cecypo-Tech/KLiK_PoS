@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { qzPrintCount } from "./qzPrint";
+import { qzNextStep, qzPrintCount } from "./qzPrint";
 
 vi.mock("react-toastify", () => ({ toast: {} }));
 
@@ -33,5 +33,27 @@ describe("qzPrintCount", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
     await expect(qzPrintCount("POS-01696")).resolves.toBe(0);
+  });
+});
+
+describe("qzNextStep", () => {
+  const ok = (rule: string) => ({ rule, limit_reached: false });
+  const capped = (rule: string) => ({ rule, limit_reached: true });
+
+  it("says so when no rule matches", () => {
+    expect(qzNextStep([])).toEqual({ kind: "none" });
+  });
+
+  it("says so when every rule is at its limit", () => {
+    expect(qzNextStep([capped("Invoice"), capped("Packing")])).toEqual({ kind: "limit" });
+  });
+
+  it("prints a single rule straight away", () => {
+    expect(qzNextStep([ok("Invoice")])).toEqual({ kind: "print", rules: ["Invoice"] });
+  });
+
+  it("asks when more than one rule matches, even if some are at their limit", () => {
+    const options = [ok("Invoice"), capped("Packing")];
+    expect(qzNextStep(options)).toEqual({ kind: "choose", options });
   });
 });

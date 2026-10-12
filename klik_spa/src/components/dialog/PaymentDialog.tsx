@@ -105,9 +105,9 @@ import { reconcileCheckout } from "../../utils/checkoutReconciliation";
 import DisplayPrintPreview from "../../utils/invoicePrint";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { handlePrintInvoice } from "../../utils/printHandler";
-import { qzReprint } from "../../utils/qzPrint";
 import QzPrintIcon from "../QzPrintIcon";
-import { useQzPrintCount } from "../../hooks/useQzPrintCount";
+import { useQzPrint } from "../../hooks/useQzPrint";
+import QzRulePicker from "../QzRulePicker";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import {
   getEffectiveDisplayRate as getSharedEffectiveDisplayRate,
@@ -347,17 +347,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
   const qzEnabled =
     posDetails?.custom_enable_qz_print === 1 || posDetails?.custom_enable_qz_print === '1' || posDetails?.custom_enable_qz_print === true;
-  const { count: qzCount, recountSoon: recountQz } = useQzPrintCount(
+  const qz = useQzPrint(
     invoiceData?.name || invoiceData?.id || "",
     qzEnabled,
+    Boolean(invoiceData?.custom_is_printed) && Boolean(posDetails?.custom_prevent_invoice_reprinting),
   );
-  const handleQzReprint = () => {
-    if (invoiceData?.custom_is_printed && posDetails?.custom_prevent_invoice_reprinting) {
-      toast.error("Reprinting is not allowed for this invoice");
-      return;
-    }
-    void qzReprint(invoiceData?.name || invoiceData?.id || "").then(recountQz, () => undefined);
-  };
   const posCompanyName =
     typeof posDetails?.company === "string"
       ? posDetails.company
@@ -3053,11 +3047,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   {qzEnabled ? (
                     <button
                       className="flex items-center space-x-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                      onClick={handleQzReprint}
+                      onClick={qz.start}
+                      disabled={qz.busy}
                     >
                       <span className="flex items-center">
                         <QzPrintIcon size={18} />
-                        {qzCount > 0 ? <span className="text-xs font-semibold">-{qzCount}</span> : null}
+                        {qz.count > 0 ? <span className="text-xs font-semibold">-{qz.count}</span> : null}
                       </span>
                       <span>Reprint</span>
                     </button>
@@ -3310,6 +3305,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           status={renderMpesaStatusNotice()}
         />
         {renderLeaveConfirm()}
+      <QzRulePicker {...qz.picker} />
       </div>
     );
   }
@@ -3317,6 +3313,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   return (
     <div className="fixed inset-y-0 left-0 lg:left-20 right-0 z-[60] bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
       {renderLeaveConfirm()}
+      <QzRulePicker {...qz.picker} />
         <PaymentHeader
           invoiceSubmitted={invoiceSubmitted}
           isAutoPrinting={isAutoPrinting}
@@ -3334,8 +3331,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           posDetails={posDetails}
           onCopyOrder={handleCopyOrder}
           onAdditionalInfo={canOpenAdditionalInfo ? () => setAdditionalInfoOpen(true) : undefined}
-          onQzReprint={qzEnabled ? handleQzReprint : undefined}
-          qzCount={qzCount}
+          onQzReprint={qzEnabled ? qz.start : undefined}
+          qzCount={qz.count}
         />
 
         <div className="flex flex-1 min-h-0">
