@@ -120,6 +120,20 @@ class TestMpesaAudit(ReceiptCase):
 		frappe.db.set_value("Payment Entry", pe, {"custom_mpesa_receipt_number": None, "reference_no": receipt.transid}, update_modified=False)
 		self.assertFalse(self._reported_consumed(receipt))
 
+	def test_a_paid_push_still_on_an_order_is_reported(self):
+		# SO-01009: paid 1,000 on 13 Oct, left on the Held tab, nothing booked.
+		from klik_pos.tests.test_mpesa_order_checkout import EXPRESS, _push
+
+		push = _push("SO-TEST-UNFINISHED", "Completed")
+		frappe.db.set_value(EXPRESS, push, "modified", frappe.utils.add_to_date(None, hours=-2), update_modified=False)
+		self.assertIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
+	def test_a_push_paid_moments_ago_is_left_to_the_checkout(self):
+		from klik_pos.tests.test_mpesa_order_checkout import _push
+
+		push = _push("SO-TEST-UNFINISHED", "Completed")
+		self.assertNotIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
 	def test_the_default_window_leaves_old_history_out(self):
 		receipt = self._receipt(1000)
 		self._sell(800, receipt)

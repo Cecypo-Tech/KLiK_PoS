@@ -47,14 +47,22 @@ _UNUSABLE = "unusable"
 
 
 def _klik_entry_for_transid(transid: str | None) -> str | None:
-	"""The submitted Payment Entry klik already minted for this receipt, found by the
-	receipt number it is stamped with. Covers entries minted before the register row was
-	linked at mint time (a checkout that failed after minting)."""
-	if not transid or not frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number"):
+	"""The submitted Payment Entry that holds this receipt's money, found by its number.
+
+	klik stamps the number on the entries it mints (which also covers one minted before the
+	register row was linked - a checkout that failed after minting). An entry made in the desk
+	names it only in reference_no: Allparts' ACC-PAY-2026-00508 booked SO-00368's 31,300 that
+	way, and missing it let the till offer the same money again.
+	"""
+	if not transid:
 		return None
-	return frappe.db.get_value(
-		"Payment Entry", {"custom_mpesa_receipt_number": transid, "docstatus": 1}, "name"
-	)
+	if frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number"):
+		stamped = frappe.db.get_value(
+			"Payment Entry", {"custom_mpesa_receipt_number": transid, "docstatus": 1}, "name"
+		)
+		if stamped:
+			return stamped
+	return frappe.db.get_value("Payment Entry", {"reference_no": transid, "docstatus": 1}, "name")
 
 
 def _receipt_balance(register: str) -> frappe._dict:
