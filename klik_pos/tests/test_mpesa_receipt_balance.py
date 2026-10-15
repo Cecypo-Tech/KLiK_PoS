@@ -213,6 +213,38 @@ class TestDrawDown(ReceiptCase):
 		self.assertEqual(flt(summary["allocated_total"]), 0)
 		self.assertFalse(invoice.custom_mpesa_reconciled_payments)
 
+	def test_a_part_drained_receipt_reports_what_it_had_left_not_what_was_picked(self):
+		receipt = self._receipt(1000)
+		invoice = self._record(self._draft(rate=300), receipt)  # picked at 1000
+		self._sell(600, receipt)  # another till leaves 400
+		invoice.reload()
+		summary = _allocate_receipts_before_submit(invoice)
+		self.assertEqual(flt(summary["received_total"]), 400)
+		self.assertEqual(flt(summary["by_register"][receipt.name]["excess"]), 100)
+
+	def test_the_summary_s_excess_is_what_the_entry_keeps(self):
+		# A cancelled sale gives money back to the receipt between pick and submit.
+		receipt = self._receipt(1000)
+		earlier = self._sell(600, receipt)
+		invoice = self._record(self._draft(rate=300), receipt)  # picked at 400
+		earlier.cancel()  # unlink-on-cancel: 1000 open again
+		invoice.reload()
+		summary = _allocate_receipts_before_submit(invoice)
+		self.assertEqual(flt(summary["by_register"][receipt.name]["excess"]), 700)
+
+	def test_a_receipt_left_spare_by_a_float_leftover_is_released(self):
+		# 800 - 699.9 cash - 100.1 leaves 2.8e-14 in floats: not money owed, so the 500
+		# receipt picked as well must be let go, not minted onto this customer.
+		first, spare = self._receipt(100.1), self._receipt(500)
+		invoice = self._draft(rate=800)
+		invoice.append("payments", {"mode_of_payment": "Cash", "amount": 699.9})
+		invoice.save()
+		self._record(invoice, first, spare)
+		invoice.reload()
+		_allocate_receipts_before_submit(invoice)
+		self.assertFalse(frappe.db.get_value("Mpesa C2B Payment Register", spare.name, "payment_entry"))
+		self.assertNotIn(spare.name, {c.mpesa_c2b_payment_register for c in invoice.custom_mpesa_reconciled_payments})
+
 	def test_customer_change_after_pick_is_refused(self):
 		receipt = self._receipt(1000)
 		self._sell(300, receipt)

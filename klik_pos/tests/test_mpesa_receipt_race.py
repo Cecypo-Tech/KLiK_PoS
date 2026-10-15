@@ -31,8 +31,9 @@ def _till(site, sites_path, invoice_name, results):
 		frappe.db.commit()
 		results[invoice_name] = "submitted"
 	except Exception as e:
-		frappe.db.rollback()
 		results[invoice_name] = e
+		if getattr(frappe.local, "db", None):  # init/connect itself may be what failed
+			frappe.db.rollback()
 	finally:
 		frappe.destroy()
 
@@ -92,6 +93,8 @@ class TestTwoTillsOneReceipt(ReceiptCase):
 				t.start()
 			for t in threads:
 				t.join(90)
+			# A till still running would commit after tearDown purged, leaving rows behind.
+			self.assertFalse(any(t.is_alive() for t in threads), "a till never finished")
 		frappe.db.commit()  # drop the main connection's pre-race snapshot
 		return results
 
