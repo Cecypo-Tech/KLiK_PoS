@@ -7,6 +7,7 @@ from frappe.utils import add_days, nowdate
 
 from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD, _site_sale_types
 from klik_pos.mpesa_audit import run
+from klik_pos.tests.test_mpesa_payment_entry_first import MODE
 from klik_pos.tests.test_mpesa_receipt_balance import ReceiptCase
 
 SINCE = "2029-01-01"  # the fixtures' invoices are dated 2029
@@ -56,6 +57,7 @@ class TestMpesaAudit(ReceiptCase):
 		invoice = self._sell(800, receipt)
 		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, {"payment_entry": None, "sales_invoice": None}, update_modified=False)
 		frappe.db.delete("POS Mpesa Reconciled Payment", {"mpesa_c2b_payment_register": receipt.name})
+		frappe.db.sql("UPDATE `tabPayment Entry` SET reference_no = CONCAT('X', reference_no) WHERE reference_no = %s", receipt.transid)
 		return receipt, invoice
 
 	def test_a_receipt_consumed_outside_klik_with_no_sale_behind_it_is_reported(self):
@@ -66,31 +68,56 @@ class TestMpesaAudit(ReceiptCase):
 		rows = run(since=frappe.utils.nowdate())["consumed_row_without_entry"]
 		return receipt.name in {r["name"] for r in rows}
 
-	def test_a_receipt_named_on_a_sale_s_payment_row_is_not_reported(self):
-		# STK push and the M-Pesa app's quick-pay keep the money on the invoice's M-Pesa row.
-		receipt, invoice = self._consumed_outside_klik()
+	@staticmethod
+	def _pay_row(invoice, amount, **ref):
+		"""An M-Pesa payment row on a submitted sale, as STK push and quick-pay write it."""
 		frappe.get_doc({
 			"doctype": "Sales Invoice Payment", "parent": invoice.name, "parenttype": "Sales Invoice",
-			"parentfield": "payments", "mode_of_payment": "Cash", "amount": 0, "reference_no": receipt.transid,
+			"parentfield": "payments", "mode_of_payment": MODE, "amount": amount, **ref,
 		}).db_insert()
-		self.assertFalse(self._reported_consumed(receipt))
 
-	def test_a_receipt_whose_register_row_names_a_submitted_sale_is_not_reported(self):
-		receipt, invoice = self._consumed_outside_klik()
-		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, "sales_invoice", invoice.name, update_modified=False)
-		self.assertFalse(self._reported_consumed(receipt))
-
-	def test_an_stk_receipt_whose_request_is_on_a_sale_is_not_reported(self):
-		receipt, invoice = self._consumed_outside_klik()
+	def _stk_request(self, receipt):
 		req = frappe.generate_hash(length=10)
 		frappe.db.sql(
 			"INSERT INTO `tabMpesa Express Request` (name, transaction_id, status, creation, modified) VALUES (%s, %s, 'Completed', NOW(), NOW())",
 			(req, receipt.transid),
 		)
-		frappe.get_doc({
-			"doctype": "Sales Invoice Payment", "parent": invoice.name, "parenttype": "Sales Invoice",
-			"parentfield": "payments", "mode_of_payment": "Cash", "amount": 0, "custom_reference_text": req,
-		}).db_insert()
+		return req
+
+	def test_a_receipt_whose_whole_amount_is_on_a_sale_s_payment_row_is_not_reported(self):
+		# STK push and the M-Pesa app's quick-pay keep the money on the invoice's M-Pesa row.
+		receipt, invoice = self._consumed_outside_klik()
+		self._pay_row(invoice, 1000, reference_no=receipt.transid)
+		self.assertFalse(self._reported_consumed(receipt))
+
+	def test_a_receipt_only_partly_on_a_sale_s_payment_row_is_reported(self):
+		# A 1000 push used on a 500 row: 500 of the customer's money is booked nowhere.
+		receipt, invoice = self._consumed_outside_klik()
+		self._pay_row(invoice, 500, reference_no=receipt.transid)
+		self.assertTrue(self._reported_consumed(receipt))
+
+	def test_a_receipt_whose_register_row_names_a_sale_carrying_it_is_not_reported(self):
+		receipt, invoice = self._consumed_outside_klik()
+		self._pay_row(invoice, 1000)
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, "sales_invoice", invoice.name, update_modified=False)
+		self.assertFalse(self._reported_consumed(receipt))
+
+	def test_a_receipt_whose_register_row_names_a_sale_not_carrying_it_is_reported(self):
+		# The push completed but the cashier took cash: the register still names the sale.
+		receipt, invoice = self._consumed_outside_klik()
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, "sales_invoice", invoice.name, update_modified=False)
+		self.assertTrue(self._reported_consumed(receipt))
+
+	def test_an_stk_receipt_whose_request_carries_it_on_a_sale_is_not_reported(self):
+		receipt, invoice = self._consumed_outside_klik()
+		self._pay_row(invoice, 1000, custom_reference_text=self._stk_request(receipt))
+		self.assertFalse(self._reported_consumed(receipt))
+
+	def test_a_receipt_booked_by_its_own_payment_entry_is_not_reported(self):
+		# A push against a Sales Order or Payment Request is booked by that flow's entry.
+		receipt, invoice = self._consumed_outside_klik()
+		pe = frappe.db.get_value("Payment Entry", {"custom_mpesa_receipt_number": receipt.transid}, "name")
+		frappe.db.set_value("Payment Entry", pe, {"custom_mpesa_receipt_number": None, "reference_no": receipt.transid}, update_modified=False)
 		self.assertFalse(self._reported_consumed(receipt))
 
 	def test_the_default_window_leaves_old_history_out(self):

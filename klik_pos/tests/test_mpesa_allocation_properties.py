@@ -56,6 +56,9 @@ KNOWN = {
 	# rounded_total (800) differs from grand_total (799.6): the receipt pays what is rounded.
 	"rounding: 799.6 paid by an 800 receipt": {"receipts": [(800, 0, 0)], "sale": 799.6, "cash": 0, "voucher": 0},
 	# 800 - 699.9 leaves 100.10000000000002 in floats; the 100.1 receipt covers it.
+	"float leftover leaves the second receipt spare": {
+		"receipts": [(100.1, 0, 0), (500, 0, 0)], "sale": 800, "cash": 699.9, "voucher": 0,
+	},
 	"sub-cent float leftover after a drain": {
 		"receipts": [(300, 0, 300), (100.1, 0, 0)], "sale": 800, "cash": 699.9, "voucher": 0,
 	},

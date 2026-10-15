@@ -751,7 +751,10 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	already_advanced = sum(flt(a.allocated_amount) for a in invoice.get("advances") or [])
 	# Vouchers (customer credit) settle right after submit: their share stays owing for them.
 	reserved = flt(getattr(invoice, "_klik_credit_reserved", 0))
-	remaining = max(payable - already_paid - already_advanced - reserved, 0.0)
+	# Kept at the invoice's precision: 800 - 699.9 - 100.1 is 2.8e-14 in floats, which is
+	# not money owed and must neither refuse the sale nor keep a spare receipt.
+	prec = invoice.precision("grand_total") or 2
+	remaining = flt(max(payable - already_paid - already_advanced - reserved, 0.0), prec)
 
 	# A receipt the sale turns out not to need - the cashier took cash instead, or picked
 	# one receipt too many - is let go before anything is minted: an entry for it would
@@ -767,12 +770,11 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 		share = min(open_amount, planned)
 		if drained is None and share < min(flt(child.amount), planned):
 			drained = (child, balance.payment_entry, open_amount)
-		planned -= share
+		planned = flt(planned - share, prec)
 		if share <= 0:
 			invoice.remove(child)
 			children.remove(child)
-	# Rounded: 800 - 699.9 - 100.1 leaves 2e-14 in floats, which is not money owed.
-	if drained and flt(planned, 2) > 0:
+	if drained and planned > 0:
 		_refuse_drained_receipt(*drained)
 	if not children:
 		invoice.save(ignore_permissions=True)
@@ -817,11 +819,11 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 					"remarks": pe_row.remarks,
 				},
 			)
-			remaining -= take
+			remaining = flt(remaining - take, prec)
 		child.allocated_amount = take
-		# What the receipt still held, not what it held at the pick: another till may have
-		# drawn on it since and the sale still went through on the rest.
-		received = min(flt(child.amount), available)
+		# What the receipt holds now, not at the pick: another till may have drawn on it,
+		# or a cancelled sale given money back. The excess is then what the entry keeps.
+		received = available
 		summary["received_total"] += received
 		summary["allocated_total"] += flt(child.allocated_amount)
 		summary["by_register"][child.mpesa_c2b_payment_register] = {
@@ -830,7 +832,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			"excess": received - flt(child.allocated_amount),
 		}
 
-	if drained and flt(remaining, 2) > 0:
+	if drained and remaining > 0:
 		_refuse_drained_receipt(*drained)
 
 	present_modes = {p.mode_of_payment for p in invoice.get("payments") or []}
