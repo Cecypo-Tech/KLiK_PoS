@@ -8,7 +8,7 @@ otherwise bury what is new. Each check returns at most `limit` rows (default 200
 """
 
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 
 from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD, _site_sale_types
 
@@ -122,6 +122,30 @@ def run(since: str | None = None, limit: int = 200) -> dict:
 		args,
 		as_dict=True,
 	)
+
+	# A push paid from the POS waits on its draft M-Pesa order until the cashier finishes the
+	# sale; one still there an hour on was left (SO-01009: 1,000 held since 13 Oct) or the
+	# order was submitted as an order (SO-00369), and its money is booked nowhere. Not limited
+	# to `since`: stranded money must not age out of the report. A cashier still finishing a
+	# sale past the hour shows up too. PowerPack's pay-by-link pushes against ordinary orders
+	# (no M-Pesa order flag) and are left out.
+	out["paid_push_on_unfinished_order"] = frappe.db.sql(
+		"""
+		SELECT r.name, r.reference_name AS sales_order, so.docstatus AS order_docstatus,
+		       r.amount, r.transaction_id, r.modified AS paid_at
+		FROM `tabMpesa Express Request` r
+		LEFT JOIN `tabSales Order` so ON so.name = r.reference_name
+		WHERE r.status = 'Completed' AND r.reference_doctype = 'Sales Order'
+		  AND (so.name IS NULL OR so.custom_klik_mpesa_order = 1)
+		  AND r.modified < %(paid_before)s
+		ORDER BY r.modified
+		LIMIT %(limit)s
+		""",
+		# The site's clock, not the database's: Frappe stores site time, and the two differ
+		# whenever the site's time zone is not the server's.
+		{**args, "paid_before": add_to_date(now_datetime(), hours=-1)},
+		as_dict=True,
+	) if frappe.db.table_exists("Mpesa Express Request") else []
 
 	for key, rows in out.items():
 		print(f"{key}: {len(rows)}" + (" (capped)" if len(rows) >= args["limit"] else ""))

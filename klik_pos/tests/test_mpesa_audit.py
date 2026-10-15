@@ -120,6 +120,43 @@ class TestMpesaAudit(ReceiptCase):
 		frappe.db.set_value("Payment Entry", pe, {"custom_mpesa_receipt_number": None, "reference_no": receipt.transid}, update_modified=False)
 		self.assertFalse(self._reported_consumed(receipt))
 
+	def _old_paid_push(self, order, days=0):
+		from klik_pos.tests.test_mpesa_order_checkout import EXPRESS, _push
+
+		push = _push(order, "Completed")
+		frappe.db.set_value(
+			EXPRESS, push, "modified", frappe.utils.add_to_date(None, days=-days, hours=-2), update_modified=False
+		)
+		return push
+
+	def test_a_paid_push_still_on_an_order_is_reported(self):
+		# SO-01009: paid 1,000 on 13 Oct, left on the Held tab, nothing booked.
+		from klik_pos.tests.test_mpesa_order_checkout import _order
+
+		push = self._old_paid_push(_order())
+		self.assertIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
+	def test_stranded_money_does_not_age_out_of_the_report(self):
+		from klik_pos.tests.test_mpesa_order_checkout import _order
+
+		push = self._old_paid_push(_order(), days=90)
+		self.assertIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
+	def test_a_pay_by_link_order_is_not_reported(self):
+		# PowerPack's pay-by-link pushes against ordinary submitted orders; no POS hand-over.
+		from klik_pos.tests.test_mpesa_order_checkout import _order
+
+		order = _order()
+		frappe.db.set_value("Sales Order", order, "custom_klik_mpesa_order", 0, update_modified=False)
+		push = self._old_paid_push(order)
+		self.assertNotIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
+	def test_a_push_paid_moments_ago_is_left_to_the_checkout(self):
+		from klik_pos.tests.test_mpesa_order_checkout import _push
+
+		push = _push("SO-TEST-UNFINISHED", "Completed")
+		self.assertNotIn(push, {r["name"] for r in run()["paid_push_on_unfinished_order"]})
+
 	def test_the_default_window_leaves_old_history_out(self):
 		receipt = self._receipt(1000)
 		self._sell(800, receipt)

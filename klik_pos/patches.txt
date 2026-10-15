@@ -13,3 +13,4 @@ klik_pos.patches.v16_0.one_credit_checkbox
 klik_pos.patches.v16_0.zero_pos_return_own_outstanding
 klik_pos.patches.v16_0.add_item_listing_indexes
 klik_pos.patches.v16_0.cash_sale_payment_server_script
+klik_pos.patches.v16_0.add_receipt_number_indexes
