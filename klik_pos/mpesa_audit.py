@@ -89,6 +89,24 @@ def run(since: str | None = None, limit: int = 200) -> dict:
 		FROM `tabMpesa C2B Payment Register` reg
 		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
 		WHERE reg.docstatus=1 AND reg.posting_date >= %(since)s AND IFNULL(pe.docstatus, 0) != 1
+		  -- A receipt klik took (it has a trace row) is always paid through an entry. One it
+		  -- did not - STK push, the M-Pesa app's quick-pay - keeps the money on a submitted
+		  -- sale's M-Pesa payment row instead: the row names the receipt or the push
+		  -- request, or the register names the sale.
+		  AND (
+			EXISTS (SELECT 1 FROM `tabPOS Mpesa Reconciled Payment` m WHERE m.mpesa_c2b_payment_register = reg.name)
+			OR (
+				NOT EXISTS (SELECT 1 FROM `tabSales Invoice` s WHERE s.name = reg.sales_invoice AND s.docstatus = 1)
+				AND NOT EXISTS (
+					SELECT 1 FROM `tabSales Invoice Payment` p
+					JOIN `tabSales Invoice` s ON s.name = p.parent AND s.docstatus = 1
+					WHERE p.reference_no IN (reg.transid, reg.name)
+					   OR p.custom_reference_text IN (reg.transid, reg.name)
+					   OR p.reference_no IN (SELECT r.name FROM `tabMpesa Express Request` r WHERE r.transaction_id = reg.transid)
+					   OR p.custom_reference_text IN (SELECT r.name FROM `tabMpesa Express Request` r WHERE r.transaction_id = reg.transid)
+				)
+			)
+		  )
 		LIMIT %(limit)s
 		""",
 		args,

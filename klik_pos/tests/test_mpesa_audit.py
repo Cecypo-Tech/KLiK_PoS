@@ -50,6 +50,49 @@ class TestMpesaAudit(ReceiptCase):
 			frappe.db.set_value("Sales Invoice", invoice.name, SITE_SALE_TYPE_FIELD, None, update_modified=False)
 		self.assertIn(invoice.name, self._names("owing_pos_sale_check_by_hand"))
 
+	def _consumed_outside_klik(self):
+		"""A consumed receipt with no entry and no klik trace row, as STK or quick-pay leave it."""
+		receipt = self._receipt(1000)
+		invoice = self._sell(800, receipt)
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, {"payment_entry": None, "sales_invoice": None}, update_modified=False)
+		frappe.db.delete("POS Mpesa Reconciled Payment", {"mpesa_c2b_payment_register": receipt.name})
+		return receipt, invoice
+
+	def test_a_receipt_consumed_outside_klik_with_no_sale_behind_it_is_reported(self):
+		receipt, _ = self._consumed_outside_klik()
+		self.assertTrue(self._reported_consumed(receipt))
+
+	def _reported_consumed(self, receipt):
+		rows = run(since=frappe.utils.nowdate())["consumed_row_without_entry"]
+		return receipt.name in {r["name"] for r in rows}
+
+	def test_a_receipt_named_on_a_sale_s_payment_row_is_not_reported(self):
+		# STK push and the M-Pesa app's quick-pay keep the money on the invoice's M-Pesa row.
+		receipt, invoice = self._consumed_outside_klik()
+		frappe.get_doc({
+			"doctype": "Sales Invoice Payment", "parent": invoice.name, "parenttype": "Sales Invoice",
+			"parentfield": "payments", "mode_of_payment": "Cash", "amount": 0, "reference_no": receipt.transid,
+		}).db_insert()
+		self.assertFalse(self._reported_consumed(receipt))
+
+	def test_a_receipt_whose_register_row_names_a_submitted_sale_is_not_reported(self):
+		receipt, invoice = self._consumed_outside_klik()
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, "sales_invoice", invoice.name, update_modified=False)
+		self.assertFalse(self._reported_consumed(receipt))
+
+	def test_an_stk_receipt_whose_request_is_on_a_sale_is_not_reported(self):
+		receipt, invoice = self._consumed_outside_klik()
+		req = frappe.generate_hash(length=10)
+		frappe.db.sql(
+			"INSERT INTO `tabMpesa Express Request` (name, transaction_id, status, creation, modified) VALUES (%s, %s, 'Completed', NOW(), NOW())",
+			(req, receipt.transid),
+		)
+		frappe.get_doc({
+			"doctype": "Sales Invoice Payment", "parent": invoice.name, "parenttype": "Sales Invoice",
+			"parentfield": "payments", "mode_of_payment": "Cash", "amount": 0, "custom_reference_text": req,
+		}).db_insert()
+		self.assertFalse(self._reported_consumed(receipt))
+
 	def test_the_default_window_leaves_old_history_out(self):
 		receipt = self._receipt(1000)
 		self._sell(800, receipt)
