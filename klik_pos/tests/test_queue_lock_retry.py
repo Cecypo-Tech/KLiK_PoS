@@ -28,13 +28,15 @@ class TestQueueLockRetry(FrappeTestCase):
 		self.notify = patch.object(sales_invoice, "_notify_queue_failure").start()
 		self.addCleanup(patch.stopall)
 
-	def _run(self, *outcomes):
+		self.enqueue = patch.object(sales_invoice.frappe, "enqueue").start()
+
+	def _run(self, *outcomes, requeues=0):
 		# A worker starts with a clean transaction; this one holds the uncommitted draft.
 		with (
 			patch.object(frappe.db, "transaction_writes", 0),
 			patch.object(sales_invoice, "_submit_queued_invoice", side_effect=list(outcomes)) as submit,
 		):
-			result = sales_invoice.process_queued_sales_invoice(self.draft.name)
+			result = sales_invoice.process_queued_sales_invoice(self.draft.name, requeues=requeues)
 		return result, submit
 
 	def test_a_deadlock_is_retried_and_the_sale_posts(self):
@@ -50,10 +52,32 @@ class TestQueueLockRetry(FrappeTestCase):
 		self.assertTrue(result["success"])
 		self.assertEqual(submit.call_count, 2)
 
-	def test_three_deadlocks_fail_the_sale_and_alert_once(self):
-		result, submit = self._run(_deadlock(), _deadlock(), _deadlock())
+	def test_a_sale_that_keeps_losing_goes_back_on_the_queue(self):
+		# CS-02402: three attempts inside two seconds all met the same minutes-long pile-up of
+		# submits. Back of the queue, after a pause, instead of Failed.
+		result, submit = self._run(*[_deadlock()] * sales_invoice.LOCK_RACE_ATTEMPTS)
 		self.assertFalse(result["success"])
 		self.assertEqual(submit.call_count, sales_invoice.LOCK_RACE_ATTEMPTS)
+		self.enqueue.assert_called_once()
+		args, kwargs = self.enqueue.call_args
+		self.assertEqual(args[0], "klik_pos.api.sales_invoice.process_queued_sales_invoice")
+		self.assertEqual((kwargs["invoice_name"], kwargs["requeues"]), (self.draft.name, 1))
+		self.notify.assert_not_called()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", self.draft.name, "queue_status"), "Queued")
+
+	def test_the_last_requeue_losing_fails_the_sale_and_alerts_once(self):
+		result, submit = self._run(
+			*[_deadlock()] * sales_invoice.LOCK_RACE_ATTEMPTS, requeues=sales_invoice.LOCK_RACE_REQUEUES
+		)
+		self.assertFalse(result["success"])
+		self.enqueue.assert_not_called()
+		self.notify.assert_called_once()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", self.draft.name, "queue_status"), "Failed")
+
+	def test_a_requeue_that_cannot_be_queued_fails_the_sale(self):
+		self.enqueue.side_effect = ConnectionError("redis down")
+		result, submit = self._run(*[_deadlock()] * sales_invoice.LOCK_RACE_ATTEMPTS)
+		self.assertFalse(result["success"])
 		self.notify.assert_called_once()
 		self.assertEqual(frappe.db.get_value("Sales Invoice", self.draft.name, "queue_status"), "Failed")
 
@@ -62,6 +86,7 @@ class TestQueueLockRetry(FrappeTestCase):
 		self.assertFalse(result["success"])
 		self.assertEqual(submit.call_count, 1)
 		self.sleep.assert_not_called()
+		self.enqueue.assert_not_called()
 		self.notify.assert_called_once()
 
 
