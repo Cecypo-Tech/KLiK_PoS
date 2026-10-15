@@ -2,18 +2,21 @@
 
 Tests cover the cases someone thought of; this looks at what actually happened.
 Run: bench --site <site> execute klik_pos.mpesa_audit.run --kwargs "{'since': '2026-10-01'}"
-Every check is a SELECT. Each key maps to the offending rows; empty means clean.
+Every check is a SELECT. Each key maps to the offending rows; empty means clean. Without
+`since` it looks at the last 30 days: older register history from earlier flows would
+otherwise bury what is new.
 """
 
 import frappe
+from frappe.utils import add_days, nowdate
 
-from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD
+from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD, _site_sale_types
 
 TOL = 0.01
 
 
 def run(since: str | None = None) -> dict:
-	since = since or "1900-01-01"
+	since = since or add_days(nowdate(), -30)
 	args = {"since": since, "tol": TOL}
 	owing = """
 		SELECT si.name, si.customer, si.posting_date, si.grand_total, si.outstanding_amount
@@ -22,12 +25,14 @@ def run(since: str | None = None) -> dict:
 		  AND si.outstanding_amount > %(tol)s AND si.posting_date >= %(since)s
 	"""
 	out = {}
-	if frappe.get_meta("Sales Invoice").has_field(SITE_SALE_TYPE_FIELD):
-		# Allparts: a Cash sale must be paid in full; Credit sales may owe.
-		out["short_paid_cash_sale"] = frappe.db.sql(
-			owing + f" AND si.`{SITE_SALE_TYPE_FIELD}`='Cash'", args, as_dict=True
+	if {"Cash", "Credit"} <= _site_sale_types():
+		# Allparts: a Cash sale must be paid in full; Credit sales may owe. One with no type
+		# (older, desk or imported) can be either, so a person decides.
+		field = f"si.`{SITE_SALE_TYPE_FIELD}`"
+		out["short_paid_cash_sale"] = frappe.db.sql(owing + f" AND {field}='Cash'", args, as_dict=True)
+		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(
+			owing + f" AND IFNULL({field}, '') NOT IN ('Cash', 'Credit')", args, as_dict=True
 		)
-		out["owing_pos_sale_check_by_hand"] = []
 	else:
 		out["short_paid_cash_sale"] = []
 		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(owing, args, as_dict=True)

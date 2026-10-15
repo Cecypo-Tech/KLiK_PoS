@@ -1,7 +1,9 @@
 """The audit finds the money shapes that should never exist, and only those."""
 
 import frappe
+from frappe.utils import add_days, nowdate
 
+from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD, _site_sale_types
 from klik_pos.mpesa_audit import run
 from klik_pos.tests.test_mpesa_receipt_balance import ReceiptCase
 
@@ -31,12 +33,29 @@ class TestMpesaAudit(ReceiptCase):
 		# CS-02273: submitted with nothing paid.
 		invoice = self._sell(800, self._receipt(1000))
 		frappe.db.set_value("Sales Invoice", invoice.name, "outstanding_amount", 800, update_modified=False)
-		if frappe.get_meta("Sales Invoice").has_field("custom_sale_type"):
-			frappe.db.set_value("Sales Invoice", invoice.name, "custom_sale_type", "Cash", update_modified=False)
+		if {"Cash", "Credit"} <= _site_sale_types():
+			frappe.db.set_value("Sales Invoice", invoice.name, SITE_SALE_TYPE_FIELD, "Cash", update_modified=False)
 			key = "short_paid_cash_sale"
 		else:
 			key = "owing_pos_sale_check_by_hand"
 		self.assertIn(invoice.name, self._names(key))
+
+	def test_an_owing_sale_with_no_sale_type_is_left_for_a_person(self):
+		# Older, desk or imported POS invoices carry no Cash/Credit; they must not vanish.
+		invoice = self._sell(800, self._receipt(1000))
+		frappe.db.set_value("Sales Invoice", invoice.name, "outstanding_amount", 800, update_modified=False)
+		if frappe.get_meta("Sales Invoice").has_field(SITE_SALE_TYPE_FIELD):
+			frappe.db.set_value("Sales Invoice", invoice.name, SITE_SALE_TYPE_FIELD, None, update_modified=False)
+		self.assertIn(invoice.name, self._names("owing_pos_sale_check_by_hand"))
+
+	def test_the_default_window_leaves_old_history_out(self):
+		receipt = self._receipt(1000)
+		self._sell(800, receipt)
+		frappe.db.set_value(
+			"Mpesa C2B Payment Register", receipt.name,
+			{"payment_entry": None, "posting_date": add_days(nowdate(), -60)}, update_modified=False,
+		)
+		self.assertNotIn(receipt.name, {r["name"] for r in run()["consumed_row_without_entry"]})
 
 	def test_two_entries_for_one_receipt_are_reported(self):
 		receipt = self._receipt(1000)
