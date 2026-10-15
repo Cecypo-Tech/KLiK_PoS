@@ -756,18 +756,23 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	# A receipt the sale turns out not to need - the cashier took cash instead, or picked
 	# one receipt too many - is let go before anything is minted: an entry for it would
 	# consume the receipt and tie it to this customer for money this sale never took.
+	# A receipt another till drew on after the pick is only refused if the sale ends up
+	# short for it: when the other receipts cover the sale, it simply goes (CS-02273 follow-up).
 	planned = remaining
+	drained = None
 	for child in list(children):
 		balance = balances[child.name]
 		usable = balance.state in ("new", "open")
-		share = min(flt(balance.open_amount), planned) if usable else 0.0
-		if share <= 0 and planned > 0:
-			# The sale still owes and this receipt has nothing left for it.
-			_refuse_drained_receipt(child, balance.payment_entry, 0.0)
+		open_amount = flt(balance.open_amount) if usable else 0.0
+		share = min(open_amount, planned)
+		if drained is None and share < min(flt(child.amount), planned):
+			drained = (child, balance.payment_entry, open_amount)
 		planned -= share
 		if share <= 0:
 			invoice.remove(child)
 			children.remove(child)
+	if drained and planned > 0:
+		_refuse_drained_receipt(*drained)
 	if not children:
 		invoice.save(ignore_permissions=True)
 		return empty
@@ -793,8 +798,8 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		available = flt(pe_row.unallocated_amount)
 		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
-		if available < flt(child.amount) and remaining > available:
-			_refuse_drained_receipt(child, pe_name, available)
+		if drained is None and available < flt(child.amount) and remaining > available:
+			drained = (child, pe_name, available)
 		take = min(available, remaining) if remaining > 0 else 0.0
 		if take > 0:
 			invoice.append(
@@ -818,6 +823,9 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			"allocated": flt(child.allocated_amount),
 			"excess": flt(child.amount) - flt(child.allocated_amount),
 		}
+
+	if drained and remaining > 0:
+		_refuse_drained_receipt(*drained)
 
 	present_modes = {p.mode_of_payment for p in invoice.get("payments") or []}
 	for mode in dict.fromkeys(c.mode_of_payment for c in children):
