@@ -123,9 +123,12 @@ def run(since: str | None = None, limit: int = 200) -> dict:
 		as_dict=True,
 	)
 
-	# A push paid from the POS waits on its draft Sales Order until the cashier finishes the
+	# A push paid from the POS waits on its draft M-Pesa order until the cashier finishes the
 	# sale; one still there an hour on was left (SO-01009: 1,000 held since 13 Oct) or the
-	# order was submitted as an order (SO-00369), and its money is booked nowhere.
+	# order was submitted as an order (SO-00369), and its money is booked nowhere. Not limited
+	# to `since`: stranded money must not age out of the report. A cashier still finishing a
+	# sale past the hour shows up too. PowerPack's pay-by-link pushes against ordinary orders
+	# (no M-Pesa order flag) and are left out.
 	out["paid_push_on_unfinished_order"] = frappe.db.sql(
 		"""
 		SELECT r.name, r.reference_name AS sales_order, so.docstatus AS order_docstatus,
@@ -133,7 +136,9 @@ def run(since: str | None = None, limit: int = 200) -> dict:
 		FROM `tabMpesa Express Request` r
 		LEFT JOIN `tabSales Order` so ON so.name = r.reference_name
 		WHERE r.status = 'Completed' AND r.reference_doctype = 'Sales Order'
-		  AND r.modified >= %(since)s AND r.modified < %(paid_before)s
+		  AND (so.name IS NULL OR so.custom_klik_mpesa_order = 1)
+		  AND r.modified < %(paid_before)s
+		ORDER BY r.modified
 		LIMIT %(limit)s
 		""",
 		# The site's clock, not the database's: Frappe stores site time, and the two differ

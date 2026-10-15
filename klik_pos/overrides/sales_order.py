@@ -7,7 +7,20 @@ def refuse_submitting_a_paid_mpesa_order(doc, method=None):
 	the till treats it as gone and the payment reaches nothing (SO-00369, Allparts)."""
 	if not doc.get("custom_klik_mpesa_order"):
 		return
-	from klik_pos.api.mpesa_order import live_push
+	from klik_pos.api.mpesa import _klik_entry_for_transid
+	from klik_pos.api.mpesa_order import EXPRESS, REGISTER, _pushes, live_push
+
+	# The two cases the till hands to the desk (_paid_push_refusal): a sale paid twice, and a
+	# push whose receipt is already booked (SO-00368). Refusing them here too left no way out.
+	paid = _pushes(doc.name, ("Completed",))
+	if len(paid) > 1:
+		return
+	transid = paid and frappe.db.get_value(EXPRESS, paid[0], "transaction_id")
+	if transid and (
+		frappe.db.exists(REGISTER, {"transid": transid, "payment_entry": ["is", "set"]})
+		or _klik_entry_for_transid(transid)
+	):
+		return
 
 	push = live_push(doc.name)
 	if push:

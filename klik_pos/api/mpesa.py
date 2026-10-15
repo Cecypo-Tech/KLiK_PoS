@@ -62,7 +62,9 @@ def _klik_entry_for_transid(transid: str | None) -> str | None:
 		)
 		if stamped:
 			return stamped
-	return frappe.db.get_value("Payment Entry", {"reference_no": transid, "docstatus": 1}, "name")
+	return frappe.db.get_value(
+		"Payment Entry", {"reference_no": transid, "docstatus": 1}, "name", order_by="creation asc"
+	)
 
 
 def _receipt_balance(register: str) -> frappe._dict:
@@ -93,11 +95,19 @@ def _receipt_balance(register: str) -> frappe._dict:
 		pe = frappe.db.get_value(
 			"Payment Entry",
 			pe_name,
-			["docstatus", "party_type", "party", "unallocated_amount", "company"],
+			["docstatus", "payment_type", "party_type", "party", "unallocated_amount", "company"],
 			as_dict=True,
 		)
 		out.payment_entry = pe_name
-		if not pe or pe.docstatus != 1 or pe.party_type != "Customer" or (row.company and pe.company != row.company):
+		# Only money received can pay a sale: a desk refund naming the receipt (Pay) is
+		# found by number, so the receipt reads as used, but it is never sale money.
+		if (
+			not pe
+			or pe.docstatus != 1
+			or pe.payment_type != "Receive"
+			or pe.party_type != "Customer"
+			or (row.company and pe.company != row.company)
+		):
 			return out
 		out.held_by = pe.party
 		out.open_amount = flt(pe.unallocated_amount)

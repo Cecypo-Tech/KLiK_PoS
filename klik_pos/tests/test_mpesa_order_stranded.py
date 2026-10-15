@@ -9,6 +9,7 @@ reference_no, while the order stayed held: finished at the till, it would be boo
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from klik_pos.api.mpesa import _receipt_balance
 from klik_pos.api.mpesa_order import _receipt_used
 from klik_pos.overrides.sales_order import refuse_submitting_a_paid_mpesa_order
 from klik_pos.tests.test_mpesa_order_checkout import EXPRESS, _order, _push
@@ -40,6 +41,24 @@ class TestAPaidOrderIsNotSubmittedAsAnOrder(FrappeTestCase):
 			frappe.get_doc("Sales Order", name).submit()
 
 
+class TestTheDeskFinishesWhatTheTillHandsIt(ReceiptCase):
+	"""The till sends two cases to the desk; the guard must let the desk finish them."""
+
+	def test_an_order_whose_receipt_the_desk_already_booked_may_be_submitted(self):
+		receipt = self._receipt(1000)
+		self._sell(1000, receipt)  # the receipt now has an entry
+		name = _order()
+		push = _push(name, "Completed")
+		frappe.db.set_value(EXPRESS, push, "transaction_id", receipt.transid)
+		refuse_submitting_a_paid_mpesa_order(frappe.get_doc("Sales Order", name))
+
+	def test_an_order_paid_twice_may_be_submitted(self):
+		name = _order()
+		_push(name, "Completed")
+		_push(name, "Completed")
+		refuse_submitting_a_paid_mpesa_order(frappe.get_doc("Sales Order", name))
+
+
 class TestAReceiptBookedByHandIsUsed(ReceiptCase):
 	def test_a_desk_entry_naming_the_receipt_in_reference_no_counts(self):
 		receipt = self._receipt(1000)
@@ -50,6 +69,18 @@ class TestAReceiptBookedByHandIsUsed(ReceiptCase):
 		frappe.db.set_value("Payment Entry", pe, "custom_mpesa_receipt_number", None, update_modified=False)
 		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, {"payment_entry": None, "docstatus": 2}, update_modified=False)
 		push = _push("SO-TEST-STRANDED", "Completed")
+		frappe.db.set_value(EXPRESS, push, "transaction_id", receipt.transid)
+		self.assertEqual(_receipt_used(push), receipt.transid)
+
+	def test_a_desk_refund_naming_the_receipt_is_used_but_never_sale_money(self):
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		pe = frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry")
+		# The receipt's entry turned into a refund: money paid out, not in.
+		frappe.db.set_value("Payment Entry", pe, {"payment_type": "Pay", "custom_mpesa_receipt_number": None}, update_modified=False)
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, {"payment_entry": None, "docstatus": 0}, update_modified=False)
+		self.assertEqual(_receipt_balance(receipt.name).state, "unusable")
+		push = _push("SO-TEST-REFUND", "Completed")
 		frappe.db.set_value(EXPRESS, push, "transaction_id", receipt.transid)
 		self.assertEqual(_receipt_used(push), receipt.transid)
 
