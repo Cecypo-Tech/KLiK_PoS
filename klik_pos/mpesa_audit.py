@@ -1,0 +1,89 @@
+"""Read-only checks for M-Pesa money shapes that should never exist.
+
+Tests cover the cases someone thought of; this looks at what actually happened.
+Run: bench --site <site> execute klik_pos.mpesa_audit.run --kwargs "{'since': '2026-10-01'}"
+Every check is a SELECT. Each key maps to the offending rows; empty means clean.
+"""
+
+import frappe
+
+from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD
+
+TOL = 0.01
+
+
+def run(since: str | None = None) -> dict:
+	since = since or "1900-01-01"
+	args = {"since": since, "tol": TOL}
+	owing = """
+		SELECT si.name, si.customer, si.posting_date, si.grand_total, si.outstanding_amount
+		FROM `tabSales Invoice` si
+		WHERE si.docstatus=1 AND si.is_pos=1 AND si.is_return=0
+		  AND si.outstanding_amount > %(tol)s AND si.posting_date >= %(since)s
+	"""
+	out = {}
+	if frappe.get_meta("Sales Invoice").has_field(SITE_SALE_TYPE_FIELD):
+		# Allparts: a Cash sale must be paid in full; Credit sales may owe.
+		out["short_paid_cash_sale"] = frappe.db.sql(
+			owing + f" AND si.`{SITE_SALE_TYPE_FIELD}`='Cash'", args, as_dict=True
+		)
+		out["owing_pos_sale_check_by_hand"] = []
+	else:
+		out["short_paid_cash_sale"] = []
+		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(owing, args, as_dict=True)
+
+	out["overdrawn_receipt"] = frappe.db.sql(
+		"""
+		SELECT pe.name, pe.custom_mpesa_receipt_number AS transid, pe.paid_amount, pe.unallocated_amount,
+		       COALESCE(SUM(ref.allocated_amount), 0) AS allocated
+		FROM `tabPayment Entry` pe
+		LEFT JOIN `tabPayment Entry Reference` ref ON ref.parent = pe.name
+		WHERE pe.docstatus=1 AND IFNULL(pe.custom_mpesa_receipt_number, '') != '' AND pe.posting_date >= %(since)s
+		GROUP BY pe.name
+		HAVING pe.unallocated_amount < -%(tol)s OR allocated > pe.paid_amount + %(tol)s
+		""",
+		args,
+		as_dict=True,
+	)
+
+	out["receipt_with_several_entries"] = frappe.db.sql(
+		"""
+		SELECT custom_mpesa_receipt_number AS name, COUNT(*) AS entries, GROUP_CONCAT(name) AS payment_entries
+		FROM `tabPayment Entry`
+		WHERE docstatus=1 AND IFNULL(custom_mpesa_receipt_number, '') != '' AND posting_date >= %(since)s
+		GROUP BY custom_mpesa_receipt_number HAVING COUNT(*) > 1
+		""",
+		args,
+		as_dict=True,
+	)
+
+	out["receipt_over_allocated_on_invoices"] = frappe.db.sql(
+		"""
+		SELECT m.mpesa_c2b_payment_register AS name, reg.transid, reg.transamount,
+		       SUM(m.allocated_amount) AS allocated, GROUP_CONCAT(si.name) AS invoices
+		FROM `tabPOS Mpesa Reconciled Payment` m
+		JOIN `tabSales Invoice` si ON si.name = m.parent AND m.parenttype = 'Sales Invoice'
+		JOIN `tabMpesa C2B Payment Register` reg ON reg.name = m.mpesa_c2b_payment_register
+		-- A return copies its sale's trace rows; counting both would double the receipt.
+		WHERE si.docstatus=1 AND si.is_return=0 AND si.posting_date >= %(since)s
+		GROUP BY m.mpesa_c2b_payment_register
+		HAVING allocated > reg.transamount + %(tol)s
+		""",
+		args,
+		as_dict=True,
+	)
+
+	out["consumed_row_without_entry"] = frappe.db.sql(
+		"""
+		SELECT reg.name, reg.transid, reg.transamount, reg.payment_entry
+		FROM `tabMpesa C2B Payment Register` reg
+		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
+		WHERE reg.docstatus=1 AND reg.posting_date >= %(since)s AND IFNULL(pe.docstatus, 0) != 1
+		""",
+		args,
+		as_dict=True,
+	)
+
+	for key, rows in out.items():
+		print(f"{key}: {len(rows)}")
+	return out
