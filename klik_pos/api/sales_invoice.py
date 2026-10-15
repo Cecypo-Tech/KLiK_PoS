@@ -272,6 +272,9 @@ def _record_failed_checkout_request(state, error):
 # ---------------------------------------------------------------------------------------
 
 LOCK_RACE_ATTEMPTS = 3
+# A queued sale whose attempts all lose goes to the back of the queue this many times before it
+# is failed: a pile-up of submits can hold its locks for minutes, far past the attempts above.
+LOCK_RACE_REQUEUES = 5
 LOCK_RACE_ERRORS = (frappe.QueryDeadlockError, frappe.QueryTimeoutError)
 
 
@@ -2663,12 +2666,30 @@ def _apply_checkout_credit(doc, credit_rows):
 
 
 @frappe.whitelist()
-def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None):
+def process_queued_sales_invoice(invoice_name, requested_by=None, customer_credit=None, requeues=0):
 	"""Background worker that submits a queued draft sales invoice."""
 	try:
 		return _retry_lock_race(_submit_queued_invoice, invoice_name, requested_by, customer_credit)
 	except Exception as e:
 		frappe.db.rollback()
+		if isinstance(e, LOCK_RACE_ERRORS) and int(requeues) < LOCK_RACE_REQUEUES:
+			# Rolled back, so no locks are held while it waits. Frappe runs no RQ scheduler, so
+			# there is no delayed enqueue: the gap is this pause plus whatever is queued ahead.
+			# ponytail: blocks the worker for the pause; a delayed job if this starves the queue.
+			time.sleep(random.uniform(5, 15))
+			try:
+				frappe.enqueue(
+					"klik_pos.api.sales_invoice.process_queued_sales_invoice",
+					queue="long",
+					invoice_name=invoice_name,
+					requested_by=requested_by,
+					customer_credit=customer_credit,
+					requeues=int(requeues) + 1,
+				)
+				return {"success": False, "message": str(e), "requeued": True}
+			except Exception:
+				# Not back on the queue: fail it below, so the cashier is told.
+				frappe.log_error(frappe.get_traceback(), f"Queued Invoice requeue error for {invoice_name}")
 		try:
 			doc = frappe.get_doc("Sales Invoice", invoice_name)
 			attempts = int(getattr(doc, "queue_attempts", 0) or 0) + 1
