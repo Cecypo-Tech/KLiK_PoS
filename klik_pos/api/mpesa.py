@@ -680,6 +680,25 @@ def _assert_cancellation_releases_payments():
 		)
 
 
+def _refuse_drained_receipt(child, pe_name, available):
+	"""Another till drew on this receipt after it was picked; the sale must not go out short."""
+	last = pe_name and frappe.db.get_value(
+		"Payment Entry Reference",
+		{"parent": pe_name, "reference_doctype": "Sales Invoice"},
+		"reference_name",
+		order_by="creation desc",
+	)
+	frappe.throw(
+		_(
+			"{0} has only {1} left now; it was used on {2} a moment ago. Pick another receipt or take the rest another way."
+		).format(
+			child.transid,
+			frappe.format_value(available, {"fieldtype": "Currency"}),
+			last or _("another sale"),
+		)
+	)
+
+
 def _allocate_receipts_before_submit(invoice) -> dict:
 	"""Pre-submit phase: settle the draft from the receipts' Payment Entries as advances.
 
@@ -706,7 +725,9 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		)
 
-	children = _usable_mpesa_rows(invoice)
+	# Every recorded row, not just the ones that can still pay: a receipt another till spent
+	# after the pick must be refused below, not skipped - skipping posted the sale unpaid (CS-02273).
+	children = list(invoice.get("custom_mpesa_reconciled_payments") or [])
 	if not children:
 		return empty
 
@@ -737,7 +758,12 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 	# consume the receipt and tie it to this customer for money this sale never took.
 	planned = remaining
 	for child in list(children):
-		share = min(flt(balances[child.name].open_amount), planned)
+		balance = balances[child.name]
+		usable = balance.state in ("new", "open")
+		share = min(flt(balance.open_amount), planned) if usable else 0.0
+		if share <= 0 and planned > 0:
+			# The sale still owes and this receipt has nothing left for it.
+			_refuse_drained_receipt(child, balance.payment_entry, 0.0)
 		planned -= share
 		if share <= 0:
 			invoice.remove(child)
@@ -768,21 +794,7 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 		available = flt(pe_row.unallocated_amount)
 		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
 		if available < flt(child.amount) and remaining > available:
-			last = frappe.db.get_value(
-				"Payment Entry Reference",
-				{"parent": pe_name, "reference_doctype": "Sales Invoice"},
-				"reference_name",
-				order_by="creation desc",
-			)
-			frappe.throw(
-				_(
-					"{0} has only {1} left now; it was used on {2} a moment ago. Pick another receipt or take the rest another way."
-				).format(
-					child.transid,
-					frappe.format_value(available, {"fieldtype": "Currency"}),
-					last or _("another sale"),
-				)
-			)
+			_refuse_drained_receipt(child, pe_name, available)
 		take = min(available, remaining) if remaining > 0 else 0.0
 		if take > 0:
 			invoice.append(

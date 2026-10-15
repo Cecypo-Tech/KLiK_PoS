@@ -193,6 +193,26 @@ class TestDrawDown(ReceiptCase):
 		with self.assertRaisesRegex(frappe.ValidationError, f"{receipt.transid}.*a moment ago"):
 			_allocate_receipts_before_submit(invoice)
 
+	def test_a_receipt_spent_after_the_pick_is_refused_not_dropped(self):
+		# CS-02273: two tills queued sales on one receipt; the second found it spent, dropped it
+		# as "not needed" and posted on credit, unpaid.
+		receipt = self._receipt(1000)
+		invoice = self._record(self._draft(rate=800), receipt)  # picked while 1000 was open
+		self._sell(1000, receipt)  # another till takes all of it
+		invoice.reload()
+		with self.assertRaisesRegex(frappe.ValidationError, f"{receipt.transid}.*a moment ago"):
+			_allocate_receipts_before_submit(invoice)
+
+	def test_a_receipt_the_sale_no_longer_needs_is_still_let_go(self):
+		receipt = self._receipt(1000)
+		invoice = self._record(self._draft(rate=800), receipt)
+		self._sell(1000, receipt)
+		invoice.reload()
+		invoice._klik_credit_reserved = invoice.rounded_total or invoice.grand_total  # a voucher pays it all
+		summary = _allocate_receipts_before_submit(invoice)
+		self.assertEqual(flt(summary["allocated_total"]), 0)
+		self.assertFalse(invoice.custom_mpesa_reconciled_payments)
+
 	def test_customer_change_after_pick_is_refused(self):
 		receipt = self._receipt(1000)
 		self._sell(300, receipt)
