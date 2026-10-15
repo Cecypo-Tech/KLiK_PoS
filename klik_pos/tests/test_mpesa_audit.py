@@ -1,5 +1,7 @@
 """The audit finds the money shapes that should never exist, and only those."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.utils import add_days, nowdate
 
@@ -95,6 +97,19 @@ class TestMpesaAudit(ReceiptCase):
 		row.update({"parent": other.name, "parenttype": "Sales Invoice", "parentfield": "custom_mpesa_reconciled_payments"})
 		row.db_insert()
 		self.assertIn(receipt.name, self._names("receipt_over_allocated_on_invoices"))
+
+	def test_each_check_is_capped_at_the_limit(self):
+		for _ in range(2):
+			receipt = self._receipt(1000)
+			self._sell(800, receipt)
+			pe = frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry")
+			frappe.db.set_value("Payment Entry", pe, "unallocated_amount", -50, update_modified=False)
+		self.assertEqual(len(run(since=SINCE, limit=1)["overdrawn_receipt"]), 1)
+
+	def test_a_site_without_the_receipt_column_is_told_so(self):
+		with patch.object(frappe.db, "has_column", return_value=False):
+			with self.assertRaisesRegex(frappe.ValidationError, "custom_mpesa_receipt_number"):
+				run()
 
 	def test_audit_writes_nothing(self):
 		before = frappe.db.sql("SELECT COUNT(*) FROM `tabVersion`")[0][0]

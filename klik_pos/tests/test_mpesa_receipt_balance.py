@@ -213,6 +213,15 @@ class TestDrawDown(ReceiptCase):
 		self.assertEqual(flt(summary["allocated_total"]), 0)
 		self.assertFalse(invoice.custom_mpesa_reconciled_payments)
 
+	def test_a_part_drained_receipt_reports_what_it_had_left_not_what_was_picked(self):
+		receipt = self._receipt(1000)
+		invoice = self._record(self._draft(rate=300), receipt)  # picked at 1000
+		self._sell(600, receipt)  # another till leaves 400
+		invoice.reload()
+		summary = _allocate_receipts_before_submit(invoice)
+		self.assertEqual(flt(summary["received_total"]), 400)
+		self.assertEqual(flt(summary["by_register"][receipt.name]["excess"]), 100)
+
 	def test_customer_change_after_pick_is_refused(self):
 		receipt = self._receipt(1000)
 		self._sell(300, receipt)

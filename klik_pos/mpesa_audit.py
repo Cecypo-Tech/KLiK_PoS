@@ -4,7 +4,7 @@ Tests cover the cases someone thought of; this looks at what actually happened.
 Run: bench --site <site> execute klik_pos.mpesa_audit.run --kwargs "{'since': '2026-10-01'}"
 Every check is a SELECT. Each key maps to the offending rows; empty means clean. Without
 `since` it looks at the last 30 days: older register history from earlier flows would
-otherwise bury what is new.
+otherwise bury what is new. Each check returns at most `limit` rows (default 200).
 """
 
 import frappe
@@ -15,9 +15,11 @@ from klik_pos.api.sales_invoice import SITE_SALE_TYPE_FIELD, _site_sale_types
 TOL = 0.01
 
 
-def run(since: str | None = None) -> dict:
+def run(since: str | None = None, limit: int = 200) -> dict:
+	if not frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number"):
+		frappe.throw("Payment Entry has no custom_mpesa_receipt_number column; run bench migrate with klik_pos installed.")
 	since = since or add_days(nowdate(), -30)
-	args = {"since": since, "tol": TOL}
+	args = {"since": since, "tol": TOL, "limit": int(limit)}
 	owing = """
 		SELECT si.name, si.customer, si.posting_date, si.grand_total, si.outstanding_amount
 		FROM `tabSales Invoice` si
@@ -29,13 +31,13 @@ def run(since: str | None = None) -> dict:
 		# Allparts: a Cash sale must be paid in full; Credit sales may owe. One with no type
 		# (older, desk or imported) can be either, so a person decides.
 		field = f"si.`{SITE_SALE_TYPE_FIELD}`"
-		out["short_paid_cash_sale"] = frappe.db.sql(owing + f" AND {field}='Cash'", args, as_dict=True)
+		out["short_paid_cash_sale"] = frappe.db.sql(owing + f" AND {field}='Cash' LIMIT %(limit)s", args, as_dict=True)
 		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(
-			owing + f" AND IFNULL({field}, '') NOT IN ('Cash', 'Credit')", args, as_dict=True
+			owing + f" AND IFNULL({field}, '') NOT IN ('Cash', 'Credit') LIMIT %(limit)s", args, as_dict=True
 		)
 	else:
 		out["short_paid_cash_sale"] = []
-		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(owing, args, as_dict=True)
+		out["owing_pos_sale_check_by_hand"] = frappe.db.sql(owing + " LIMIT %(limit)s", args, as_dict=True)
 
 	out["overdrawn_receipt"] = frappe.db.sql(
 		"""
@@ -46,6 +48,7 @@ def run(since: str | None = None) -> dict:
 		WHERE pe.docstatus=1 AND IFNULL(pe.custom_mpesa_receipt_number, '') != '' AND pe.posting_date >= %(since)s
 		GROUP BY pe.name
 		HAVING pe.unallocated_amount < -%(tol)s OR allocated > pe.paid_amount + %(tol)s
+		LIMIT %(limit)s
 		""",
 		args,
 		as_dict=True,
@@ -57,6 +60,7 @@ def run(since: str | None = None) -> dict:
 		FROM `tabPayment Entry`
 		WHERE docstatus=1 AND IFNULL(custom_mpesa_receipt_number, '') != '' AND posting_date >= %(since)s
 		GROUP BY custom_mpesa_receipt_number HAVING COUNT(*) > 1
+		LIMIT %(limit)s
 		""",
 		args,
 		as_dict=True,
@@ -73,6 +77,7 @@ def run(since: str | None = None) -> dict:
 		WHERE si.docstatus=1 AND si.is_return=0 AND si.posting_date >= %(since)s
 		GROUP BY m.mpesa_c2b_payment_register
 		HAVING allocated > reg.transamount + %(tol)s
+		LIMIT %(limit)s
 		""",
 		args,
 		as_dict=True,
@@ -84,11 +89,12 @@ def run(since: str | None = None) -> dict:
 		FROM `tabMpesa C2B Payment Register` reg
 		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
 		WHERE reg.docstatus=1 AND reg.posting_date >= %(since)s AND IFNULL(pe.docstatus, 0) != 1
+		LIMIT %(limit)s
 		""",
 		args,
 		as_dict=True,
 	)
 
 	for key, rows in out.items():
-		print(f"{key}: {len(rows)}")
+		print(f"{key}: {len(rows)}" + (" (capped)" if len(rows) >= args["limit"] else ""))
 	return out

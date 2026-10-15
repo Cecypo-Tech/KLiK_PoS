@@ -53,6 +53,12 @@ KNOWN = {
 		"receipts": [(5000, 0, 2500), (450, 0, 0), (100, 0, 50)], "sale": 6000, "cash": 3000, "voucher": 0,
 	},
 	"first drained, sale still short (refuse)": {"receipts": [(300, 0, 300), (250, 0, 0)], "sale": 800, "cash": 0, "voucher": 0},
+	# rounded_total (800) differs from grand_total (799.6): the receipt pays what is rounded.
+	"rounding: 799.6 paid by an 800 receipt": {"receipts": [(800, 0, 0)], "sale": 799.6, "cash": 0, "voucher": 0},
+	# 800 - 699.9 leaves 100.10000000000002 in floats; the 100.1 receipt covers it.
+	"sub-cent float leftover after a drain": {
+		"receipts": [(300, 0, 300), (100.1, 0, 0)], "sale": 800, "cash": 699.9, "voucher": 0,
+	},
 }
 
 
@@ -132,11 +138,15 @@ class TestAllocationRules(ReceiptCase):
 
 	def test_random_sales(self):
 		rng = random.Random(SEED)
-		reached = 0
+		outcomes = []
 		for i in range(CASES):
 			sc = scenario(rng)
 			outcome, *rest = self.run_case(f"case {i}", sc)
-			reached += outcome != "refused_at_pick"
+			outcomes.append(outcome)
 			with self.subTest(i=i):
 				self.check_rules(f"case {i}", sc, outcome, *rest)
+		reached = sum(o != "refused_at_pick" for o in outcomes)
 		self.assertGreaterEqual(reached, CASES // 2, "most cases never reached the allocator; fix the generator")
+		# A run that never submits, or never refuses, checked only half the rules.
+		self.assertIn("submitted", outcomes, f"seed={SEED}: no case submitted")
+		self.assertIn("refused", outcomes, f"seed={SEED}: no case was refused")

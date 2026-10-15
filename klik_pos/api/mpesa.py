@@ -771,7 +771,8 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 		if share <= 0:
 			invoice.remove(child)
 			children.remove(child)
-	if drained and planned > 0:
+	# Rounded: 800 - 699.9 - 100.1 leaves 2e-14 in floats, which is not money owed.
+	if drained and flt(planned, 2) > 0:
 		_refuse_drained_receipt(*drained)
 	if not children:
 		invoice.save(ignore_permissions=True)
@@ -798,6 +799,8 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 		available = flt(pe_row.unallocated_amount)
 		_refuse_if_used_meanwhile("Payment Entry", pe_name, "unallocated_amount", available, child.transid)
+		# Belt and braces: planning already flagged any receipt drained before this
+		# transaction, and _refuse_if_used_meanwhile refuses one drained since.
 		if drained is None and available < flt(child.amount) and remaining > available:
 			drained = (child, pe_name, available)
 		take = min(available, remaining) if remaining > 0 else 0.0
@@ -816,15 +819,18 @@ def _allocate_receipts_before_submit(invoice) -> dict:
 			)
 			remaining -= take
 		child.allocated_amount = take
-		summary["received_total"] += flt(child.amount)
+		# What the receipt still held, not what it held at the pick: another till may have
+		# drawn on it since and the sale still went through on the rest.
+		received = min(flt(child.amount), available)
+		summary["received_total"] += received
 		summary["allocated_total"] += flt(child.allocated_amount)
 		summary["by_register"][child.mpesa_c2b_payment_register] = {
 			"payment_entry": pe_name,
 			"allocated": flt(child.allocated_amount),
-			"excess": flt(child.amount) - flt(child.allocated_amount),
+			"excess": received - flt(child.allocated_amount),
 		}
 
-	if drained and remaining > 0:
+	if drained and flt(remaining, 2) > 0:
 		_refuse_drained_receipt(*drained)
 
 	present_modes = {p.mode_of_payment for p in invoice.get("payments") or []}
