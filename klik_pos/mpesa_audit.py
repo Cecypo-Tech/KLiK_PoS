@@ -148,5 +148,5 @@ def run(since: str | None = None, limit: int = 200) -> dict:
 	) if frappe.db.table_exists("Mpesa Express Request") else []
 
 	for key, rows in out.items():
-		print(f"{key}: {len(rows)}" + (" (capped)" if len(rows) >= args["limit"] else ""))
+		print(f"{key}: {len(rows)}" + (" (limit reached, may be more)" if len(rows) >= args["limit"] else ""))
 	return out
