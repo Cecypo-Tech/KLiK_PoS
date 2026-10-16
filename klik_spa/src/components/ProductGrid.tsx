@@ -649,8 +649,8 @@ export default function ProductGrid({
         {inStockItems.map((item, i) => (
           <Fragment key={item.id}>
           {gridHeaders.has(i) && (
-            // Above the cards' info buttons (z-70), so they slide under it.
-            <div className="col-span-full sticky top-0 z-[80] -mx-1 px-3 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+            // Above the cards (z-1/z-2, their info buttons inside them), so they slide under it.
+            <div className="col-span-full sticky top-0 z-20 -mx-1 px-3 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
               {gridHeaders.get(i)}
             </div>
           )}

@@ -102,3 +102,10 @@ def get_current_user_info():
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Error getting current user info")
 		return {"success": False, "error": str(e)}
+
+
+@frappe.whitelist()
+def csrf_token():
+	"""The session's CSRF token and user, for a till page rendered under an earlier session.
+	The till retries a save only when the user is still its own."""
+	return {"token": frappe.sessions.get_csrf_token(), "user": frappe.session.user}

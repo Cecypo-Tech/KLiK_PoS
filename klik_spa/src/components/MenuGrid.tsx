@@ -173,9 +173,11 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
 
   return (
     <div className="flex flex-col h-full">
-      {/* Above the item list's sticky group headers (z-80) and card buttons (z-70), so the
-          user menu that drops from here is never drawn under them. */}
-      <div className="sticky top-0 z-[90] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+      {/* Above the item list's sticky group headers (z-20), so the user menu that drops from
+          here is never drawn under them; below dialogs (z-50) and checkout (z-60), which cover
+          this whole page. Cards are their own stacking contexts (z-1/z-2), so their inner
+          layers never compete. */}
+      <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3 flex-1 max-w-md">
             <SearchBar

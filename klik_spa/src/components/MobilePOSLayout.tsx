@@ -125,8 +125,8 @@ export default function MobilePOSLayout({
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Mobile Header */}
-      <div className="sticky top-0 z-[90] bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+      {/* Mobile Header: over the sticky group headers (z-20), under dialogs (z-50) such as the barcode scanner. */}
+      <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center space-x-3">
             <img src="/assets/klik_pos/klik_spa/bev_logo.jpeg" alt="KLiK PoS" className="w-8 h-8 rounded-full object-cover" />

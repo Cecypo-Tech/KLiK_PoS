@@ -297,12 +297,15 @@ def _paid_push_refusal(order_id, data):
 	push = paid[0]
 	used = _receipt_used(push)
 	if used:
+		entry = frappe.db.get_value(
+			REGISTER, {"transid": used, "payment_entry": ["is", "set"]}, "payment_entry"
+		) or _klik_entry_for_transid(used)
 		return (
 			"mpesa_receipt_used",
 			_(
-				"M-Pesa receipt {0} of request {1} is already used by another sale. Finish this "
-				"sale from the desk."
-			).format(used, push),
+				"M-Pesa receipt {0} of request {1} is already booked in {2}. Finish this sale from "
+				"the desk."
+			).format(used, push, entry),
 		)
 	recorded = sum(
 		flt(row.get("amount"))

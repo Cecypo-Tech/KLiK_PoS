@@ -298,11 +298,36 @@ def get_mpesa_payments(
 			OR (pe.docstatus = 1 AND pe.unallocated_amount > 0)
 		)
 	"""
+	# The count must be what a search can list: leave out what _receipt_balance reads as not
+	# sale money (a linked entry that is no customer's receipt, an untouched row a desk entry
+	# names by number) and what _stk_used_transids hides. One EXISTS per column, so each uses
+	# its (column, docstatus) index.
+	not_sale_money = "NOT (x.payment_type = 'Receive' AND x.party_type = 'Customer' AND x.unallocated_amount > 0)"
+	booked_by_number = [
+		f"""EXISTS (SELECT 1 FROM `tabPayment Entry` x
+			WHERE x.{col} = reg.transid AND x.docstatus = 1 AND {not_sale_money})"""
+		for col in ("reference_no", "custom_mpesa_receipt_number")
+		if frappe.db.has_column("Payment Entry", col)
+	]
+	listable = f"""{has_money_left}
+		AND (IFNULL(reg.payment_entry, '') = '' OR (pe.payment_type = 'Receive'
+			AND pe.party_type = 'Customer' AND (IFNULL(reg.company, '') = '' OR pe.company = reg.company)))
+		AND NOT (IFNULL(reg.payment_entry, '') = '' AND IFNULL(reg.transid, '') != ''
+			AND ({" OR ".join(booked_by_number)}))
+		AND NOT EXISTS (
+			SELECT 1 FROM `tabMpesa Express Request` req
+			WHERE req.status = 'Completed' AND req.transaction_id = reg.transid AND (
+				EXISTS (SELECT 1 FROM `tabSales Invoice Payment` sip
+					INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+					WHERE sip.custom_reference_text = req.name AND si.docstatus = 1)
+				OR (req.reference_doctype = 'Sales Order' AND EXISTS (SELECT 1 FROM `tabSales Order` so
+					WHERE so.name = req.reference_name AND so.docstatus = 0 AND so.custom_klik_mpesa_order = 1))))
+	"""
 	params = {"codes": tuple(shortcodes)}
 	total_count = frappe.db.sql(
 		f"""SELECT COUNT(*) FROM `tabMpesa C2B Payment Register` reg
 		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
-		WHERE {has_money_left}""",
+		WHERE {listable}""",
 		params,
 	)[0][0]
 

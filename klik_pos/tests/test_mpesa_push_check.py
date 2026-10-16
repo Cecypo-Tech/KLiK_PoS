@@ -223,6 +223,7 @@ class TestThePushReceipt(PushCase):
 				self.assertFalse(result["success"])
 				self.assertEqual(result.get("code"), "mpesa_receipt_used", result)
 				self.assertIn(transid, result["error"])
+				self.assertIn(f"already booked in {used}", result["error"])
 
 	def test_the_push_s_own_consumed_receipt_does_not_stop_its_sale(self):
 		"""frappe_mpsa_payments submits a paid push's register row, with no Payment Entry, so it
