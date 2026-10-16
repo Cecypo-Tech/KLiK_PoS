@@ -3563,7 +3563,7 @@ def _update_existing_draft_invoice(
 		_create_batch_and_serial_bundle(items, invoice_doc)
 
 	invoice_doc.set_taxes()
-	invoice_doc.set_missing_values()
+	_set_missing_values_keeping_warehouse(invoice_doc)
 	invoice_doc.calculate_taxes_and_totals()
 
 	# Payments must be applied after the first totals pass, then totals are recalculated
@@ -4095,7 +4095,7 @@ def _apply_pos_tax_treatment(
 	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
 	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
 	doc.set_taxes()
-	doc.set_missing_values()
+	_set_missing_values_keeping_warehouse(doc)
 	# On a POS invoice ERPNext's set_pos_fields copies the till's own template over this one -
 	# blank on a till that names none - and leaves the rows built from it behind.
 	if template and doc.get("taxes_and_charges") != template:
@@ -4386,6 +4386,19 @@ def _apply_pos_shipping_rule(doc, shipping_rule):
 	doc.shipping_rule = shipping_rule
 	rule.apply(doc)
 	doc.calculate_taxes_and_totals()
+
+
+def _set_missing_values_keeping_warehouse(doc):
+	"""set_missing_values, leaving each line on the warehouse klik gave it.
+
+	On a POS invoice ERPNext's set_pos_fields reloads the POS Profile and writes its warehouse
+	over every line - the till's own, though the cashier picked another to sell from.
+	"""
+	warehouses = [row.warehouse for row in doc.items]
+	doc.set_missing_values()
+	for row, warehouse in zip(doc.items, warehouses):
+		if warehouse:
+			row.warehouse = warehouse
 
 
 def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None, restore_price_list_rate=True):
@@ -6145,7 +6158,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				_create_batch_and_serial_bundle(items, invoice_doc)
 
 			invoice_doc.set_taxes()
-			invoice_doc.set_missing_values()
+			_set_missing_values_keeping_warehouse(invoice_doc)
 			invoice_doc.calculate_taxes_and_totals()
 
 			# Payments must be applied after the first totals pass, then totals are recalculated

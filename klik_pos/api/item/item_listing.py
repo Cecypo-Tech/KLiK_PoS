@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate
 
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import checked_warehouse, get_current_pos_profile
 
 from ..sql_builder import (
     apply_sql_permissions,
@@ -79,7 +79,7 @@ def get_items(
     effective_hide_unavailable = bool(hide_unavailable) and not stock_unavailable
 
     if requested_warehouse:
-        warehouse = requested_warehouse
+        warehouse = checked_warehouse(pos_doc, requested_warehouse) or warehouse
 
     price_list = requested_price_list or _get_priority_price_list(customer, pos_doc, pos_price_list)
 
