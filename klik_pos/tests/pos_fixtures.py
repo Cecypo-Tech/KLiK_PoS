@@ -78,3 +78,19 @@ def default_sales_tax_template(company):
 	return frappe.db.get_value(
 		"Sales Taxes and Charges Template", {"company": company, "is_default": 1}, "name"
 	)
+
+
+def company_with_warehouses(count=2):
+	"""A company with at least `count` leaf warehouses, the same one every run.
+
+	`frappe.db.get_value("Company", {}, "name")` is whichever company the table returns first:
+	on this bench a test-created company with no warehouse at all, so every fixture built on
+	its warehouse (a Bin, a till) failed with "warehouse is mandatory".
+	"""
+	rows = frappe.db.sql(
+		"""SELECT company FROM `tabWarehouse`
+		WHERE is_group = 0 AND disabled = 0 AND IFNULL(company, '') != ''
+		GROUP BY company HAVING COUNT(*) >= %s ORDER BY company LIMIT 1""",
+		count,
+	)
+	return rows[0][0] if rows else None

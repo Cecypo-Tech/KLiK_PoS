@@ -60,6 +60,8 @@ def _resolve_pos_profile_name():
 
 	# Cache identity (name) only
 	_cached_pos_profiles[cache_key] = pos_profile_name
+	# A rolled-back shift's name is handed out again; its till must not answer for the next one.
+	frappe.db.after_rollback.add(lambda: _cached_pos_profiles.pop(cache_key, None))
 	return pos_profile_name
 
 

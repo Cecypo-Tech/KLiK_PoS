@@ -28,6 +28,14 @@ class RefundingTillCase(CashOnlyReturnCase):
 			frappe.db.set_value("POS Profile", till, "company", COMPANY)
 		self.shift = _shift(self.refunded_at, "Administrator")
 
+	def _draft(self, *args, **kwargs):
+		invoice = super()._draft(*args, **kwargs)
+		# Rung on the selling till from the start: left to ERPNext, a POS sale takes any till of
+		# the company, in no set order - the refunding one too, whose salesperson PIN then
+		# refused the sale itself.
+		invoice.pos_profile = self.sold_at
+		return invoice
+
 	def _sale_on_other_till(self):
 		invoice = self._sale(300, cash=300)
 		frappe.db.set_value("Sales Invoice", invoice.name, "pos_profile", self.sold_at, update_modified=False)

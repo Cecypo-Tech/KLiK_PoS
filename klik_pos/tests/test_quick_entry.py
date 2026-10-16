@@ -13,6 +13,7 @@ from erpnext.stock.doctype.item.test_item import make_item
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.item.quick_entry import MAX_LINES, parse_line, resolve_lines
+from klik_pos.tests.pos_fixtures import company_with_warehouses
 
 GROUP = "_Test KLiK Quick Entry"
 OTHER_GROUP = "_Test KLiK Quick Entry Other"
@@ -71,7 +72,7 @@ class TestQuickEntryMatching(FrappeTestCase):
 		):
 			if not frappe.db.exists("Item", code):
 				make_item(code, {"item_name": name, "item_group": group, "is_stock_item": 0, **extra})
-		cls.company = frappe.db.get_value("Company", {}, "name")
+		cls.company = company_with_warehouses()
 		cls.till = frappe._dict(
 			name="_Test Quick Entry Till",
 			company=cls.company,
