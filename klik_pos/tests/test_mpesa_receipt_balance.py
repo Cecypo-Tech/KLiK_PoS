@@ -112,6 +112,17 @@ class TestSearch(ReceiptCase):
 		self._sell(300, receipt)
 		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before + 1)
 
+	def test_count_leaves_out_a_receipt_a_desk_entry_already_spent(self):
+		"""Allparts' desk entries name the receipt only in reference_no and leave its row a draft."""
+		before = get_mpesa_payments(company=COMPANY)["count"]
+		receipt = self._receipt(300)
+		self._sell(300, receipt)
+		pe = frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry")
+		frappe.db.set_value("Payment Entry", pe, "custom_mpesa_receipt_number", None)
+		frappe.db.set_value("Mpesa C2B Payment Register", receipt.name, {"payment_entry": None, "docstatus": 0})
+		self.assertNotIn(receipt.name, self._search(receipt))
+		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before)
+
 
 class TestPick(ReceiptCase):
 	def test_an_open_receipt_can_be_picked_again(self):
@@ -384,6 +395,14 @@ class TestNoReceiptNoMpesa(NoReceiptCase):
 		paid.save()
 		paid.submit()
 		self.assertNotIn(receipt.name, self._search(receipt))
+
+	def test_count_leaves_out_a_receipt_already_paid_by_stk(self):
+		before = get_mpesa_payments(company=COMPANY)["count"]
+		receipt = self._receipt(100)
+		paid = self._typed(reference=self._stk(transaction_id=receipt.transid))
+		paid.save()
+		paid.submit()
+		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before)
 
 
 class TestRetry(ReceiptCase):

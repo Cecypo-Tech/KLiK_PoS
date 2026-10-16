@@ -298,11 +298,32 @@ def get_mpesa_payments(
 			OR (pe.docstatus = 1 AND pe.unallocated_amount > 0)
 		)
 	"""
+	# The count must be what a search can list: leave out what _receipt_balance reads as used
+	# (an untouched row a desk entry names by number) and _stk_used_transids hides.
+	stamped = (
+		"OR x.custom_mpesa_receipt_number = reg.transid"
+		if frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number")
+		else ""
+	)
+	listable = f"""{has_money_left}
+		AND NOT (IFNULL(reg.payment_entry, '') = '' AND EXISTS (
+			SELECT 1 FROM `tabPayment Entry` x
+			WHERE x.docstatus = 1 AND (x.reference_no = reg.transid {stamped})
+				AND NOT (x.payment_type = 'Receive' AND x.party_type = 'Customer' AND x.unallocated_amount > 0)))
+		AND NOT EXISTS (
+			SELECT 1 FROM `tabMpesa Express Request` req
+			WHERE req.status = 'Completed' AND req.transaction_id = reg.transid AND (
+				EXISTS (SELECT 1 FROM `tabSales Invoice Payment` sip
+					INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+					WHERE sip.custom_reference_text = req.name AND si.docstatus = 1)
+				OR (req.reference_doctype = 'Sales Order' AND EXISTS (SELECT 1 FROM `tabSales Order` so
+					WHERE so.name = req.reference_name AND so.docstatus = 0 AND so.custom_klik_mpesa_order = 1))))
+	"""
 	params = {"codes": tuple(shortcodes)}
 	total_count = frappe.db.sql(
 		f"""SELECT COUNT(*) FROM `tabMpesa C2B Payment Register` reg
 		LEFT JOIN `tabPayment Entry` pe ON pe.name = reg.payment_entry
-		WHERE {has_money_left}""",
+		WHERE {listable}""",
 		params,
 	)[0][0]
 
