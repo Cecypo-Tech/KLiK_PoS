@@ -9,7 +9,7 @@ from klik_pos.api.sales_invoice import (
     get_reserved_qty_for_item_warehouse,
     get_reserved_stock_map,
 )
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import checked_warehouse, get_current_pos_profile
 
 from ..sql_builder import apply_sql_permissions
 
@@ -182,7 +182,7 @@ def get_item_stock(item_code):
 def get_items_stock_batch(item_codes, warehouse=None):
     # Like get_items: the till may ask for the warehouse it switched to.
     pos_doc = get_current_pos_profile()
-    warehouse = warehouse or pos_doc.warehouse
+    warehouse = checked_warehouse(pos_doc, warehouse) or pos_doc.warehouse
 
     try:
         item_codes_list = [

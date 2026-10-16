@@ -28,6 +28,16 @@ import { parsePhoneNumber } from "react-phone-number-input";
 import { customerRowDetails } from "../../utils/customerRow";
 import AddCustomerModal from "../customer/AddCustomerModal";
 import OverdueWarningModal from "../customer/OverdueWarningModal";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  // @ts-expect-error ignore
+} from "@/components/ui/alert-dialog";
 
 interface CustomerSearchSectionProps {
   selectedCustomer: Customer | null;
@@ -76,7 +86,6 @@ export const CustomerSearchSection = ({
   const setProductCustomer = useProductStore((s) => s.setSelectedCustomer);
   const selectedPriceList = useCartStore((state) => state.selectedPriceList);
   const setSelectedPriceList = useCartStore((state) => state.setSelectedPriceList);
-  const refreshCartPricing = useCartStore((state) => state.refreshCartPricing);
   const walkinDetails = useCartStore((state) => state.walkinDetails);
   const extraFields = useCartStore((state) => state.extraFields);
   const { fields: extraFieldDefs } = useExtraFields();
@@ -150,7 +159,15 @@ export const CustomerSearchSection = ({
     };
   }, [allowWarehouseChange]);
 
+  const cartCount = useCartStore((state) => state.cartItems.length);
+  const [warehouseBlocked, setWarehouseBlocked] = useState(false);
+
   const handleWarehouseChange = async (value: string) => {
+    // Every cart line was added under the picked warehouse; switching would sell them from another.
+    if (cartCount > 0) {
+      setWarehouseBlocked(true);
+      return;
+    }
     setWarehouse(value || null);
     await fetchProducts(true);
   };
@@ -304,8 +321,8 @@ export const CustomerSearchSection = ({
   };
 
   const handlePriceListChange = async (value: string) => {
+    // setSelectedPriceList re-prices the cart itself.
     await setSelectedPriceList(value || null);
-    await refreshCartPricing();
     await fetchProducts(true);
   };
 
@@ -758,6 +775,20 @@ export const CustomerSearchSection = ({
           prefilledData={prefilledData}
         />
       )}
+
+      <AlertDialog open={warehouseBlocked} onOpenChange={setWarehouseBlocked}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cart has items</AlertDialogTitle>
+            <AlertDialogDescription>
+              You can't change warehouse while the cart has items. Clear the cart first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {overdueData && (
         <OverdueWarningModal

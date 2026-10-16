@@ -9,6 +9,7 @@ import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { UOMSelectField } from "./UOMSelectField";
 import { SerialBatchBundleModal } from "./SerialBatchBundleSelector";
 import { useCartStore } from "../../stores/cartStore";
+import { usePOSProfileStore } from "../../stores/posProfileStore";
 import ProductDetailsModal from "../ProductDetailsModal";
 import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
@@ -183,7 +184,8 @@ export const CartItemRow = ({
   const [isLoadingFullData, setIsLoadingFullData] = useState(false);
 
   const hasSerialOrBatch = item.has_serial_no || item.has_batch_no;
-  const warehouse = posDetails?.warehouse || "";
+  const pickedWarehouse = usePOSProfileStore((s) => s.warehouse);
+  const warehouse = pickedWarehouse || posDetails?.warehouse || "";
   const restrictCostVisibility = posDetails?.restrict_cost_visibility_in_tooltip ?? true;
   const allowPriceListSwitching = !!posDetails?.allow_price_list_switching;
   const quickSwitchPrice = !!posDetails?.custom_quick_switch_price;
@@ -285,7 +287,7 @@ export const CartItemRow = ({
           const autoEntries = autoDataResult.message.map((row: any) => ({
             serial_no: row.serial_no || undefined,
             batch_no: row.batch_no || undefined,
-            warehouse: row.warehouse || posDetails.warehouse || "",
+            warehouse: row.warehouse || warehouse,
             qty: row.qty || 1,
             selected: false,
           }));
@@ -299,7 +301,7 @@ export const CartItemRow = ({
             selected: false,
             serial_no: item.has_serial_no ? "" : undefined,
             batch_no: item.has_batch_no ? "" : undefined,
-            warehouse: posDetails.warehouse || "",
+            warehouse,
           }]);
           if (shouldSaveToCart) {
             saveToCart([]);

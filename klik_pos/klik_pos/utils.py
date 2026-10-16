@@ -1,10 +1,38 @@
+from urllib.parse import unquote
+
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 # Performance optimization: Cache frequently accessed data per user and opening entry
 # Key: f"{user}|{opening_entry or 'none'}", Value: POS Profile name (identity only)
 _cached_pos_profiles = {}
 _cached_company_data = {}
+
+# The till's picked warehouse, sent with every request (klik_spa/src/utils/warehouseHeader.ts).
+WAREHOUSE_HEADER = "X-Klik-Warehouse"
+
+
+def checked_warehouse(profile, wanted):
+	"""`wanted` if this till may sell from it, None for the till's own; throws otherwise."""
+	wanted = (wanted or "").strip()
+	if not wanted or wanted == profile.get("warehouse"):
+		return None
+	if not cint(profile.get("allow_warehouse_change")):
+		frappe.throw(_("Till {0} does not allow switching warehouse.").format(profile.get("name")))
+	from klik_pos.api.pos_profile import leaf_warehouses_for
+
+	if wanted not in leaf_warehouses_for(profile.get("company"), frappe.session.user):
+		frappe.throw(_("You cannot sell from warehouse {0} at this till.").format(wanted))
+	return wanted
+
+
+def requested_warehouse(profile):
+	"""The warehouse the till picked for this request, checked; None for the till's own."""
+	request = getattr(frappe.local, "request", None)
+	headers = getattr(request, "headers", None)
+	# URL-encoded by the till: a header value is Latin-1 only.
+	return checked_warehouse(profile, unquote(headers.get(WAREHOUSE_HEADER) or "") if headers else None)
 
 
 def _resolve_pos_profile_name():
@@ -44,6 +72,7 @@ def get_current_pos_profile():
 
 	# Mania: Always fetch a fresh doc to ensure latest fields -> Issue reported 04/11/2025
 	pos_profile_doc = frappe.get_doc("POS Profile", pos_profile_name)
+	pos_profile_doc.warehouse = requested_warehouse(pos_profile_doc) or pos_profile_doc.warehouse
 	return pos_profile_doc
 
 
@@ -56,8 +85,14 @@ def get_current_pos_profile_lite(fields):
 	from the DB, so field freshness matches get_current_pos_profile.
 	"""
 	pos_profile_name = _resolve_pos_profile_name()
-	values = frappe.db.get_value("POS Profile", pos_profile_name, fields, as_dict=True)
-	return values or frappe._dict()
+	extra = ["name", "warehouse", "company", "allow_warehouse_change"] if "warehouse" in fields else []
+	values = frappe.db.get_value(
+		"POS Profile", pos_profile_name, list(dict.fromkeys([*fields, *extra])), as_dict=True
+	)
+	values = values or frappe._dict()
+	if "warehouse" in fields and values:
+		values.warehouse = requested_warehouse(values) or values.warehouse
+	return values
 
 
 def clear_pos_profile_cache(user=None):

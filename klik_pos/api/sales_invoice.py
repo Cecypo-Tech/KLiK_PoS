@@ -14,7 +14,7 @@ from frappe.utils import cint, flt, fmt_money, getdate, nowdate, strip_html_tags
 
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_current_pos_profile, requested_warehouse
 from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority
@@ -1500,7 +1500,10 @@ def _tills_sharing_warehouse(pos_doc):
 	a till on another warehouse - another branch of the same company - does not.
 	"""
 	name = getattr(pos_doc, "name", None)
-	warehouse = getattr(pos_doc, "warehouse", None)
+	# The till's own warehouse, not one picked for this request: the shop does not move.
+	warehouse = (frappe.db.get_value("POS Profile", name, "warehouse") if name else None) or getattr(
+		pos_doc, "warehouse", None
+	)
 	company = getattr(pos_doc, "company", None)
 	if not warehouse or not company:
 		return [name] if name else []
@@ -3560,7 +3563,7 @@ def _update_existing_draft_invoice(
 		_create_batch_and_serial_bundle(items, invoice_doc)
 
 	invoice_doc.set_taxes()
-	invoice_doc.set_missing_values()
+	_set_missing_values_keeping_warehouse(invoice_doc)
 	invoice_doc.calculate_taxes_and_totals()
 
 	# Payments must be applied after the first totals pass, then totals are recalculated
@@ -3711,6 +3714,7 @@ def _get_active_pos_profile():
 	try:
 		if selected_pos_profile_name:
 			pos_profile_doc = frappe.get_doc("POS Profile", selected_pos_profile_name)
+			pos_profile_doc.warehouse = requested_warehouse(pos_profile_doc) or pos_profile_doc.warehouse
 			return pos_profile_doc
 		else:
 			fallback_profile = get_current_pos_profile()
@@ -4091,7 +4095,7 @@ def _apply_pos_tax_treatment(
 	_populate_tax_details(doc, force_inclusive_tax=force_inclusive_tax)
 	_populate_per_item_taxes(doc, pos_profile, force_inclusive_tax=force_inclusive_tax)
 	doc.set_taxes()
-	doc.set_missing_values()
+	_set_missing_values_keeping_warehouse(doc)
 	# On a POS invoice ERPNext's set_pos_fields copies the till's own template over this one -
 	# blank on a till that names none - and leaves the rows built from it behind.
 	if template and doc.get("taxes_and_charges") != template:
@@ -4382,6 +4386,19 @@ def _apply_pos_shipping_rule(doc, shipping_rule):
 	doc.shipping_rule = shipping_rule
 	rule.apply(doc)
 	doc.calculate_taxes_and_totals()
+
+
+def _set_missing_values_keeping_warehouse(doc):
+	"""set_missing_values, leaving each line on the warehouse klik gave it.
+
+	On a POS invoice ERPNext's set_pos_fields reloads the POS Profile and writes its warehouse
+	over every line - the till's own, though the cashier picked another to sell from.
+	"""
+	warehouses = [row.warehouse for row in doc.items]
+	doc.set_missing_values()
+	for row, warehouse in zip(doc.items, warehouses):
+		if warehouse:
+			row.warehouse = warehouse
 
 
 def _reassert_pos_line_prices(doc, pos_line_prices, skip_item_code=None, restore_price_list_rate=True):
@@ -6141,7 +6158,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				_create_batch_and_serial_bundle(items, invoice_doc)
 
 			invoice_doc.set_taxes()
-			invoice_doc.set_missing_values()
+			_set_missing_values_keeping_warehouse(invoice_doc)
 			invoice_doc.calculate_taxes_and_totals()
 
 			# Payments must be applied after the first totals pass, then totals are recalculated
