@@ -298,18 +298,22 @@ def get_mpesa_payments(
 			OR (pe.docstatus = 1 AND pe.unallocated_amount > 0)
 		)
 	"""
-	# The count must be what a search can list: leave out what _receipt_balance reads as used
-	# (an untouched row a desk entry names by number) and _stk_used_transids hides.
-	stamped = (
-		"OR x.custom_mpesa_receipt_number = reg.transid"
-		if frappe.db.has_column("Payment Entry", "custom_mpesa_receipt_number")
-		else ""
-	)
+	# The count must be what a search can list: leave out what _receipt_balance reads as not
+	# sale money (a linked entry that is no customer's receipt, an untouched row a desk entry
+	# names by number) and what _stk_used_transids hides. One EXISTS per column, so each uses
+	# its (column, docstatus) index.
+	not_sale_money = "NOT (x.payment_type = 'Receive' AND x.party_type = 'Customer' AND x.unallocated_amount > 0)"
+	booked_by_number = [
+		f"""EXISTS (SELECT 1 FROM `tabPayment Entry` x
+			WHERE x.{col} = reg.transid AND x.docstatus = 1 AND {not_sale_money})"""
+		for col in ("reference_no", "custom_mpesa_receipt_number")
+		if frappe.db.has_column("Payment Entry", col)
+	]
 	listable = f"""{has_money_left}
-		AND NOT (IFNULL(reg.payment_entry, '') = '' AND EXISTS (
-			SELECT 1 FROM `tabPayment Entry` x
-			WHERE x.docstatus = 1 AND (x.reference_no = reg.transid {stamped})
-				AND NOT (x.payment_type = 'Receive' AND x.party_type = 'Customer' AND x.unallocated_amount > 0)))
+		AND (IFNULL(reg.payment_entry, '') = '' OR (pe.payment_type = 'Receive'
+			AND pe.party_type = 'Customer' AND (IFNULL(reg.company, '') = '' OR pe.company = reg.company)))
+		AND NOT (IFNULL(reg.payment_entry, '') = '' AND IFNULL(reg.transid, '') != ''
+			AND ({" OR ".join(booked_by_number)}))
 		AND NOT EXISTS (
 			SELECT 1 FROM `tabMpesa Express Request` req
 			WHERE req.status = 'Completed' AND req.transaction_id = reg.transid AND (

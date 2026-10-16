@@ -112,6 +112,15 @@ class TestSearch(ReceiptCase):
 		self._sell(300, receipt)
 		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before + 1)
 
+	def test_count_leaves_out_a_receipt_whose_linked_entry_is_not_sale_money(self):
+		before = get_mpesa_payments(company=COMPANY)["count"]
+		receipt = self._receipt(1000)
+		self._sell(300, receipt)
+		pe = frappe.db.get_value("Mpesa C2B Payment Register", receipt.name, "payment_entry")
+		frappe.db.set_value("Payment Entry", pe, "payment_type", "Pay")
+		self.assertNotIn(receipt.name, self._search(receipt))
+		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before)
+
 	def test_count_leaves_out_a_receipt_a_desk_entry_already_spent(self):
 		"""Allparts' desk entries name the receipt only in reference_no and leave its row a draft."""
 		before = get_mpesa_payments(company=COMPANY)["count"]

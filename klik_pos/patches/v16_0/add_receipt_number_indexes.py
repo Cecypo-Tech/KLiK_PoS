@@ -16,3 +16,15 @@ def execute():
 			["custom_mpesa_receipt_number", "docstatus"],
 			index_name="klik_pos_pe_mpesa_receipt_number",
 		)
+	# The till's receipt count asks, per pending receipt, whether a paid push already used it.
+	# Both columns come from the M-Pesa apps, so may not be there; the text one indexes a prefix.
+	if frappe.db.has_column("Mpesa Express Request", "transaction_id"):
+		frappe.db.add_index(
+			"Mpesa Express Request", ["transaction_id", "status"], index_name="klik_pos_mexp_transaction_id"
+		)
+	if frappe.db.has_column("Sales Invoice Payment", "custom_reference_text"):
+		frappe.db.add_index(
+			"Sales Invoice Payment",
+			["custom_reference_text(140)", "parent"],
+			index_name="klik_pos_sip_reference_text",
+		)
