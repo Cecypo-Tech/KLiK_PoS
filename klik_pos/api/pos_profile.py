@@ -351,23 +351,22 @@ def get_warehouses():
     except Exception:
         company = None
 
+    return {"warehouses": leaf_warehouses_for(company, frappe.session.user)}
+
+
+def leaf_warehouses_for(company, user):
+    """Leaf, enabled warehouses of `company` that `user`'s Warehouse permissions allow."""
     filters = {"is_group": 0, "disabled": 0}
     if company:
         filters["company"] = company
 
-    permitted = _get_permitted_warehouses(frappe.session.user)
+    permitted = _get_permitted_warehouses(user)
     if permitted is not None:
         if not permitted:
-            return {"warehouses": []}
+            return []
         filters["name"] = ["in", permitted]
 
-    warehouses = frappe.get_all(
-        "Warehouse",
-        filters=filters,
-        fields=["name"],
-        order_by="name asc",
-    )
-    return {"warehouses": [w.name for w in warehouses]}
+    return frappe.get_all("Warehouse", filters=filters, pluck="name", order_by="name asc")
 
 
 def _get_permitted_warehouses(user):

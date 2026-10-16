@@ -14,7 +14,7 @@ from frappe.utils import cint, flt, fmt_money, getdate, nowdate, strip_html_tags
 
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_current_pos_profile, requested_warehouse
 from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority
@@ -1500,7 +1500,10 @@ def _tills_sharing_warehouse(pos_doc):
 	a till on another warehouse - another branch of the same company - does not.
 	"""
 	name = getattr(pos_doc, "name", None)
-	warehouse = getattr(pos_doc, "warehouse", None)
+	# The till's own warehouse, not one picked for this request: the shop does not move.
+	warehouse = (frappe.db.get_value("POS Profile", name, "warehouse") if name else None) or getattr(
+		pos_doc, "warehouse", None
+	)
 	company = getattr(pos_doc, "company", None)
 	if not warehouse or not company:
 		return [name] if name else []
@@ -3711,6 +3714,7 @@ def _get_active_pos_profile():
 	try:
 		if selected_pos_profile_name:
 			pos_profile_doc = frappe.get_doc("POS Profile", selected_pos_profile_name)
+			pos_profile_doc.warehouse = requested_warehouse(pos_profile_doc) or pos_profile_doc.warehouse
 			return pos_profile_doc
 		else:
 			fallback_profile = get_current_pos_profile()
