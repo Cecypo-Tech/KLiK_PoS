@@ -102,3 +102,9 @@ def get_current_user_info():
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Error getting current user info")
 		return {"success": False, "error": str(e)}
+
+
+@frappe.whitelist()
+def csrf_token():
+	"""The session's CSRF token, for a till page rendered under an earlier session."""
+	return frappe.sessions.get_csrf_token()
