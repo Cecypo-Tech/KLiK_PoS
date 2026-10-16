@@ -8,6 +8,7 @@ class TestCsrfToken(FrappeTestCase):
 		session holds another, and every save fails "Invalid Request" until it asks again."""
 		from klik_pos.api.user import csrf_token
 
-		token = csrf_token()
-		self.assertTrue(token)
-		self.assertEqual(token, frappe.session.data.csrf_token)
+		out = csrf_token()
+		self.assertTrue(out["token"])
+		self.assertEqual(out["token"], frappe.session.data.csrf_token)
+		self.assertEqual(out["user"], frappe.session.user)

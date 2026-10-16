@@ -1,4 +1,5 @@
 import type React from "react"
+import { fetchSessionToken, type CsrfWindow } from "../utils/csrfRetry"
 import { useState, useEffect, createContext, useContext } from "react"
 import erpnextAPI from "../services/erpnext-api"
 import { usePOSProfileStore } from "../stores/posProfileStore"
@@ -123,7 +124,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(userData)
         localStorage.setItem("erpnext_token", "authenticated")
         localStorage.setItem("user_data", JSON.stringify(userData))
-        
+
+        // The page was rendered for the previous session: take this one's user and token,
+        // so the first save after logging in is not refused as "Invalid Request".
+        const page = window as unknown as CsrfWindow
+        page.klik_user = userData.name
+        const session = await fetchSessionToken(fetch)
+        if (session) page.csrf_token = session.token
+
         setAuthenticated(true)
         await refreshAll()
 

@@ -106,5 +106,6 @@ def get_current_user_info():
 
 @frappe.whitelist()
 def csrf_token():
-	"""The session's CSRF token, for a till page rendered under an earlier session."""
-	return frappe.sessions.get_csrf_token()
+	"""The session's CSRF token and user, for a till page rendered under an earlier session.
+	The till retries a save only when the user is still its own."""
+	return {"token": frappe.sessions.get_csrf_token(), "user": frappe.session.user}
