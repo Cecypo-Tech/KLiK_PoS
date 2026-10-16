@@ -202,7 +202,9 @@ class TestDraftsFinishedElsewhere(Tills):
             draft = create_draft_invoice(payload)
         self.assertTrue(draft["success"], draft.get("message"))
         with patch.object(sales_invoice, "get_current_pos_opening_entry", return_value=finished.name):
-            create_draft_invoice({**payload, "draft_invoice_id": draft["invoice_name"]})
+            again = create_draft_invoice({**payload, "draft_invoice_id": draft["invoice_name"]})
+        # Unchecked, a failed re-save (a deadlock in a full run) read as the wrong shift.
+        self.assertTrue(again["success"], again.get("message"))
         self.assertEqual(
             frappe.db.get_value("Sales Invoice", draft["invoice_name"], "custom_pos_opening_entry"), finished.name
         )

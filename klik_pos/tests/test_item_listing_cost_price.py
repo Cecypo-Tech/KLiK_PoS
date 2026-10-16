@@ -12,6 +12,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.item import item_listing
+from klik_pos.tests.pos_fixtures import company_with_warehouses
 
 ITEM_GROUP = "TEST-COST-PRICE-GROUP"
 ITEM_CODES = [f"TEST-COST-PRICE-ITEM-{i:03d}" for i in range(1, 3)]
@@ -25,7 +26,7 @@ class ItemListingCostPriceTestCase(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.company = frappe.db.get_value("Company", {}, "name")
+		cls.company = company_with_warehouses()
 		cls.warehouse = frappe.db.get_value("Warehouse", {"is_group": 0, "company": cls.company}, "name")
 		cls.other_warehouse = frappe.db.get_value(
 			"Warehouse",
