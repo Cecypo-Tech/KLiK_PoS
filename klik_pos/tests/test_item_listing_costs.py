@@ -65,7 +65,11 @@ class TestSmallerPageCosts(ListingQueryCase):
 		self.assertEqual(stock, {fx.EMPTY: 0, fx.STOCKED: 5})
 
 	def test_the_stock_refresh_reads_the_warehouse_the_till_asks_for(self):
-		profile = frappe._dict(warehouse=fx.WAREHOUSE, hide_unavailable_items=0)
+		# A till that may switch: another warehouse is checked (test_picked_warehouse).
+		profile = frappe._dict(
+			name="_Test Till", company=fx.COMPANY, warehouse=fx.WAREHOUSE,
+			hide_unavailable_items=0, allow_warehouse_change=1,
+		)
 		with patch.object(item_stock, "get_current_pos_profile", return_value=profile):
 			stock = item_stock.get_items_stock_batch(fx.ELSEWHERE, warehouse=fx.OTHER_WAREHOUSE)
 			home = item_stock.get_items_stock_batch(fx.ELSEWHERE)
