@@ -217,7 +217,7 @@ export default function ProductGrid({
   }, [addItemToCart, ensureInitialized, requiresSalespersonPin, scannerOnly, stockUnavailable, lossOfSaleEnabled]);
 
   const openPricePopup = useCallback(async (rowIndex: number, item: MenuItem) => {
-    const warehouse = posDetails?.warehouse || "";
+    const warehouse = usePOSProfileStore.getState().warehouse || posDetails?.warehouse || "";
     try {
       const response = await fetch(
         `/api/method/klik_pos.api.item.item_details.get_full_pricing_and_batch_details?item_code=${encodeURIComponent(item.item_code || item.id)}&warehouse=${encodeURIComponent(warehouse)}`

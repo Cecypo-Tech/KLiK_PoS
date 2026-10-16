@@ -80,8 +80,8 @@ export default function ProductTooltip({
 
   const warehouse = useMemo(() => {
     if (loading) return null;
-    return posDetails?.warehouse;
-  }, [posDetails, loading]);
+    return selectedWarehouse || posDetails?.warehouse;
+  }, [posDetails, loading, selectedWarehouse]);
 
   const restrictCostVisibility = useMemo(() => {
     if (loading) return true;

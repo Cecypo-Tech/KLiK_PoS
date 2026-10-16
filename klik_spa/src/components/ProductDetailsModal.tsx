@@ -223,12 +223,12 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
   const [data, setData] = useState<ItemFullData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<"pricing" | "stock" | "details" | "bundle" | "lens">("pricing")
-  const { posDetails, loading } = usePOSProfileStore()
+  const { posDetails, loading, warehouse: pickedWarehouse } = usePOSProfileStore()
 
   const warehouse = useMemo(() => {
     if (loading) return null
-    return posDetails?.warehouse
-  }, [posDetails, loading])
+    return pickedWarehouse || posDetails?.warehouse
+  }, [posDetails, loading, pickedWarehouse])
 
   const restrictCostVisibility = useMemo(() => {
     if (loading) return true
