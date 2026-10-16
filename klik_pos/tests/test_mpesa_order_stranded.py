@@ -89,9 +89,6 @@ class TestReceiptLookupsAreIndexed(FrappeTestCase):
 	def test_both_receipt_number_columns_get_an_index(self):
 		# Every receipt the till lists is looked up by number; unindexed, each one scans
 		# every Payment Entry on the site.
-		from klik_pos.patches.v16_0 import add_receipt_number_indexes
-
-		add_receipt_number_indexes.execute()
 		indexed = {
 			row[0]
 			for row in frappe.db.sql(
@@ -101,3 +98,10 @@ class TestReceiptLookupsAreIndexed(FrappeTestCase):
 		}
 		self.assertIn("reference_no", indexed)
 		self.assertIn("custom_mpesa_receipt_number", indexed)
+
+	def test_a_fresh_install_and_every_migrate_add_them(self):
+		# A fresh install marks every patch done without running it, and the stamped column
+		# comes from frappe_mpsa_payments, possibly installed after klik.
+		hook = "klik_pos.patches.v16_0.add_receipt_number_indexes.execute"
+		self.assertIn(hook, frappe.get_hooks("after_install", app_name="klik_pos"))
+		self.assertIn(hook, frappe.get_hooks("after_migrate", app_name="klik_pos"))
