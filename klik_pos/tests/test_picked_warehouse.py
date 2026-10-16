@@ -6,6 +6,7 @@ stock and sold A's.
 """
 
 from contextlib import contextmanager
+from urllib.parse import quote
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -26,7 +27,8 @@ from klik_pos.tests.pos_fixtures import pos_profile_settings
 def picked(warehouse):
 	"""As if the till sent `warehouse` in the header."""
 	before = getattr(frappe.local, "request", None)
-	headers = {WAREHOUSE_HEADER: warehouse} if warehouse else {}
+	# As the till sends it: URL-encoded, a header value being Latin-1 only.
+	headers = {WAREHOUSE_HEADER: quote(warehouse)} if warehouse else {}
 	frappe.local.request = Request(EnvironBuilder(path="/api/method/test", headers=headers).get_environ())
 	try:
 		yield
@@ -257,3 +259,36 @@ class TestSalesFollowThePickedWarehouse(FrappeTestCase):
 		with pos_profile_settings(self.till.name, allow_warehouse_change=0), picked(None):
 			with self.assertRaisesRegex(frappe.ValidationError, "does not allow"):
 				get_items_stock_batch(ITEM, warehouse=self.other)
+
+	def _payload(self):
+		return {
+			"customer": {"id": self.customer},
+			"items": self._items(),
+			"amountPaid": 1000,
+			"paymentMethods": [{"method": self.mode, "amount": 1000}],
+			"businessType": "B2C",
+		}
+
+	def test_a_draft_saved_then_submitted_with_the_cart_sells_from_the_picked_warehouse(self):
+		# Both rebuild the lines and call set_missing_values, which would put them back on
+		# the till's own warehouse.
+		from klik_pos.api.sales_invoice import create_draft_invoice, submit_draft_invoice
+
+		with picked(self.other):
+			draft = create_draft_invoice(self._payload())
+			self.assertTrue(draft["success"], draft.get("message"))
+			name = draft["invoice_name"]
+			self.assertEqual(
+				set(frappe.get_all("Sales Invoice Item", {"parent": name}, pluck="warehouse")), {self.other}
+			)
+			# Saved again from the cart: the existing draft is rebuilt.
+			again = create_draft_invoice({**self._payload(), "draft_invoice_id": name})
+			self.assertTrue(again["success"], again.get("message"))
+			self.assertEqual(
+				set(frappe.get_all("Sales Invoice Item", {"parent": name}, pluck="warehouse")), {self.other}
+			)
+			submitted = submit_draft_invoice(name, data=self._payload())
+		self.assertTrue(submitted["success"], submitted.get("message"))
+		frappe.db.commit()
+		ledger = frappe.get_all("Stock Ledger Entry", {"voucher_no": name, "is_cancelled": 0}, pluck="warehouse")
+		self.assertEqual(set(ledger), {self.other})

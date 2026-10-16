@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 import frappe
 from frappe import _
 from frappe.utils import cint
@@ -29,7 +31,8 @@ def requested_warehouse(profile):
 	"""The warehouse the till picked for this request, checked; None for the till's own."""
 	request = getattr(frappe.local, "request", None)
 	headers = getattr(request, "headers", None)
-	return checked_warehouse(profile, headers.get(WAREHOUSE_HEADER) if headers else None)
+	# URL-encoded by the till: a header value is Latin-1 only.
+	return checked_warehouse(profile, unquote(headers.get(WAREHOUSE_HEADER) or "") if headers else None)
 
 
 def _resolve_pos_profile_name():

@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { keepPick, readPick, warehouseAfterLoad } from "../utils/pickedWarehouse";
+
+/** The user the till page was rendered (or last logged in) for - see utils/csrfRetry. */
+const tillUser = () => (typeof window === "undefined" ? undefined : (window as { klik_user?: string }).klik_user);
 
 export interface POSCompanyDetails {
   name?: string;
@@ -166,6 +170,7 @@ export const usePOSProfileStore = create<POSDetailsState>()(
       },
 
       setWarehouse: (warehouse: string | null) => {
+        keepPick(get().posDetails, tillUser(), warehouse);
         set({ warehouse });
       },
 
@@ -260,7 +265,7 @@ export const usePOSProfileStore = create<POSDetailsState>()(
             currency: posDetails?.currency || "USD",
             businessType: posDetails?.business_type || "B2C",
             isZatcaEnabled: posDetails?.is_zatca_enabled || false,
-            warehouse: posDetails?.warehouse || null,
+            warehouse: warehouseAfterLoad(posDetails, tillUser(), readPick()),
             isLoading: false,
             error: null,
             lastFetched: Date.now(),
@@ -427,7 +432,7 @@ export const usePOSProfileStore = create<POSDetailsState>()(
             currency: updatedDetails?.currency || "USD",
             businessType: updatedDetails?.business_type || "B2C",
             isZatcaEnabled: updatedDetails?.is_zatca_enabled || false,
-            warehouse: updatedDetails?.warehouse || null,
+            warehouse: warehouseAfterLoad(updatedDetails, tillUser(), readPick()),
           };
         });
       },

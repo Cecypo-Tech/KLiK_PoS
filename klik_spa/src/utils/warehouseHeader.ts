@@ -13,7 +13,8 @@ export function withWarehouseHeader(base: Fetch, picked: () => string | null | u
     const warehouse = picked();
     if (!warehouse || !url.startsWith("/api/")) return base(input, init);
     const headers = new Headers(init?.headers);
-    headers.set(WAREHOUSE_HEADER, warehouse);
+    // Header values are Latin-1 only; the server unquotes it.
+    headers.set(WAREHOUSE_HEADER, encodeURIComponent(warehouse));
     return base(input, { ...init, headers });
   };
 }
