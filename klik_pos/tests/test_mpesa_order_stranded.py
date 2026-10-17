@@ -105,3 +105,26 @@ class TestReceiptLookupsAreIndexed(FrappeTestCase):
 		hook = "klik_pos.patches.v16_0.add_receipt_number_indexes.execute"
 		self.assertIn(hook, frappe.get_hooks("after_install", app_name="klik_pos"))
 		self.assertIn(hook, frappe.get_hooks("after_migrate", app_name="klik_pos"))
+
+	def test_a_site_without_the_mpesa_apps_still_installs(self):
+		# On a site without frappe_mpsa_payments the M-Pesa table is missing, and v16's
+		# has_column raises on a missing table instead of answering False.
+		from unittest.mock import patch
+
+		from klik_pos.patches.v16_0.add_receipt_number_indexes import execute
+
+		db, real_columns, real_exists = frappe.db, frappe.db.get_table_columns, frappe.db.table_exists
+		missing = "Mpesa Express Request"
+
+		def columns(doctype):
+			if doctype == missing:
+				raise db.TableMissingError("DocType", doctype)
+			return real_columns(doctype)
+
+		def exists(doctype, *args, **kwargs):
+			return doctype != missing and real_exists(doctype, *args, **kwargs)
+
+		with patch.object(db, "get_table_columns", side_effect=columns), patch.object(
+			db, "table_exists", side_effect=exists
+		):
+			execute()
