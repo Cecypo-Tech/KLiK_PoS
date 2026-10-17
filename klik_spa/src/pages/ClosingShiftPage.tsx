@@ -38,6 +38,7 @@ import SwitchProfileItem from "../components/SwitchProfileItem";
 import { clearAllCache } from "../utils/clearCache";
 import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
+import { HELP_CLOSING_SHIFT_URL } from "../utils/helpLinks";
 import ClosingCountRows from "../components/closing/ClosingCountRows";
 
 export default function ClosingShiftPage() {
@@ -457,7 +458,17 @@ export default function ClosingShiftPage() {
         <div className="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
           <div className="px-4 py-3">
             <div className="flex items-center justify-between">
+              <div className="flex items-center">
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">Closing Shift</h1>
+              <a
+                href={HELP_CLOSING_SHIFT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="How to close a shift"
+                title="How to close a shift"
+                className="ml-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >?</a>
+              </div>
               <div className="flex items-center gap-2">
               <SwitchProfileItem variant="button" />
               <button
@@ -849,7 +860,17 @@ export default function ClosingShiftPage() {
         {/* Header */}
         <div className="fixed top-0 left-20 right-0 z-50 bg-beveren-50 dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
           <div className="h-16 px-6 flex items-center justify-between">
+            <div className="flex items-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Closing Shift</h1>
+            <a
+                href={HELP_CLOSING_SHIFT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="How to close a shift"
+                title="How to close a shift"
+                className="ml-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >?</a>
+            </div>
             <div className="flex items-center gap-2">
             <SwitchProfileItem variant="button" />
             <button
