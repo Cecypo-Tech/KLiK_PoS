@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Returns and Vouchers</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :where(body, body *) { margin: 0; padding: 0; }
+    /* Layout: one wide flowchart in a local scroller, then two unequal rule cards. */
+    :root {
+      --paper: #f8fafc; --paper-2: #f1f5f9; --node: #ffffff; --ink: #0f172a; --muted: #475569;
+      --soft: #64748b; --rule: rgba(15,23,42,0.12); --accent: #30618f; --accent-tint: rgba(48,97,143,0.08);
+      --oval: rgba(15,23,42,0.03); --oval-line: rgba(15,23,42,0.30);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+      --paper: #0f172a; --paper-2: #1e293b; --node: #1e293b; --ink: #e2e8f0; --muted: #94a3b8;
+      --soft: #8391a7; --rule: rgba(226,232,240,0.12); --accent: #60a5fa; --accent-tint: rgba(96,165,250,0.10);
+      --oval: rgba(226,232,240,0.04); --oval-line: rgba(226,232,240,0.30); color-scheme: dark; } }
+    :root[data-theme="dark"] {
+      --paper: #0f172a; --paper-2: #1e293b; --node: #1e293b; --ink: #e2e8f0; --muted: #94a3b8;
+      --soft: #8391a7; --rule: rgba(226,232,240,0.12); --accent: #60a5fa; --accent-tint: rgba(96,165,250,0.10);
+      --oval: rgba(226,232,240,0.04); --oval-line: rgba(226,232,240,0.30); color-scheme: dark; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding-block: 3rem;
+      padding-left: max(16px, env(safe-area-inset-left, 0px));
+      padding-right: max(16px, env(safe-area-inset-right, 0px));
+    }
+
+    .frame { max-width: 1040px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 0.5rem;
+    }
+
+    .lede { color: var(--muted); max-width: 62ch; margin-bottom: 1.5rem; line-height: 1.5; }
+
+    svg { width: 100%; min-width: 1000px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+
+    svg .nm { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--ink); }
+    svg .sb { font-family: var(--font-mono); font-size: 9px; fill: var(--muted); }
+    svg .al { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--muted); }
+    svg .ey { font-family: var(--font-mono); font-size: 8px; font-weight: 500; letter-spacing: 0.18em; fill: var(--muted); }
+    svg .co { font-family: var(--font-sans); font-size: 13px; font-style: italic; fill: var(--muted); }
+    svg .lg { font-family: var(--font-sans); font-size: 9px; fill: var(--muted); }
+
+    .rules { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 1rem; margin-top: 2rem; }
+    @media (max-width: 760px) { .rules { grid-template-columns: 1fr; } }
+    .card { min-width: 0; background: var(--node); border: 1px solid var(--rule); border-radius: 6px; padding: 1.25rem; }
+    .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th { text-align: left; font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.12em;
+         text-transform: uppercase; color: var(--muted); padding: 0 0.5rem 0.5rem 0; }
+    td { padding: 0.5rem 0.5rem 0.5rem 0; border-top: 1px solid var(--rule); vertical-align: top; }
+    td.ok { color: var(--accent); font-weight: 600; }
+    ul { list-style: none; font-size: 0.875rem; line-height: 1.45; }
+    li { padding: 0.5rem 0; border-top: 1px solid var(--rule); }
+    li:first-child { border-top: 0; padding-top: 0; }
+    code { font-family: var(--font-mono); font-size: 0.8em; background: var(--paper-2); padding: 0 0.25em; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Klik POS · Cashier guide</p>
+    <h1>Returns, refunds and store-credit vouchers</h1>
+    <p class="lede">Only cash goes back across the counter. Money paid by M-Pesa, cheque, card or bank becomes a
+      voucher the customer spends on a later sale, and anything the voucher doesn't use stays on it.</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="returns-and-vouchers-title returns-and-vouchers-desc">
+        <title id="returns-and-vouchers-title">Returns, refunds and store-credit vouchers</title>
+        <desc id="returns-and-vouchers-desc">How a return is settled by payment method (cash back, store-credit voucher, or reduced balance) and how a voucher pays a later sale, with any unused balance staying on the voucher.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" style="fill:var(--muted)"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" style="fill:var(--accent)"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" style="fill:var(--paper)"/>
+
+        <!-- Stage labels and divider -->
+        <text x="40" y="32" class="ey">1 · AT THE RETURN</text>
+        <line x1="40" y1="332" x2="960" y2="332" stroke-width="0.8" style="stroke:var(--rule)"/>
+        <text x="40" y="364" class="ey">2 · ON A LATER SALE</text>
+
+        <!-- Arrows (drawn before nodes) -->
+        <!-- Start → decision -->
+        <line x1="236" y1="144" x2="298" y2="144" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Decision top → cash back -->
+        <path d="M400,96 L400,72 Q400,64 408,64 L618,64" fill="none" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Decision right → voucher -->
+        <line x1="500" y1="144" x2="618" y2="144" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Decision bottom → off balance -->
+        <line x1="400" y1="192" x2="400" y2="230" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Voucher → checkout -->
+        <line x1="730" y1="176" x2="730" y2="402" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Checkout → voucher pays -->
+        <line x1="730" y1="460" x2="730" y2="510" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Voucher pays → pay the rest -->
+        <line x1="620" y1="540" x2="502" y2="540" stroke-width="1.2" marker-end="url(#arrow)" style="stroke:var(--muted)"/>
+        <!-- Leftover balance back onto the voucher (focal) -->
+        <path d="M840,540 L892,540 Q900,540 900,532 L900,152 Q900,144 892,144 L842,144" fill="none" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow-accent)" style="stroke:var(--accent)"/>
+
+        <!-- Arrow labels -->
+        <rect x="494" y="46" width="40" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="514" y="55" class="al" text-anchor="middle">CASH</text>
+
+        <rect x="530" y="124" width="60" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="560" y="133" class="al" text-anchor="middle">NON-CASH</text>
+
+        <rect x="408" y="206" width="60" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="438" y="215" class="al" text-anchor="middle">ON CREDIT</text>
+
+        <rect x="656" y="284" width="66" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="689" y="293" class="al" text-anchor="middle">NEXT VISIT</text>
+
+        <rect x="738" y="480" width="44" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="760" y="489" class="al" text-anchor="middle">APPLY</text>
+
+        <rect x="524" y="520" width="72" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="560" y="529" class="al" text-anchor="middle">STILL OWING</text>
+
+        <rect x="908" y="240" width="80" height="12" rx="2" style="fill:var(--paper)"/>
+        <text x="948" y="249" class="al" text-anchor="middle" style="fill:var(--accent)">BALANCE LEFT</text>
+
+        <!-- 1. Start: customer returns items -->
+        <rect x="60" y="120" width="176" height="48" rx="20" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
+        <text x="148" y="141" class="nm" text-anchor="middle">Customer returns items</text>
+        <text x="148" y="156" class="sb" text-anchor="middle">Return Items on the sale</text>
+
+        <!-- 2. Decision: how was it paid -->
+        <polygon points="400,96 500,144 400,192 300,144" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
+        <text x="400" y="141" class="nm" text-anchor="middle">How was the</text>
+        <text x="400" y="155" class="nm" text-anchor="middle">sale paid?</text>
+
+        <!-- 3. End: cash back -->
+        <rect x="620" y="40" width="220" height="48" rx="20" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
+        <text x="730" y="61" class="nm" text-anchor="middle">Cash back from the drawer</text>
+        <text x="730" y="76" class="sb" text-anchor="middle">never more than the cash taken</text>
+
+        <!-- 4. Focal: credit note = voucher -->
+        <rect x="620" y="112" width="220" height="64" rx="6" style="fill:var(--paper)"/>
+        <rect x="620" y="112" width="220" height="64" rx="6" stroke-width="1.2" style="fill:var(--accent-tint);stroke:var(--accent)"/>
+        <text x="730" y="135" class="nm" text-anchor="middle">Store-credit voucher</text>
+        <text x="730" y="151" class="sb" text-anchor="middle">it is the credit note itself</text>
+        <text x="730" y="164" class="sb" text-anchor="middle">use: note no. + original sale no.</text>
+
+        <!-- 5. End: off what they owe -->
+        <rect x="300" y="232" width="200" height="48" rx="20" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
+        <text x="400" y="253" class="nm" text-anchor="middle">Taken off what they owe</text>
+        <text x="400" y="268" class="sb" text-anchor="middle">nothing is handed back</text>
+
+        <!-- Callout: mixed payments -->
+        <text x="60" y="224" class="co">Paid partly in cash? The cash part</text>
+        <text x="60" y="242" class="co">comes back in cash; the rest goes</text>
+        <text x="60" y="260" class="co">on a voucher.</text>
+
+        <!-- 6. Step: vouchers at checkout -->
+        <rect x="620" y="404" width="220" height="56" rx="6" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
+        <text x="730" y="428" class="nm" text-anchor="middle">Checkout → Vouchers</text>
+        <text x="730" y="444" class="sb" text-anchor="middle">enter both numbers · Check voucher</text>
+
+        <!-- 7. Step: voucher pays the sale -->
+        <rect x="620" y="512" width="220" height="56" rx="6" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
+        <text x="730" y="536" class="nm" text-anchor="middle">Voucher pays the sale</text>
+        <text x="730" y="552" class="sb" text-anchor="middle">up to what it holds</text>
+
+        <!-- 8. End: pay the rest -->
+        <rect x="300" y="516" width="200" height="48" rx="20" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
+        <text x="400" y="537" class="nm" text-anchor="middle">Pay the rest as usual</text>
+        <text x="400" y="552" class="sb" text-anchor="middle">cash · M-Pesa · card</text>
+
+        <!-- Legend -->
+        <line x1="40" y1="600" x2="960" y2="600" stroke-width="0.8" style="stroke:var(--rule)"/>
+        <text x="40" y="616" class="ey">LEGEND</text>
+
+        <rect x="40" y="632" width="24" height="12" rx="6" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
+        <text x="72" y="642" class="lg">Outcome</text>
+
+        <rect x="160" y="632" width="24" height="12" rx="2" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
+        <text x="192" y="642" class="lg">Till step</text>
+
+        <polygon points="284,638 296,632 308,638 296,644" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
+        <text x="316" y="642" class="lg">Decision</text>
+
+        <rect x="412" y="632" width="24" height="12" rx="2" stroke-width="1.2" style="fill:var(--accent-tint);stroke:var(--accent)"/>
+        <text x="444" y="642" class="lg">The voucher</text>
+
+        <line x1="552" y1="638" x2="580" y2="638" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow-accent)" style="stroke:var(--accent)"/>
+        <text x="588" y="642" class="lg">Unused balance stays on the voucher for next time</text>
+      </svg>
+    </div>
+
+    <div class="rules">
+      <div class="card">
+        <h2>Who can use a voucher</h2>
+        <table>
+          <thead><tr><th>Voucher belongs to</th><th>Sale is for</th><th>What the till does</th></tr></thead>
+          <tbody>
+            <tr><td>A named customer</td><td>The same customer</td><td class="ok">Applies</td></tr>
+            <tr><td>A named customer</td><td>Walk In</td><td>Offers <code>Switch sale to …</code> the owner</td></tr>
+            <tr><td>A named customer</td><td>A different customer</td><td>Refuses</td></tr>
+            <tr><td>Walk In</td><td>That same Walk In customer</td><td class="ok">Applies</td></tr>
+            <tr><td>Walk In</td><td>Anyone else</td><td>Refuses: Walk In vouchers pay Walk In sales only</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Good to know</h2>
+        <ul>
+          <li><strong>Check voucher</strong> shows Open, Partly used (with what's left), Nothing left, Cancelled, or No match.</li>
+          <li>Vouchers can't be used on a credit sale, or while finishing an older draft.</li>
+          <li>Apply vouchers <em>before</em> sending an M-Pesa request. That request already asked for the remaining amount.</li>
+          <li>Changing the sale's customer removes any vouchers already applied.</li>
+          <li>Need M-Pesa or bank money back as money? Accounts refunds it from the office, not the till.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
