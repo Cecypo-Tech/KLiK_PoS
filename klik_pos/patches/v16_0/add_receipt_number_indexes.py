@@ -18,7 +18,10 @@ def execute():
 		)
 	# The till's receipt count asks, per pending receipt, whether a paid push already used it.
 	# Both columns come from the M-Pesa apps, so may not be there; the text one indexes a prefix.
-	if frappe.db.has_column("Mpesa Express Request", "transaction_id"):
+	# has_column raises on a missing table, and the table exists only with the M-Pesa apps.
+	if frappe.db.table_exists("Mpesa Express Request") and frappe.db.has_column(
+		"Mpesa Express Request", "transaction_id"
+	):
 		frappe.db.add_index(
 			"Mpesa Express Request", ["transaction_id", "status"], index_name="klik_pos_mexp_transaction_id"
 		)
