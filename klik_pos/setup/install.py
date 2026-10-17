@@ -7,7 +7,6 @@ def before_install():
     custom_fields_to_remove = [
         "POS Profile-custom_require_sales_person",
         "POS Profile-custom_sales_person_pin_required",
-        "Sales Person-pos_pin",
         "Customer-custom_is_walkin",
     ]
 

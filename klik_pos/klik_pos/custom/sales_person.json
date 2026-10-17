@@ -1,0 +1,21 @@
+{
+ "custom_fields": [
+  {
+   "doctype": "Custom Field",
+   "name": "Sales Person-pos_pin",
+   "dt": "Sales Person",
+   "fieldname": "pos_pin",
+   "fieldtype": "Password",
+   "label": "PIN",
+   "length": 4,
+   "insert_after": "old_parent",
+   "read_only": 1,
+   "module": "KLiK PoS"
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Sales Person",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}
