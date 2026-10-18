@@ -11,9 +11,9 @@ from klik_pos.setup.walkin_fields import (
 
 
 class TestWalkinFields(FrappeTestCase):
-    def test_field_spec_is_two_data_fields_with_shared_names(self):
+    def test_field_spec_is_three_data_fields_with_shared_names(self):
         names = [f["fieldname"] for f in WALKIN_FIELDS]
-        self.assertEqual(names, ["custom_walkin_customer_name", "custom_walkin_phone"])
+        self.assertEqual(names, ["custom_walkin_customer_name", "custom_walkin_phone", "custom_walkin_tax_id"])
         for f in WALKIN_FIELDS:
             self.assertEqual(f["fieldtype"], "Data")
             self.assertEqual(f["no_copy"], 0)

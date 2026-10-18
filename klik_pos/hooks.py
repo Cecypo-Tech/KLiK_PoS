@@ -32,12 +32,17 @@ add_to_apps_screen = [
 ]
 
 doc_events = {
+	# Walk-in Tax ID -> tax_id on every save (setup/walkin_fields.py, overrides/walkin_tax_id.py).
+	"Quotation": {"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id"},
+	"Delivery Note": {"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id"},
 	"Sales Order": {
+		"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id",
 		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate_order",
 		"before_submit": "klik_pos.overrides.sales_order.refuse_submitting_a_paid_mpesa_order",
 	},
 	"Sales Invoice": {
 		"before_insert": "klik_pos.overrides.sales_invoice.set_sale_type",
+		"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id",
 		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate",
 		# Cash sales' full-payment check is the opt-in Server Script
 		# "Sales Invoice - Cash Requires Payment" (patches/v16_0/cash_sale_payment_server_script).

@@ -397,6 +397,7 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
         so,
         walkin_name=cart_meta.get("walkin_name"),
         walkin_phone=cart_meta.get("walkin_phone"),
+        walkin_tax_id=cart_meta.get("tax_id"),
     )
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
     if cart_meta.get("remarks") is not None:
@@ -444,6 +445,7 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
         so,
         walkin_name=cart_meta.get("walkin_name"),
         walkin_phone=cart_meta.get("walkin_phone"),
+        walkin_tax_id=cart_meta.get("tax_id"),
     )
     _apply_extra_fields(so, cart_meta.get("extra_fields"))
     if cart_meta.get("remarks") is not None:
