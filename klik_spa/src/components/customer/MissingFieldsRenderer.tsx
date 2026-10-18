@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { MissingField } from '../../hooks/useCustomers';
 import { LinkSelect } from '../ui/LinkSelect';
 
+import { ClipboardList } from "lucide-react";
 interface MissingFieldsRendererProps {
   missingFields: MissingField[];
   onFieldChange: (fieldname: string, value: any) => void;
@@ -164,7 +165,7 @@ export const MissingFieldsRenderer: React.FC<MissingFieldsRendererProps> = ({
   return (
     <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center">
-        <span className="mr-2">📋</span>
+        <ClipboardList className="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
         Additional Required Fields
       </h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2">

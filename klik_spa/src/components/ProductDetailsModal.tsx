@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { MapPin, Package } from "lucide-react"
 import type { MenuItem } from "../../types"
 import { usePOSProfileStore } from "../stores/posProfileStore"
 import { useCartStore } from "../stores/cartStore"
@@ -152,7 +153,7 @@ function BatchCard({ batch, currencySymbol, showSerials, showCost }: { batch: Ba
             </div>
             
             <div className="flex flex-wrap gap-3 mt-1.5 text-xs">
-              <span className="text-gray-500 dark:text-gray-400">📍 {batch.warehouse}</span>
+              <span className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400"><MapPin className="w-3 h-3" />{batch.warehouse}</span>
               {batch.expiry_date && (
                 <span className={`${expired ? "text-red-600 dark:text-red-400" : soonExp ? "text-yellow-600 dark:text-yellow-400" : "text-gray-500 dark:text-gray-400"}`}>
                   Exp: {fmtDate(batch.expiry_date)}
@@ -204,8 +205,8 @@ function SerialCard({ serial, currencySymbol, showCost }: { serial: SerialEntry;
         <div className="flex-1">
           <p className="font-mono text-sm font-semibold text-gray-900 dark:text-white">{serial.serial_no}</p>
           <div className="flex gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
-            <span>📍 {serial.warehouse}</span>
-            {serial.batch_no && <span>📦 {serial.batch_no}</span>}
+            <span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{serial.warehouse}</span>
+            {serial.batch_no && <span className="inline-flex items-center gap-1"><Package className="w-3 h-3" />{serial.batch_no}</span>}
           </div>
         </div>
         {showCost && (

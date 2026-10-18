@@ -9,6 +9,7 @@ import { groupHeaders, lineViewColumns } from "../utils/lineViewColumns"
 import { useProductStore } from "../stores/productStore"
 
 
+import { Search } from "lucide-react";
 interface ProductLineViewProps {
   items: MenuItem[]
   onAddToCart: (item: MenuItem) => void
@@ -67,7 +68,7 @@ export default function ProductLineView({
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="text-6xl mb-4">🔍</div>
+          <Search className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
             No items found
           </h3>

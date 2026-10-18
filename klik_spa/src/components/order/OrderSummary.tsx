@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
+import { ShoppingCart } from "lucide-react";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { getBatches } from "../../utils/batch";
 import { getSerials } from "../../utils/serial";
@@ -589,7 +590,7 @@ export default function OrderSummary({
         <div className="divide-y divide-gray-200 dark:divide-gray-700">
           {cartItems.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-6xl mb-4">🛒</div>
+              <ShoppingCart className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 Your cart is empty
               </h3>

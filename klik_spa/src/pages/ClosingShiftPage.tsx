@@ -7,7 +7,8 @@ import {
   MonitorX,
   X,
   RotateCcw,
-  AlertCircle
+  AlertCircle,
+  Banknote
 } from "lucide-react";
 
 import InvoiceViewModal from "../components/InvoiceViewModal";
@@ -512,7 +513,7 @@ export default function ClosingShiftPage() {
                 <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700">
                   <div className="flex items-center gap-2 min-w-0">
                     {stat.name.toLowerCase().includes('cash') ? (
-                      <span className="text-base leading-none flex-shrink-0">💵</span>
+                      <Banknote className="w-4 h-4 flex-shrink-0 text-green-600 dark:text-green-400" />
                     ) : (
                       <CreditCard className="w-4 h-4 flex-shrink-0 text-beveren-600 dark:text-beveren-400" />
                     )}
@@ -914,7 +915,7 @@ export default function ClosingShiftPage() {
                   <div key={stat.name} className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700">
                     <div className="flex items-center gap-2 min-w-0">
                       {stat.name.toLowerCase().includes('cash') ? (
-                        <span className="text-base leading-none flex-shrink-0">💵</span>
+                        <Banknote className="w-4 h-4 flex-shrink-0 text-green-600 dark:text-green-400" />
                       ) : (
                         <CreditCard className="w-4 h-4 flex-shrink-0 text-orange-600 dark:text-orange-400" />
                       )}

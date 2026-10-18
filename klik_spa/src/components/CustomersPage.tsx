@@ -12,7 +12,7 @@ import {
   Edit,
   Banknote,
   FileText,
-
+  Package,
 } from "lucide-react"
 import { useCustomers } from "../hooks/useCustomers" // Import the hook
 import { useCustomerReceivable } from "../hooks/useCustomerReceivable"
@@ -399,7 +399,7 @@ export default function CustomersPage() {
               <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
                 <div className="flex items-center">
                   <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">📦</span>
+                    <Package className="w-3.5 h-3.5 text-white" />
                   </div>
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Invoices</p>
@@ -570,7 +570,7 @@ export default function CustomersPage() {
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center">
                 <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">📦</span>
+                  <Package className="w-3.5 h-3.5 text-white" />
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Orders</p>
