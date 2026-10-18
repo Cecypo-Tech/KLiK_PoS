@@ -25,12 +25,13 @@ from klik_pos.api.sales_invoice import (
 )
 from klik_pos.tests.credit_fixtures import make_credit_note
 from klik_pos.tests.mpesa_fixtures import make_c2b_payment
-from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode, pos_profile_settings
+from klik_pos.tests.pos_fixtures import open_own_shift, payable_total, pick_payment_mode, pos_profile_settings
 
 ITEM_GROUP = "TEST-RCPT-GROUP"
 ITEM_CODE = "TEST-RCPT-ITEM"
 CUSTOMER = "TEST-RCPT-CUSTOMER"
 OTHER_CUSTOMER = "TEST-RCPT-OTHER"
+TILL = "TEST-RCPT-TILL"
 SERVICE_ITEM = "TEST-RCPT-SERVICE"  # what the vouchers' credit notes were for
 
 
@@ -61,15 +62,12 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 		frappe.set_user("Administrator")
 		cls.ready = False
 
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
-		if not get_current_pos_opening_entry():
+		# Its own shift, on a copy of a till that takes M-Pesa.
+		if not open_own_shift(cls, TILL, prefer=_mpesa_mode):
 			return
-		try:
-			cls.pos_profile = get_current_pos_profile()
-		except Exception:
-			return
+		cls.pos_profile = get_current_pos_profile()
 		cls.company = cls.pos_profile.company
 		cls.warehouse = cls.pos_profile.warehouse
 		cls.cash_mode = pick_payment_mode(cls.pos_profile.name)
@@ -128,7 +126,7 @@ class TestReceiptsRideTheSubmit(FrappeTestCase):
 	def setUp(self):
 		super().setUp()
 		if not getattr(self.__class__, "ready", False):
-			self.skipTest("no open POS shift with an M-Pesa mode and shortcode on this site")
+			self.skipTest("no till with an M-Pesa mode and shortcode on this site")
 		frappe.set_user("Administrator")
 
 	# -- helpers ---------------------------------------------------------------------------

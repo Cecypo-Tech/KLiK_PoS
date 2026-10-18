@@ -41,6 +41,7 @@ from klik_pos.api.sales_invoice import (
 )
 from klik_pos.tests.pos_fixtures import (
 	default_sales_tax_template,
+	open_own_shift,
 	payable_total,
 	pick_payment_mode,
 	pos_profile_settings,
@@ -51,6 +52,7 @@ ITEM_CODE = "TEST-BURN-ITEM"
 FORCED_FAILURE = "Forced failure exercising the checkout abort path"
 NAMING_RULE_PREFIX = "TESTBURN-"
 CUSTOMER = "TEST-BURN-CUSTOMER"
+TILL = "TEST-BURN-ADMIN-TILL"
 
 
 def _delete_requests(*request_ids):
@@ -395,19 +397,12 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 		frappe.set_user("Administrator")
 		cls.ready = False
 
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-
-		if not get_current_pos_opening_entry():
+		if not open_own_shift(cls, TILL):
 			return
 
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
-		try:
-			cls.pos_profile = get_current_pos_profile()
-		except Exception:
-			# An open shift pointing at a deleted profile is a broken fixture, not a
-			# failing assertion. Skip rather than report a red test for it.
-			return
+		cls.pos_profile = get_current_pos_profile()
 		cls.company = cls.pos_profile.company
 		cls.warehouse = cls.pos_profile.warehouse or frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
@@ -480,7 +475,7 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 	def setUp(self):
 		super().setUp()
 		if not getattr(self.__class__, "ready", False):
-			self.skipTest("no open POS Opening Entry / payment mode / customer on this site")
+			self.skipTest("no till to copy / payment mode / customer on this site")
 		frappe.set_user("Administrator")
 
 	def _payload(self, request_id):
