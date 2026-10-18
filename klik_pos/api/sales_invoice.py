@@ -536,13 +536,21 @@ def _set_customer(doc, customer):
 	doc.customer = customer
 
 
-def _apply_walkin_party_fields(doc, walkin_name=None, walkin_phone=None):
-	"""Set walk-in buyer name/phone on a selling doc when the optional custom
-	fields exist. tax_id is handled separately by the standard field path."""
+def _apply_walkin_party_fields(doc, walkin_name=None, walkin_phone=None, walkin_tax_id=None):
+	"""Set walk-in buyer name/phone/PIN on a selling doc when the optional custom
+	fields exist. tax_id itself is still set by the standard field path; the PIN also goes in
+	custom_walkin_tax_id (walk-in customers only), which overrides.walkin_tax_id copies back
+	into tax_id on every save, so it survives draft saves and Quotation -> Order -> Invoice."""
 	if walkin_name and doc.meta.has_field("custom_walkin_customer_name"):
 		doc.custom_walkin_customer_name = walkin_name
 	if walkin_phone and doc.meta.has_field("custom_walkin_phone"):
 		doc.custom_walkin_phone = walkin_phone
+	if (
+		walkin_tax_id
+		and doc.meta.has_field("custom_walkin_tax_id")
+		and frappe.db.get_value("Customer", getattr(doc, "customer", None), "custom_is_walkin")
+	):
+		doc.custom_walkin_tax_id = walkin_tax_id
 
 
 def _carry_tax_id_from_original(return_doc, original_invoice):
@@ -3346,7 +3354,7 @@ def build_sales_invoice_doc(
 		doc.tax_id = tax_id
 
 	# Set walk-in buyer name/phone (guarded; fields are optional/button-installed)
-	_apply_walkin_party_fields(doc, walkin_name=walkin_name, walkin_phone=walkin_phone)
+	_apply_walkin_party_fields(doc, walkin_name=walkin_name, walkin_phone=walkin_phone, walkin_tax_id=tax_id)
 	_apply_extra_fields(doc, extra_fields)
 
 	# Set salesperson in sales team
@@ -3520,6 +3528,7 @@ def _update_existing_draft_invoice(
 		invoice_doc,
 		walkin_name=rebuilt_doc.get("custom_walkin_customer_name"),
 		walkin_phone=rebuilt_doc.get("custom_walkin_phone"),
+		walkin_tax_id=rebuilt_doc.get("custom_walkin_tax_id") or rebuilt_doc.tax_id,
 	)
 	from klik_pos.api.pos_profile import get_configured_extra_fieldnames
 	for _fn in get_configured_extra_fieldnames():
@@ -6115,6 +6124,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				invoice_doc,
 				walkin_name=rebuilt_doc.get("custom_walkin_customer_name"),
 				walkin_phone=rebuilt_doc.get("custom_walkin_phone"),
+				walkin_tax_id=rebuilt_doc.get("custom_walkin_tax_id") or rebuilt_doc.tax_id,
 			)
 			from klik_pos.api.pos_profile import get_configured_extra_fieldnames
 			for _fn in get_configured_extra_fieldnames():

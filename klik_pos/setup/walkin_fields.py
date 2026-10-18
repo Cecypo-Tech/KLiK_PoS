@@ -26,6 +26,19 @@ WALKIN_FIELDS = [
         "translatable": 0,
         "module": "KLiK PoS",
     },
+    {
+        # tax_id is fetched from the Customer on every draft save (and Quotation has none),
+        # so a walk-in's PIN typed on the desk lives here; overrides.walkin_tax_id copies it
+        # into tax_id. Point PIN Checker Settings' sales form PIN field at this one.
+        "fieldname": "custom_walkin_tax_id",
+        "label": "Walk-in Tax ID",
+        "fieldtype": "Data",
+        "insert_after": "custom_walkin_phone",
+        "in_standard_filter": 1,
+        "no_copy": 0,
+        "translatable": 0,
+        "module": "KLiK PoS",
+    },
 ]
 
 
