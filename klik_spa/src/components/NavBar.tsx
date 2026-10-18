@@ -4,7 +4,7 @@ import { useI18n } from "../hooks/useI18n"
 import { useAuth } from "../hooks/useAuth"
 import { useTheme } from "../hooks/useTheme"
 import { usePOSProfileStore } from "../stores/posProfileStore";
-import { Search, Settings, LogOut, Moon, Sun, Store, HelpCircle } from "lucide-react"
+import { Search, Settings, LogOut, Moon, Sun, Store, HelpCircle, Globe } from "lucide-react"
 import { HELP_WALKTHROUGHS_URL } from "../utils/helpLinks"
 
 export default function NavBar() {
@@ -152,7 +152,7 @@ export default function NavBar() {
                       className="flex items-center w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                       type="button"
                     >
-                      <span className="mr-3 text-gray-500">🌐</span>
+                      <Globe size={16} className="mr-3 text-gray-500" />
                       <span>{language === "en" ? "Switch to Arabic" : "Switch to English"}</span>
                     </button>
 

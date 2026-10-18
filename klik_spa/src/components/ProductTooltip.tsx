@@ -6,6 +6,7 @@ import { usePOSProfileStore } from "../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../utils/currency";
 import { getCostMargin, getInclusiveTaxRate } from "../utils/costMargin";
 
+import { ClipboardList, Package } from "lucide-react";
 interface Batch {
   batch_id: string;
   qty: number;
@@ -239,7 +240,7 @@ export default function ProductTooltip({
             {data?.batches && data.batches.length > 0 && (
               <div>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
-                  <span>📦</span> Batch Stock
+                  <Package className="w-3 h-3" /> Batch Stock
                 </p>
                 <div className="space-y-1">
                   {data.batches.slice(0, 3).map((batch, i) => (
@@ -407,7 +408,7 @@ export default function ProductTooltip({
           {data?.price_lists && data.price_lists.length > 0 && (
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
-                <span>📋</span> Alternative Prices
+                <ClipboardList className="w-3 h-3" /> Alternative Prices
               </p>
               <div className="space-y-0.5">
                 {data.price_lists.slice(0, 3).map((pl, i) => (
@@ -437,7 +438,7 @@ export default function ProductTooltip({
           {data?.batches && data.batches.length > 0 && (
             <div className="pt-1.5 border-t border-gray-100 dark:border-gray-700">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
-                <span>📦</span> Batch Stock
+                <Package className="w-3 h-3" /> Batch Stock
               </p>
               <div className="space-y-1">
                 {data.batches.slice(0, 2).map((batch, i) => (

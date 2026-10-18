@@ -1,5 +1,7 @@
 "use client"
 
+import { AlertTriangle } from "lucide-react"
+
 interface OverdueInvoice {
   name: string
   due_date: string
@@ -76,7 +78,7 @@ export default function OverdueWarningModal({ invoices, customerName, onClose }:
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-red-500 text-lg font-bold">⚠</span>
+              <AlertTriangle className="w-5 h-5 text-red-500 dark:text-red-400" />
               <h2 className="text-base font-bold text-gray-900 dark:text-white">
                 Overdue Invoices — {customerName}
               </h2>
