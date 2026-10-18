@@ -9,11 +9,12 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api.sales_invoice import CHECKOUT_REQUEST_DOCTYPE, queue_sales_invoice
-from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode, pos_profile_settings
+from klik_pos.tests.pos_fixtures import open_own_shift, payable_total, pick_payment_mode, pos_profile_settings
 
 ITEM_GROUP = "TEST-PAYSCEN-GROUP"
 ITEM_CODE = "TEST-PAYSCEN-ITEM"
 CUSTOMER = "TEST-PAYSCEN-CUSTOMER"
+TILL = "TEST-PAYSCEN-TILL"
 
 
 def _delete_requests(*request_ids):
@@ -41,17 +42,12 @@ class TestCheckoutPaymentScenarios(FrappeTestCase):
 		frappe.set_user("Administrator")
 		cls.ready = False
 
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-
-		if not get_current_pos_opening_entry():
+		if not open_own_shift(cls, TILL):
 			return
 
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
-		try:
-			cls.pos_profile = get_current_pos_profile()
-		except Exception:
-			return
+		cls.pos_profile = get_current_pos_profile()
 		cls.company = cls.pos_profile.company
 		cls.warehouse = cls.pos_profile.warehouse or frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "company": cls.company}, "name"
@@ -124,7 +120,7 @@ class TestCheckoutPaymentScenarios(FrappeTestCase):
 	def setUp(self):
 		super().setUp()
 		if not getattr(self.__class__, "ready", False):
-			self.skipTest("no open POS Opening Entry / payment mode on this site")
+			self.skipTest("no till to copy / payment mode / warehouse on this site")
 		frappe.set_user("Administrator")
 
 	def _items(self):
