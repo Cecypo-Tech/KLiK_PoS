@@ -22,3 +22,19 @@ class TestACachedTillDoesNotOutliveItsShift(FrappeTestCase):
 		self.assertIn(key, utils._cached_pos_profiles)
 		frappe.db.rollback()
 		self.assertNotIn(key, utils._cached_pos_profiles)
+
+
+class TestADeletedShiftLeavesNothingCached(FrappeTestCase):
+	"""A deleted shift's name is handed out again too: the series steps back. A test cleanup
+	that deleted its shift and till left "POS Profile TEST-RCPT-TILL not found" for the next
+	module whose shift took the name."""
+
+	def test_deleting_a_shift_forgets_its_till(self):
+		from klik_pos.tests.test_held_order_orphans import _opening_entry
+
+		shift = _opening_entry()
+		key = f"{frappe.session.user}|{shift.name}"
+		utils._cached_pos_profiles[key] = "_Test Till Gone"
+		frappe.db.set_value("POS Opening Entry", shift.name, "docstatus", 2)
+		frappe.delete_doc("POS Opening Entry", shift.name, force=True, ignore_permissions=True, ignore_on_trash=True)
+		self.assertNotIn(key, utils._cached_pos_profiles)

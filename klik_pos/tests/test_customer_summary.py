@@ -4,7 +4,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
-from klik_pos.api import customer_summary, receivables
+from klik_pos.api import cashier_scope, customer_summary, receivables
 from klik_pos.api.receivables import get_customer_receivables
 
 COMPANY = "Dev Co"
@@ -108,11 +108,15 @@ class TestCustomerAccountSummary(FrappeTestCase):
 		# the fixtures' company: an unrelated open till on another company otherwise empties
 		# the AR report, and the expectation derived below would quietly become 0.0 and then
 		# agree with an equally empty result - a test that passes while proving nothing.
-		for module in (customer_summary, receivables):
+		# Also a till that shows every cashier's invoices: on one that does not, the summary
+		# counts the caller's own invoices and never asks the receivables module.
+		for module in (customer_summary, receivables, cashier_scope):
 			patcher = patch.object(
 				module,
 				"get_current_pos_profile",
-				return_value=frappe._dict(name="_pinned_for_tests", company=COMPANY),
+				return_value=frappe._dict(
+					name="_pinned_for_tests", company=COMPANY, custom_allow_viewing_other_cashiers=1
+				),
 			)
 			patcher.start()
 			cls.addClassCleanup(patcher.stop)

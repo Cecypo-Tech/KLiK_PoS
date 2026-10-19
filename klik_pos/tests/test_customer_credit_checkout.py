@@ -21,10 +21,11 @@ from klik_pos.api import customer_credit
 from klik_pos.api import sales_invoice as si
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from klik_pos.tests.credit_fixtures import make_credit_note
-from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode
+from klik_pos.tests.pos_fixtures import open_own_shift, payable_total
 
 CUSTOMER = "TEST-CREDIT-ROUTER-CUSTOMER"
 ITEM = "TEST-CREDIT-ROUTER-ITEM"
+TILL = "TEST-CREDIT-ROUTER-TILL"
 
 
 def _ensure_customer():
@@ -66,37 +67,21 @@ def _totals(items):
 	return flt(doc.grand_total, 2), flt(doc.rounded_total, 2)
 
 
-def _ensure_open_shift(profile):
-	"""Checkout refuses a till with no shift open today. Open one inside the test
-	transaction when the site has none, so these tests do not depend on a live shift."""
-	if frappe.get_all(
-		"POS Opening Entry", filters={"pos_profile": profile.name, "docstatus": 1, "status": "Open"}
-	):
-		return
-	entry = frappe.new_doc("POS Opening Entry")
-	entry.period_start_date = frappe.utils.now()
-	entry.posting_date = frappe.utils.nowdate()
-	entry.company = profile.company
-	entry.pos_profile = profile.name
-	entry.user = "Administrator"
-	entry.append(
-		"balance_details",
-		{
-			"mode_of_payment": pick_payment_mode(profile.name),
-			"opening_amount": 0,
-			"custom_variance_reason": "test fixture: shift opened with an empty drawer",
-		},
-	)
-	entry.insert(ignore_permissions=True)
-	entry.submit()
-
-
 class TestCheckoutWithCredit(FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		# A shift of its own, opened today: any open shift on the till used to do, and one
+		# left open overnight is refused as outdated.
+		cls.ready = bool(open_own_shift(cls, TILL))
+
 	def setUp(self):
+		if not self.ready:
+			self.skipTest("no till to copy on this site")
 		frappe.set_user("Administrator")
 		profile = get_current_pos_profile()
 		self.company = profile.company
-		_ensure_open_shift(profile)
 		_ensure_customer()
 		_ensure_service_item()
 		self.items = [{"id": ITEM, "quantity": 1, "price": 80, "uom": "Nos"}]
