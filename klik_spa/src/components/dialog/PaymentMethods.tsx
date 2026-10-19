@@ -81,7 +81,7 @@ export default function PaymentMethods({
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden divide-y divide-gray-200 dark:divide-gray-700">
         {rows.map((method) => {
           const isActive = (method.amount || 0) > 0;
-          const showRef = isActive && isReferenceMethod(method.type, method.name);
+          const showRef = isActive && isReferenceMethod(method.type);
           const rowLocked = disabled || lockedMethodIds.includes(method.id);
 
           return (
