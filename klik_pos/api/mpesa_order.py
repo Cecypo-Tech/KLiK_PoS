@@ -116,6 +116,9 @@ def delete_order(so):
 	for link in get_dynamic_linked_docs(so, "Delete"):
 		if link["reference_doctype"] == EXPRESS and link["reference_docname"] not in live:
 			continue
+		# An active Sales Order workflow's open action; frappe's own on_trash clears it.
+		if link["reference_doctype"] == "Workflow Action":
+			continue
 		raise_link_exists_exception(
 			so, link["reference_doctype"], link["reference_docname"], link["at_position"]
 		)

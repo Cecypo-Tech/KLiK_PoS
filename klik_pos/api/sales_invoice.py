@@ -5957,7 +5957,8 @@ def _check_discardable_links(invoice_doc):
 		failed_stk = link["reference_doctype"] == "Mpesa Express Request" and (
 			frappe.db.get_value("Mpesa Express Request", link["reference_docname"], "status") == "Failed"
 		)
-		if not failed_stk:
+		# An active Sales Invoice workflow's open action; frappe's own on_trash clears it.
+		if not failed_stk and link["reference_doctype"] != "Workflow Action":
 			raise_link_exists_exception(
 				invoice_doc, link["reference_doctype"], link["reference_docname"], link["at_position"]
 			)
