@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.setup.walkin_fields import (
@@ -42,3 +43,19 @@ class TestWalkinFields(FrappeTestCase):
     def test_endpoint_denies_without_permission(self, _perm):
         with self.assertRaises(Exception):
             install_walkin_party_fields()
+
+    def test_every_anchor_exists(self):
+        # Anchored after a field the doctype lacks, they land at the bottom of the form.
+        install_walkin_fields()
+        for dt in WALKIN_DOCTYPES:
+            anchor = frappe.db.get_value("Custom Field", f"{dt}-custom_walkin_customer_name", "insert_after")
+            self.assertTrue(frappe.get_meta(dt).has_field(anchor), f"{dt}: anchor {anchor} is missing")
+
+    def test_quotation_fields_follow_customer_name(self):
+        install_walkin_fields(["Quotation"])
+        order = [df.fieldname for df in frappe.get_meta("Quotation", cached=False).fields]
+        i = order.index("customer_name")
+        self.assertEqual(
+            order[i + 1 : i + 4],
+            ["custom_walkin_customer_name", "custom_walkin_phone", "custom_walkin_tax_id"],
+        )

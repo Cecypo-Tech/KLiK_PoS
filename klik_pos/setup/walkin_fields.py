@@ -42,10 +42,20 @@ WALKIN_FIELDS = [
 ]
 
 
+# Quotation has no tax_id: anchored after it, the fields fell to the bottom of the form.
+WALKIN_ANCHOR = {"Quotation": "customer_name"}
+
+
+def _walkin_fields_for(doctype):
+    if doctype not in WALKIN_ANCHOR:
+        return WALKIN_FIELDS
+    return [{**WALKIN_FIELDS[0], "insert_after": WALKIN_ANCHOR[doctype]}, *WALKIN_FIELDS[1:]]
+
+
 def install_walkin_fields(doctypes=None):
     """Idempotent. create_custom_fields() updates/creates as needed."""
     doctypes = doctypes or WALKIN_DOCTYPES
-    custom_fields = {dt: WALKIN_FIELDS for dt in doctypes}
+    custom_fields = {dt: _walkin_fields_for(dt) for dt in doctypes}
     create_custom_fields(custom_fields, ignore_validate=True)
     return doctypes
 
