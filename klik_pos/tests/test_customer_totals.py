@@ -8,9 +8,12 @@ three different numbers for one customer. They now share total_spent_sql/total_o
 last_visit_sql from customer_summary.py.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from klik_pos.api import cashier_scope, customer
 from klik_pos.api.customer import get_customer_statistics, get_customers
 from klik_pos.api.customer_summary import get_customer_account_summary
 
@@ -50,6 +53,20 @@ def _make_invoice(customer, rate, qty=1, is_return=0, return_against=None, pos_o
 
 
 class TestCustomerTotalsAgree(FrappeTestCase):
+	def setUp(self):
+		super().setUp()
+		# The customer list follows the till: its customer groups and whether it shows every
+		# cashier's invoices. Left to whichever till is current, the fixtures' customer can
+		# fall outside its groups and never be listed.
+		pinned = frappe._dict(
+			name="_pinned_for_tests", company=COMPANY, custom_business_type="B2B & B2C",
+			customer_groups=[], custom_allow_viewing_other_cashiers=1,
+		)
+		for module in (customer, cashier_scope):
+			patcher = patch.object(module, "get_current_pos_profile", return_value=pinned)
+			patcher.start()
+			self.addCleanup(patcher.stop)
+
 	def test_back_office_invoice_counts_toward_total_spent(self):
 		"""A non-POS (back-office) invoice must not be invisible to total_spent — the old
 		custom_pos_opening_entry filter dropped it entirely."""

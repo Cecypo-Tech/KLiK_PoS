@@ -3,7 +3,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, nowdate
 from unittest.mock import patch
 
-from klik_pos.api import receivables
+from klik_pos.api import cashier_scope, receivables
 
 COMPANY = "Dev Co"
 ITEM = "Consulting"
@@ -161,13 +161,13 @@ class TestReceivablesDegradedFallback(FrappeTestCase):
 		# assertions otherwise depend on whichever till happens to be open on the machine
 		# running them: a shift on another company returns an empty report and every
 		# lookup below collapses with IndexError. Pin it to the fixtures' company.
-		patcher = patch.object(
-			receivables,
-			"get_current_pos_profile",
-			return_value=frappe._dict(name="_pinned_for_tests", company=COMPANY),
-		)
-		patcher.start()
-		self.addCleanup(patcher.stop)
+		# And to a till that lets its cashiers see every invoice: on one that does not, the
+		# report reads the caller's own invoices and never reaches the AR engine under test.
+		pinned = frappe._dict(name="_pinned_for_tests", company=COMPANY, custom_allow_viewing_other_cashiers=1)
+		for module in (receivables, cashier_scope):
+			patcher = patch.object(module, "get_current_pos_profile", return_value=pinned)
+			patcher.start()
+			self.addCleanup(patcher.stop)
 
 	def test_permission_error_falls_back_instead_of_returning_failure(self):
 		"""A user without Journal Entry read must still see what is owed. Before this, the
