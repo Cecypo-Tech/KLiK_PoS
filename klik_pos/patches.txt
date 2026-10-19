@@ -15,3 +15,4 @@ klik_pos.patches.v16_0.add_item_listing_indexes
 klik_pos.patches.v16_0.cash_sale_payment_server_script
 klik_pos.patches.v16_0.add_receipt_number_indexes
 klik_pos.patches.v16_0.add_walkin_tax_id_field
+klik_pos.patches.v16_0.move_quotation_walkin_fields
