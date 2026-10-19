@@ -1,7 +1,5 @@
 # Test package for klik_pos
 
-from unittest.mock import patch
-
 
 def mute_workflow_emails():
 	"""before_tests: no workflow action emails for the whole run.
@@ -12,7 +10,8 @@ def mute_workflow_emails():
 	tests and finally killed the runner. Frappe mutes the mail itself in tests, but only
 	after the PDF is built. The site's workflow stays as it is.
 	"""
-	target = "frappe.workflow.doctype.workflow_action.workflow_action.send_workflow_action_email"
-	if not getattr(mute_workflow_emails, "patcher", None):
-		mute_workflow_emails.patcher = patch(target, new=lambda doc, transitions: None)
-		mute_workflow_emails.patcher.start()
+	from frappe.workflow.doctype.workflow_action import workflow_action
+
+	# Assigned, not patch().start(): a test's patch.stopall (test_queue_lock_retry) stops
+	# every started patcher, and took this one with it mid-run.
+	workflow_action.send_workflow_action_email = lambda doc, transitions: None
