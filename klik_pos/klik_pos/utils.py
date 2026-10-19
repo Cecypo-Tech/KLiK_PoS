@@ -97,6 +97,13 @@ def get_current_pos_profile_lite(fields):
 	return values
 
 
+def forget_deleted_shift(doc, method=None):
+	"""after_delete on POS Opening Entry: the series steps back, so the next shift takes this
+	name - and must not resolve to the till this one was on."""
+	for key in [k for k in _cached_pos_profiles if k.endswith(f"|{doc.name}")]:
+		_cached_pos_profiles.pop(key, None)
+
+
 def clear_pos_profile_cache(user=None):
 	"""Clear cached POS Profile identities. If user provided, clear all entries for that user."""
 	global _cached_pos_profiles

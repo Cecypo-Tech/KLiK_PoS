@@ -56,6 +56,7 @@ doc_events = {
 			"klik_pos.api.pos_entry.validate_opening_entry",
 		],
 		"on_submit": "klik_pos.api.pos_entry.remember_opened_shift",
+		"after_delete": "klik_pos.klik_pos.utils.forget_deleted_shift",
 	},
 	"POS Closing Entry": {
 		"validate": [
