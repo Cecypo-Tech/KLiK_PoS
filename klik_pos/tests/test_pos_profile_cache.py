@@ -19,9 +19,9 @@ class TestACachedTillDoesNotOutliveItsShift(FrappeTestCase):
 		):
 			self.assertEqual(utils._resolve_pos_profile_name(), "_Test Till Gone")
 		key = f"{frappe.session.user}|{shift}"
-		self.assertIn(key, utils._cached_pos_profiles)
+		self.assertIn(key, utils._till_cache())
 		frappe.db.rollback()
-		self.assertNotIn(key, utils._cached_pos_profiles)
+		self.assertNotIn(key, utils._till_cache())
 
 
 class TestADeletedShiftLeavesNothingCached(FrappeTestCase):
@@ -34,7 +34,21 @@ class TestADeletedShiftLeavesNothingCached(FrappeTestCase):
 
 		shift = _opening_entry()
 		key = f"{frappe.session.user}|{shift.name}"
-		utils._cached_pos_profiles[key] = "_Test Till Gone"
+		utils._till_cache()[key] = "_Test Till Gone"
 		frappe.db.set_value("POS Opening Entry", shift.name, "docstatus", 2)
 		frappe.delete_doc("POS Opening Entry", shift.name, force=True, ignore_permissions=True, ignore_on_trash=True)
-		self.assertNotIn(key, utils._cached_pos_profiles)
+		self.assertNotIn(key, utils._till_cache())
+
+
+class TestACachedTillLastsOneRequest(FrappeTestCase):
+	"""Each web worker kept its own process-wide cache, so a deletion handled by one worker
+	left the others resolving the reused shift name to the deleted till."""
+
+	def test_the_next_request_looks_the_till_up_again(self):
+		shift = "POS-OPE-NEXT-REQUEST"
+		with patch.object(sales_invoice, "get_current_pos_opening_entry", return_value=shift):
+			with patch.object(frappe.db, "get_value", return_value="_Test Till Before"):
+				self.assertEqual(utils._resolve_pos_profile_name(), "_Test Till Before")
+			del frappe.local.klik_till_cache  # what a new request starts with
+			with patch.object(frappe.db, "get_value", return_value="_Test Till Now"):
+				self.assertEqual(utils._resolve_pos_profile_name(), "_Test Till Now")
