@@ -20,7 +20,9 @@ from klik_pos.klik_pos.utils import (
 	get_current_pos_profile,
 	get_current_pos_profile_lite,
 )
-from klik_pos.tests.pos_fixtures import pos_profile_settings
+from klik_pos.tests.pos_fixtures import open_own_shift, pos_profile_settings
+
+TILL = "TEST-PICKED-WAREHOUSE-TILL"
 
 
 @contextmanager
@@ -50,9 +52,9 @@ class TestPickedWarehouse(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-
-		cls.ready = bool(get_current_pos_opening_entry())
+		cls.ready = bool(
+			open_own_shift(cls, TILL, prefer=lambda p: other_warehouse(frappe.get_doc("POS Profile", p)))
+		)
 		if cls.ready:
 			cls.till = get_current_pos_profile()
 			cls.own = cls.till.warehouse
@@ -140,11 +142,12 @@ class TestSalesFollowThePickedWarehouse(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 		from klik_pos.tests.pos_fixtures import pick_payment_mode
 		from klik_pos.tests.test_checkout_payment_scenarios import _ensure_customer
 
-		cls.ready = bool(get_current_pos_opening_entry())
+		cls.ready = bool(
+			open_own_shift(cls, TILL, prefer=lambda p: other_warehouse(frappe.get_doc("POS Profile", p)))
+		)
 		if not cls.ready:
 			return
 		cls.till = get_current_pos_profile()

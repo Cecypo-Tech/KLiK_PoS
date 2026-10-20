@@ -203,14 +203,8 @@ class TestReHoldingByIdIsChecked(FrappeTestCase):
 
 	def test_re_holding_a_handed_over_order_moves_it_to_my_shift_and_till(self):
 		"""Otherwise the shift that first held it deletes it at close, from under whoever took it."""
-		mine_now = frappe.get_all(
-			"POS Opening Entry",
-			filters={"user": "Administrator", "status": "Open", "docstatus": 1, "pos_profile": TILL},
-			pluck="name",
-			limit=1,
-		)
-		if not mine_now:
-			self.skipTest(f"no open shift for Administrator on {TILL}")
+		frappe.set_user("Administrator")
+		mine_now = [_opening_entry(hours_ago=0).name]  # on TILL, rolled back with the test
 		till = frappe.get_doc("POS Profile", TILL)
 		till.custom_allow_viewing_other_cashiers = 1
 		theirs = _order(opening_entry=_opening_entry(hours_ago=1).name, owner=SOMEONE_ELSE)
