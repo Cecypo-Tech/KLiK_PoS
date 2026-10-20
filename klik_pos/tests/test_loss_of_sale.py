@@ -6,7 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.tests.pos_fixtures import pos_profile_settings
+from klik_pos.tests.pos_fixtures import open_own_shift, pos_profile_settings
 from klik_pos.setup.pos_profile_fields import install_los_qty_field, install_pos_profile_feature_fields
 
 ITEM_GROUP = "TEST-LOS-GROUP"
@@ -14,20 +14,7 @@ STOCKED = "TEST-LOS-STOCKED"  # 10 in the till's warehouse
 EMPTY = "TEST-LOS-EMPTY"  # none anywhere
 BATCHED = "TEST-LOS-BATCHED"  # batch-tracked, none anywhere
 CUSTOMER = "TEST-LOS-CUSTOMER"
-
-
-def _profile():
-	"""The till the session sells from when a shift is open, else any enabled POS Profile."""
-	from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-	from klik_pos.klik_pos.utils import get_current_pos_profile
-
-	if get_current_pos_opening_entry():
-		try:
-			return get_current_pos_profile()
-		except Exception:
-			pass
-	name = frappe.db.get_value("POS Profile", {"disabled": 0, "warehouse": ["is", "set"]}, "name")
-	return frappe.get_doc("POS Profile", name) if name else None
+TILL = "TEST-LOS-TILL"
 
 
 def _make_item(code, has_batch_no=0):
@@ -53,9 +40,18 @@ class TestLossOfSale(FrappeTestCase):
 		install_los_qty_field()
 		frappe.db.commit()
 		cls.ready = False
-		cls.profile = _profile()
+		# Its own shift, opened today, on a copy of a till with a warehouse: the sales below
+		# need an open shift, and borrowing one skipped them all when none was open.
+		cls.profile = open_own_shift(cls, TILL, prefer=lambda p: frappe.db.get_value("POS Profile", p, "warehouse"))
 		if not cls.profile:
 			return
+		# The desk invoices below go unpaid and _sell(credit=True) sells on credit: say so on
+		# this till rather than depend on the copied one allowing it. The copy is dropped
+		# at class cleanup, so nothing needs restoring.
+		frappe.db.set_value(
+			"POS Profile", TILL, {"allow_partial_payment": 1, "custom_allow_credit_sales_as_pos": 1}
+		)
+		cls.profile.reload()
 		cls.warehouse = cls.profile.warehouse
 		cls.company = cls.profile.company
 
@@ -289,13 +285,7 @@ class TestLossOfSale(FrappeTestCase):
 					before_validate(invoice)
 				self.assertEqual((invoice.items[0].qty, invoice.items[0].get("custom_los_qty") or 0), (16, 0))
 
-	# Task 4 - these sell through the till, so they need an open shift.
-
-	def _require_shift(self):
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-
-		if not get_current_pos_opening_entry():
-			self.skipTest("no open POS Opening Entry on this site")
+	# Task 4 - these sell through the till, on the class's own shift.
 
 	def _sell(self, items, enabled=1, credit=False):
 		"""A till sale: paid in full, or with credit=True an unpaid credit sale."""
@@ -331,7 +321,6 @@ class TestLossOfSale(FrappeTestCase):
 		return response
 
 	def test_the_checkout_preview_returns_the_split(self):
-		self._require_shift()
 		from klik_pos.api.sales_invoice import validate_checkout_invoice
 
 		payload = {
@@ -348,7 +337,6 @@ class TestLossOfSale(FrappeTestCase):
 		self.assertEqual(response["tax_preview"]["items"][0]["qty"], 10)
 
 	def test_a_paid_sale_records_the_loss_on_its_line(self):
-		self._require_shift()
 		response = self._sell(
 			[
 				{"id": STOCKED, "quantity": 4, "los_qty": 0, "price": 100, "uom": "Nos"},
@@ -368,7 +356,6 @@ class TestLossOfSale(FrappeTestCase):
 		)
 
 	def test_a_paid_oversell_is_still_refused(self):
-		self._require_shift()
 		response = self._sell([{"id": STOCKED, "quantity": 16, "los_qty": 0, "price": 100, "uom": "Nos"}])
 		self.assertFalse(response["success"])
 		self.assertIn("Insufficient stock", response["message"])
@@ -386,19 +373,16 @@ class TestLossOfSale(FrappeTestCase):
 
 	def test_an_unpaid_sale_whose_stock_moved_is_refused(self):
 		# The cashier showed 16; billing 10 without telling the till is not on.
-		self._require_shift()
 		response = self._sell([{"id": STOCKED, "quantity": 16, "los_qty": 0, "price": 100, "uom": "Nos"}], credit=True)
 		self.assertFalse(response["success"], response)
 		self.assertIn("Stock changed since checkout", response["message"])
 
 	def test_an_unpaid_sale_the_preview_split_goes_through(self):
-		self._require_shift()
 		response = self._sell([{"id": STOCKED, "quantity": 10, "los_qty": 6, "price": 100, "uom": "Nos"}], credit=True)
 		self.assertTrue(response["success"], response.get("message"))
 		self.assertEqual(self._rows(response["invoice_name"]), [(STOCKED, 10, 6)])
 
 	def test_with_loss_of_sale_off_a_paid_sale_records_no_loss(self):
-		self._require_shift()
 		response = self._sell([{"id": STOCKED, "quantity": 4, "los_qty": 3, "price": 100, "uom": "Nos"}], enabled=0)
 		self.assertTrue(response["success"], response.get("message"))
 		self.assertEqual(self._rows(response["invoice_name"]), [(STOCKED, 4, 0)])
@@ -433,20 +417,17 @@ class TestLossOfSale(FrappeTestCase):
 
 	def test_a_held_order_keeps_the_till_s_split(self):
 		"""So its print and total are for what is in stock; reopening it asks for the full qty again."""
-		self._require_shift()
 		from klik_pos.api.sales_order import create_held_order
 
 		self.assertEqual(self._held_rows(create_held_order), [(STOCKED, 2, 0), (EMPTY, 0, 6)])
 
 	def test_without_loss_of_sale_a_held_order_holds_what_was_asked_for(self):
-		self._require_shift()
 		from klik_pos.api.sales_order import create_held_order
 
 		self.assertEqual(self._held_rows(create_held_order, enabled=0), [(STOCKED, 2, 0), (EMPTY, 6, 0)])
 
 	def test_an_mpesa_order_holds_what_was_asked_for(self):
 		"""Its push is for the order's total: the full ask."""
-		self._require_shift()
 		from klik_pos.api.mpesa_order import save_mpesa_order
 
 		self.assertEqual(self._held_rows(save_mpesa_order), [(STOCKED, 2, 0), (EMPTY, 6, 0)])

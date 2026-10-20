@@ -4,10 +4,19 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-# Performance optimization: Cache frequently accessed data per user and opening entry
-# Key: f"{user}|{opening_entry or 'none'}", Value: POS Profile name (identity only)
-_cached_pos_profiles = {}
 _cached_company_data = {}
+
+
+def _till_cache():
+	"""The till each f"{user}|{shift or 'none'}" resolves to - for this request only.
+
+	It was process-wide: each web worker kept its own, so a deletion handled by one worker
+	left the others resolving the reused shift name to the deleted till.
+	"""
+	if not hasattr(frappe.local, "klik_till_cache"):
+		frappe.local.klik_till_cache = {}
+	return frappe.local.klik_till_cache
+
 
 # The till's picked warehouse, sent with every request (klik_spa/src/utils/warehouseHeader.ts).
 WAREHOUSE_HEADER = "X-Klik-Warehouse"
@@ -48,8 +57,9 @@ def _resolve_pos_profile_name():
 	current_opening_entry = get_current_pos_opening_entry()
 	cache_key = f"{user}|{current_opening_entry or 'none'}"
 
-	if cache_key in _cached_pos_profiles:
-		return _cached_pos_profiles[cache_key]
+	cache = _till_cache()
+	if cache_key in cache:
+		return cache[cache_key]
 
 	if current_opening_entry:
 		pos_profile_name = frappe.db.get_value("POS Opening Entry", current_opening_entry, "pos_profile")
@@ -59,9 +69,9 @@ def _resolve_pos_profile_name():
 			frappe.throw(_("No POS Profile found for user {0}").format(user))
 
 	# Cache identity (name) only
-	_cached_pos_profiles[cache_key] = pos_profile_name
+	cache[cache_key] = pos_profile_name
 	# A rolled-back shift's name is handed out again; its till must not answer for the next one.
-	frappe.db.after_rollback.add(lambda: _cached_pos_profiles.pop(cache_key, None))
+	frappe.db.after_rollback.add(lambda: cache.pop(cache_key, None))
 	return pos_profile_name
 
 
@@ -100,33 +110,17 @@ def get_current_pos_profile_lite(fields):
 def forget_deleted_shift(doc, method=None):
 	"""after_delete on POS Opening Entry: the series steps back, so the next shift takes this
 	name - and must not resolve to the till this one was on."""
-	for key in [k for k in _cached_pos_profiles if k.endswith(f"|{doc.name}")]:
-		_cached_pos_profiles.pop(key, None)
+	cache = _till_cache()
+	for key in [k for k in cache if k.endswith(f"|{doc.name}")]:
+		cache.pop(key, None)
 
 
 def clear_pos_profile_cache(user=None):
-	"""Clear cached POS Profile identities. If user provided, clear all entries for that user."""
-	global _cached_pos_profiles
-
-	if user:
-		# Clear all cache entries matching the user prefix
-		keys_to_delete = [k for k in list(_cached_pos_profiles.keys()) if k.startswith(f"{user}|")]
-		for k in keys_to_delete:
-			del _cached_pos_profiles[k]
-		if keys_to_delete:
-			frappe.logger().info(
-				f"🧹 POS Profile cache cleared for user: {user} ({len(keys_to_delete)} entries)"
-			)
-	else:
-		# Clear cache for current user
-		current_user = frappe.session.user
-		keys_to_delete = [k for k in list(_cached_pos_profiles.keys()) if k.startswith(f"{current_user}|")]
-		for k in keys_to_delete:
-			del _cached_pos_profiles[k]
-		if keys_to_delete:
-			frappe.logger().info(
-				f"🧹 POS Profile cache cleared for user: {current_user} ({len(keys_to_delete)} entries)"
-			)
+	"""Forget the tills cached for `user` (default: the session user)."""
+	cache = _till_cache()
+	prefix = f"{user or frappe.session.user}|"
+	for key in [k for k in cache if k.startswith(prefix)]:
+		del cache[key]
 
 
 def get_user_default_company():
