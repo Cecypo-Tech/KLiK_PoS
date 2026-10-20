@@ -260,7 +260,7 @@ after_migrate = [
 # Testing
 # -------
 
-before_tests = "klik_pos.tests.mute_workflow_emails"
+# before_tests = "klik_pos.install.before_tests"
 
 # Overriding Methods
 # ------------------------------
