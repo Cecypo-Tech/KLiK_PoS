@@ -23,10 +23,11 @@ from klik_pos.api.sales_invoice import (
 	get_checkout_request_status,
 	queue_sales_invoice,
 )
-from klik_pos.tests.pos_fixtures import payable_total, pick_payment_mode
+from klik_pos.tests.pos_fixtures import open_own_shift, payable_total, pick_payment_mode
 
 ITEM_GROUP = "TEST-CHECKOUT-IDEM-GROUP"
 ITEM_CODE = "TEST-CHECKOUT-IDEM-ITEM"
+TILL = "TEST-CHECKOUT-IDEM-TILL"
 OTHER_USER = "checkout_idem_other@example.com"
 
 
@@ -282,9 +283,9 @@ class TestCheckoutEndToEnd(FrappeTestCase):
 		super().setUpClass()
 		frappe.set_user("Administrator")
 
-		from klik_pos.api.sales_invoice import get_current_pos_opening_entry
-
-		if not get_current_pos_opening_entry():
+		# Its own shift, opened today: a borrowed one was missing (every test skipped) or
+		# left open overnight and refused as outdated.
+		if not open_own_shift(cls, TILL):
 			cls.ready = False
 			return
 
