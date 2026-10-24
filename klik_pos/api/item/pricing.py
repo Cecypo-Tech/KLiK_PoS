@@ -96,13 +96,36 @@ def _build_pricing_context(customer=None, price_list=None):
 
 @frappe.whitelist()
 def get_selling_price_lists():
+    """Enabled selling Price Lists the current user is allowed to use.
+
+    A User Permission on Price List narrows the picker to those lists, like the
+    warehouse picker (pos_profile.leaf_warehouses_for). frappe.get_all ignores
+    permissions, so the filter is applied here.
+    """
+    filters = {"selling": 1, "enabled": 1}
+    permitted = _permitted_price_lists(frappe.session.user)
+    if permitted is not None:
+        if not permitted:
+            return {"price_lists": []}
+        filters["name"] = ["in", permitted]
     rows = frappe.get_all(
         "Price List",
-        filters={"selling": 1, "enabled": 1},
+        filters=filters,
         fields=["name", "currency"],
         order_by="name asc",
     )
     return {"price_lists": rows}
+
+
+def _permitted_price_lists(user):
+    """Price List names `user` is restricted to by User Permission; None when unrestricted."""
+    if user == "Administrator":
+        return None
+    from frappe.permissions import get_user_permissions
+
+    perms = (get_user_permissions(user) or {}).get("Price List")
+    names = [p.get("doc") for p in perms or [] if p.get("doc")]
+    return names or None
 
 
 def _get_price_list(customer=None):
