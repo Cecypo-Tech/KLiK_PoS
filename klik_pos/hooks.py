@@ -95,6 +95,7 @@ fixtures = [
 			]
 		],
 	},
+	{"doctype": "Role", "filters": [["name", "=", "KLiK Only"]]},
 ]
 # Includes in <head>
 # ------------------
@@ -289,7 +290,7 @@ override_whitelisted_methods = {
 
 # Request Events
 # ----------------
-# before_request = ["klik_pos.utils.before_request"]
+before_request = ["klik_pos.utils.before_request"]
 # after_request = ["klik_pos.utils.after_request"]
 
 # Job Events
