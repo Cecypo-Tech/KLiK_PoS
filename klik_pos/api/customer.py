@@ -292,6 +292,9 @@ def get_customer_info(customer_name: str):
             return {"success": False, "error": f"Customer not found: {customer_name}"}
 
         party_details = get_party_details(party=customer_id, party_type="Customer", pos_profile=pos_profile.name)
+        from klik_pos.api.item.item_price import get_price_list_with_customer_priority
+
+        party_details["selling_price_list"] = get_price_list_with_customer_priority(customer_id, pos_profile)
         customer = frappe.get_doc("Customer", customer_id)
 
         # Get primary contact details

@@ -303,6 +303,10 @@ def get_pos_details():
         pos = get_current_pos_profile()
 
     details = pos.as_dict()
+    from klik_pos.api.item.item_price import get_price_list_with_customer_priority
+
+    # The list this user actually prices from, not the raw till field (User Permissions).
+    details["selling_price_list"] = get_price_list_with_customer_priority(None, pos)
     if "applicable_for_users" in details:
         del details["applicable_for_users"]
 

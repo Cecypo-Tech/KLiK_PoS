@@ -10,7 +10,7 @@ from erpnext.accounts.doctype.pricing_rule.pricing_rule import apply_pricing_rul
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 from .item_price import (
-    ENABLED_PRICE_LIST,
+    allowed_price_list_sql,
     fetch_item_price,
     _get_uom_conversion_factor,
     get_price_list_with_customer_priority,
@@ -102,7 +102,7 @@ def _prepare_erpnext_items(cart_items, context):
         direct_price_sql = f"""
             SELECT price_list_rate
             FROM `tabItem Price`
-            WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+            WHERE item_code = %s AND uom = %s AND selling = 1 AND {allowed_price_list_sql()}
             AND (price_list = %s OR %s IS NULL)
             ORDER BY modified DESC LIMIT 1
         """
@@ -245,7 +245,7 @@ def _handle_no_pricing_rule(erpnext_item, cart_items, context):
         direct_price_sql = f"""
             SELECT price_list_rate
             FROM `tabItem Price`
-            WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+            WHERE item_code = %s AND uom = %s AND selling = 1 AND {allowed_price_list_sql()}
             AND (price_list = %s OR %s IS NULL)
             ORDER BY modified DESC LIMIT 1
         """
@@ -280,7 +280,7 @@ def _calculate_discounted_price(cart_item, pricing_result, context):
     direct_price_sql = f"""
         SELECT price_list_rate
         FROM `tabItem Price`
-        WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+        WHERE item_code = %s AND uom = %s AND selling = 1 AND {allowed_price_list_sql()}
         AND (price_list = %s OR %s IS NULL)
         ORDER BY modified DESC LIMIT 1
     """

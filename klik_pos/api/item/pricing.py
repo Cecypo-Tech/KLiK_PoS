@@ -6,7 +6,12 @@ from frappe.utils import flt
 from erpnext.accounts.doctype.pricing_rule.pricing_rule import apply_pricing_rule
 from klik_pos.klik_pos.utils import get_current_pos_profile
 from ..sql_builder import apply_sql_permissions
-from .item_price import ENABLED_PRICE_LIST, is_enabled_price_list
+from .item_price import (
+    allowed_price_list_sql,
+    checked_price_list,
+    get_price_list_with_customer_priority,
+    permitted_price_lists,
+)
 
 
 @frappe.whitelist()
@@ -73,7 +78,7 @@ def _build_pricing_context(customer=None, price_list=None):
         "pos_profile": pos_profile,
         "company": company,
         "warehouse": pos_profile.warehouse if pos_profile else None,
-        "price_list": price_list or _get_price_list(customer),
+        "price_list": checked_price_list(price_list) or get_price_list_with_customer_priority(customer),
         "currency": frappe.get_cached_value("Company", company, "default_currency") or "SAR",
         "customer": customer,
         "customer_group": None,
@@ -103,7 +108,7 @@ def get_selling_price_lists():
     permissions, so the filter is applied here.
     """
     filters = {"selling": 1, "enabled": 1}
-    permitted = _permitted_price_lists(frappe.session.user)
+    permitted = permitted_price_lists()
     if permitted is not None:
         if not permitted:
             return {"price_lists": []}
@@ -117,47 +122,6 @@ def get_selling_price_lists():
     return {"price_lists": rows}
 
 
-def _permitted_price_lists(user):
-    """Price List names `user` is restricted to by User Permission; None when unrestricted."""
-    if user == "Administrator":
-        return None
-    from frappe.permissions import get_user_permissions
-
-    perms = (get_user_permissions(user) or {}).get("Price List")
-    names = [p.get("doc") for p in perms or [] if p.get("doc")]
-    return names or None
-
-
-def _get_price_list(customer=None):
-    if customer:
-        customer_doc = frappe.get_list(
-            "Customer",
-            filters={"name": customer},
-            fields=["default_price_list", "customer_group"],
-            limit=1,
-        )
-        if customer_doc and is_enabled_price_list(customer_doc[0].get("default_price_list")):
-            return customer_doc[0]["default_price_list"]
-        
-        if customer_doc and customer_doc[0].get("customer_group"):
-            group_doc = frappe.get_list(
-                "Customer Group",
-                filters={"name": customer_doc[0]["customer_group"]},
-                fields=["default_price_list"],
-                limit=1,
-            )
-            if group_doc and is_enabled_price_list(group_doc[0].get("default_price_list")):
-                return group_doc[0]["default_price_list"]
-
-    pos_profile = get_current_pos_profile()
-    if pos_profile and getattr(pos_profile, "selling_price_list", None):
-        return pos_profile.selling_price_list
-
-    price_list = frappe.db.get_single_value("Selling Settings", "selling_price_list")
-    if price_list:
-        return price_list
-
-    return None
 
 
 def _prepare_erpnext_items(cart_items, context):
@@ -215,7 +179,7 @@ def _get_item_price(item_code, uom, price_list, customer=None):
         sql = f"""
             SELECT price_list_rate, currency
             FROM `tabItem Price`
-            WHERE item_code = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+            WHERE item_code = %s AND selling = 1 AND {allowed_price_list_sql()}
         """
         params = [item_code]
         

@@ -13,7 +13,7 @@ from ..sql_builder import (
     record_denied_doctype,
     reset_denied_doctypes,
 )
-from .item_price import fetch_item_price, is_enabled_price_list
+from .item_price import checked_price_list, fetch_item_price, get_price_list_with_customer_priority
 from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balance
 from .search_utils import build_item_search_conditions
 
@@ -66,7 +66,7 @@ def get_items(
 
     requested_price_list = price_list
     requested_warehouse = warehouse
-    pos_doc, warehouse, pos_price_list, hide_unavailable = _get_pos_context()
+    pos_doc, warehouse, _pos_price_list, hide_unavailable = _get_pos_context()
     include_service_items = _include_service_items(pos_doc)
 
     # Probed up front rather than inferred from the denial record, because the query branch
@@ -81,7 +81,7 @@ def get_items(
     if requested_warehouse:
         warehouse = checked_warehouse(pos_doc, requested_warehouse) or warehouse
 
-    price_list = requested_price_list or _get_priority_price_list(customer, pos_doc, pos_price_list)
+    price_list = checked_price_list(requested_price_list) or get_price_list_with_customer_priority(customer, pos_doc)
 
     try:
         select_fields = (
@@ -1049,38 +1049,6 @@ def _build_degradation(stock_unavailable):
     }
 
 
-def _get_priority_price_list(customer=None, pos_profile=None, default_price_list=None):
-    try:
-        if customer:
-            row = frappe.db.get_value(
-                "Customer", customer, ["default_price_list", "customer_group"], as_dict=True
-            )
-            if row:
-                if row.default_price_list and is_enabled_price_list(row.default_price_list):
-                    return row.default_price_list
-                if row.customer_group:
-                    group_list = frappe.db.get_value(
-                        "Customer Group", row.customer_group, "default_price_list"
-                    )
-                    if group_list and is_enabled_price_list(group_list):
-                        return group_list
-    except Exception as e:
-        frappe.logger().warning(f"Error getting customer-based price list: {e}")
-    
-    if pos_profile and getattr(pos_profile, "selling_price_list", None):
-        return pos_profile.selling_price_list
-    
-    try:
-        selling_settings_price_list = frappe.db.get_single_value("Selling Settings", "selling_price_list")
-        if selling_settings_price_list:
-            return selling_settings_price_list
-    except Exception:
-        pass
-    
-    if default_price_list:
-        return default_price_list
-    
-    return None
 
 
 def _include_service_items(pos_doc):

@@ -79,19 +79,14 @@ class TestDisabledPriceLists(FrappeTestCase):
 		self.assertEqual(price.get("price"), 1200)
 
 	def _pickers(self):
-		"""Every place that picks a customer's price list, each with the till patched in."""
+		"""The one resolver every place that prices from a customer's list goes through, with the
+		till patched in and passed in."""
 		from unittest.mock import patch
 
-		from klik_pos.api.item import item_listing, pricing
-
 		till = frappe._dict(selling_price_list=ENABLED)
-		with (
-			patch("klik_pos.api.item.item_price.get_current_pos_profile", return_value=till),
-			patch("klik_pos.api.item.pricing.get_current_pos_profile", return_value=till),
-		):
+		with patch("klik_pos.api.item.item_price.get_current_pos_profile", return_value=till):
 			yield "customer priority", get_price_list_with_customer_priority(CUSTOMER)
-			yield "item listing", item_listing._get_priority_price_list(CUSTOMER, pos_profile=till)
-			yield "cart pricing", pricing._get_price_list(CUSTOMER)
+		yield "till passed in", get_price_list_with_customer_priority(CUSTOMER, pos_profile=till)
 
 	def _set_defaults(self, customer_list, group_list):
 		frappe.db.set_value("Customer", CUSTOMER, "default_price_list", customer_list)

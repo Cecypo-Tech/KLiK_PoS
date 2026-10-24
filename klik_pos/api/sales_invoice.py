@@ -3739,7 +3739,7 @@ def _set_pos_profile_fields(doc, pos_profile, customer, business_type, amount_pa
 	doc.pos_profile = pos_profile.name
 	doc.company = pos_profile.company
 	doc.currency = get_customer_billing_currency(customer)
-	price_list = get_price_list_with_customer_priority(customer) or getattr(pos_profile, "selling_price_list", None)
+	price_list = get_price_list_with_customer_priority(customer, pos_profile)
 	if price_list:
 		doc.selling_price_list = price_list
 	doc.conversion_rate = 1.0

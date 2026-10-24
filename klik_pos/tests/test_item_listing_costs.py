@@ -15,6 +15,7 @@ from unittest.mock import patch
 import frappe
 
 from klik_pos.api.item import item_listing, item_stock
+from klik_pos.api.item.item_price import get_price_list_with_customer_priority
 from klik_pos.tests import listing_fixtures as fx
 from klik_pos.tests.test_item_listing_query import ListingQueryCase
 
@@ -41,7 +42,7 @@ class TestSmallerPageCosts(ListingQueryCase):
 		# tearDownClass commits, so the shared test customer is put back explicitly.
 		self.addCleanup(frappe.db.set_value, "Customer", "_Test Customer", "default_price_list", previous)
 		with patch.object(item_listing.frappe, "get_doc", side_effect=AssertionError("get_doc")):
-			chosen = item_listing._get_priority_price_list("_Test Customer", None, None)
+			chosen = get_price_list_with_customer_priority("_Test Customer")
 		self.assertEqual(chosen, "_Test Price List")
 
 	def test_neither_listing_endpoint_answers_guests(self):
