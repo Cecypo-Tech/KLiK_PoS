@@ -10,7 +10,7 @@ from klik_pos.klik_pos.utils import get_current_pos_profile_lite
 _SCAN_POS_PROFILE_FIELDS = ["warehouse", "selling_price_list", "custom_enable_service_items"]
 
 from ..sql_builder import apply_sql_permissions
-from .item_price import fetch_item_price
+from .item_price import fetch_item_price, get_price_list_with_customer_priority
 from .item_stock import fetch_item_balance
 from .item_listing import _fetch_product_bundle_map
 
@@ -43,7 +43,7 @@ def get_item_by_barcode(barcode: str):
     try:
         pos_doc = get_current_pos_profile_lite(_SCAN_POS_PROFILE_FIELDS)
         warehouse = pos_doc.get("warehouse")
-        price_list = pos_doc.get("selling_price_list")
+        price_list = get_price_list_with_customer_priority(None, pos_doc)
         include_service_items = _include_service_items(pos_doc)
 
         item_sql = """
@@ -211,7 +211,7 @@ def get_item_by_identifier(code: str):
 
         pos_doc = get_current_pos_profile_lite(_SCAN_POS_PROFILE_FIELDS)
         warehouse = pos_doc.get("warehouse")
-        price_list = pos_doc.get("selling_price_list")
+        price_list = get_price_list_with_customer_priority(None, pos_doc)
         include_service_items = _include_service_items(pos_doc)
     except Exception as e:
         frappe.log_error(

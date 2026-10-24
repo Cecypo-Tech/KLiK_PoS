@@ -5,7 +5,7 @@ from frappe.utils import cint, flt
 from erpnext.stock.get_item_details import get_item_details
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
-from .item_price import is_enabled_price_list
+from .item_price import get_price_list_with_customer_priority
 
 
 @frappe.whitelist()
@@ -71,10 +71,8 @@ def get_item_tax_details(item_code, customer=None, qty=1, uom=None):
             or 1.0
         )
 
-        price_list = (
-            customer_doc.default_price_list
-            if customer_doc and is_enabled_price_list(customer_doc.default_price_list)
-            else pos_profile.selling_price_list
+        price_list = get_price_list_with_customer_priority(
+            customer_doc.name if customer_doc else None, pos_profile
         )
         price_list_currency = currency
         if price_list:

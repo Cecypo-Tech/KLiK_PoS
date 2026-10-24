@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -27,7 +27,7 @@ class TestCustomerInfoLookup(FrappeTestCase):
 		frappe.db.set_value("Customer", duplicate.name, "modified", frappe.utils.add_days(frappe.utils.now(), 1))
 
 		with (
-			patch("klik_pos.api.customer.get_current_pos_profile", return_value=MagicMock(company=None)),
+			patch("klik_pos.api.customer.get_current_pos_profile", return_value=frappe._dict(company=None)),
 			patch("klik_pos.api.customer.get_party_details", return_value={}) as party_details,
 			patch("klik_pos.api.customer.get_customer_loyalty_summary", return_value={}),
 		):
@@ -45,7 +45,7 @@ class TestCustomerInfoLookup(FrappeTestCase):
 		frappe.db.set_value("Customer", customer.name, "custom_delivery_personnel", personnel.name)
 
 		with (
-			patch("klik_pos.api.customer.get_current_pos_profile", return_value=MagicMock(company=None)),
+			patch("klik_pos.api.customer.get_current_pos_profile", return_value=frappe._dict(company=None)),
 			patch("klik_pos.api.customer.get_party_details", return_value={}),
 			patch("klik_pos.api.customer.get_customer_loyalty_summary", return_value={}),
 		):

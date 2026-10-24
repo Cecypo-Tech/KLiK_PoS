@@ -5,8 +5,8 @@ from frappe.utils import cint, flt
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
 from ..sql_builder import apply_sql_permissions
-from .item_listing import _fetch_batch_stock, _get_priority_price_list
-from .item_price import fetch_item_price
+from .item_listing import _fetch_batch_stock
+from .item_price import fetch_item_price, get_price_list_with_customer_priority
 
 
 @frappe.whitelist()
@@ -37,8 +37,8 @@ def get_template_variants(template_item_code: str, customer: str | None = None):
     if cint(template.has_variants) != 1:
         frappe.throw(_("Item {0} is not a variant template.").format(template_item_code))
 
-    pos_doc, warehouse, default_price_list = _get_variant_pos_context()
-    price_list = _get_priority_price_list(customer, pos_doc, default_price_list)
+    pos_doc, warehouse, _till_list = _get_variant_pos_context()
+    price_list = get_price_list_with_customer_priority(customer, pos_doc)
 
     variants = _get_template_variant_rows(template_item_code)
     variant_codes = [variant.name for variant in variants]

@@ -10,6 +10,51 @@ from ..sql_builder import apply_sql_permissions
 ENABLED_PRICE_LIST = "price_list IN (SELECT name FROM `tabPrice List` WHERE enabled = 1)"
 
 
+def permitted_price_lists(user=None):
+    """Price List names `user` is restricted to by User Permission; None when unrestricted."""
+    user = user or frappe.session.user
+    if user == "Administrator":
+        return None
+    from frappe.permissions import get_user_permissions
+
+    perms = (get_user_permissions(user) or {}).get("Price List")
+    names = [p.get("doc") for p in perms or [] if p.get("doc")]
+    return names or None
+
+
+def is_enabled_price_list(price_list):
+    return bool(price_list) and bool(frappe.db.get_value("Price List", price_list, "enabled"))
+
+
+def is_allowed_price_list(price_list):
+    """Enabled, and not shut out by the user's Price List permissions."""
+    if not is_enabled_price_list(price_list):
+        return False
+    permitted = permitted_price_lists()
+    return permitted is None or price_list in permitted
+
+
+def checked_price_list(price_list):
+    """`price_list` if the user may price from it; None when none was asked for; throws otherwise."""
+    if not price_list:
+        return None
+    permitted = permitted_price_lists()
+    if permitted is not None and price_list not in permitted:
+        frappe.throw(
+            _("You cannot use price list {0} at this till.").format(price_list), frappe.PermissionError
+        )
+    return price_list
+
+
+def allowed_price_list_sql():
+    """SQL condition on `price_list`: enabled, and one of the user's permitted lists when restricted."""
+    permitted = permitted_price_lists()
+    if permitted is None:
+        return ENABLED_PRICE_LIST
+    names = ", ".join(frappe.db.escape(name) for name in permitted)
+    return f"{ENABLED_PRICE_LIST} AND price_list IN ({names})"
+
+
 @frappe.whitelist()
 def get_item_price_for_customer(item_code, customer=None, uom=None):
     try:
@@ -55,14 +100,13 @@ def fetch_item_price(
     uom: str | None = None,
 ) -> dict:
     try:
-        if not price_list:
-            price_list = get_price_list_with_customer_priority(customer)
+        price_list = checked_price_list(price_list) or get_price_list_with_customer_priority(customer)
 
         if not price_list or not str(price_list).strip():
             base_sql = f"""
                 SELECT price_list_rate, currency
                 FROM `tabItem Price`
-                WHERE item_code = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+                WHERE item_code = %s AND selling = 1 AND {allowed_price_list_sql()}
             """
             params = [item_code]
 
@@ -271,6 +315,8 @@ def fetch_item_price(
             "currency_symbol": default_symbol,
         }
 
+    except frappe.PermissionError:
+        raise
     except Exception:
         frappe.log_error(
             frappe.get_traceback(),
@@ -338,13 +384,12 @@ def _calculate_price_from_default_uom(
         if not factor:
             return None
 
-        if not price_list:
-            price_list = get_price_list_with_customer_priority(customer)
+        price_list = checked_price_list(price_list) or get_price_list_with_customer_priority(customer)
 
         price_sql = f"""
             SELECT price_list_rate, currency
             FROM `tabItem Price`
-            WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+            WHERE item_code = %s AND uom = %s AND selling = 1 AND {allowed_price_list_sql()}
         """
 
         params = [item_code, default_uom]
@@ -366,7 +411,7 @@ def _calculate_price_from_default_uom(
             fallback_sql = f"""
                 SELECT price_list_rate, currency
                 FROM `tabItem Price`
-                WHERE item_code = %s AND uom = %s AND selling = 1 AND {ENABLED_PRICE_LIST}
+                WHERE item_code = %s AND uom = %s AND selling = 1 AND {allowed_price_list_sql()}
                 ORDER BY modified DESC
                 LIMIT 1
             """
@@ -415,69 +460,38 @@ def _calculate_price_from_default_uom(
         return None
 
 
-def is_enabled_price_list(price_list):
-    return bool(price_list) and bool(frappe.db.get_value("Price List", price_list, "enabled"))
-
-
-def get_price_list_with_customer_priority(customer=None):
-    try:
-        if customer:
-            customer_sql = """
-                SELECT default_price_list, customer_group
-                FROM `tabCustomer` c
-                WHERE c.name = %s
-            """
-            customer_sql = apply_sql_permissions(customer_sql)
-
-            res = frappe.db.sql(
-                customer_sql,
-                (customer,),
-            )
-
-            if res and res[0][0] and is_enabled_price_list(res[0][0]):
-                return res[0][0]
-
-            # Customer group fallback
-            if res and len(res[0]) > 1 and res[0][1]:
-                customer_group_sql = """
-                    SELECT default_price_list
-                    FROM `tabCustomer Group` cg
-                    WHERE cg.name = %s
-                """
-                customer_group_sql = apply_sql_permissions(customer_group_sql)
-                customer_group_res = frappe.db.sql(
-                    customer_group_sql,
-                    (res[0][1],),
-                )
-                if (
-                    customer_group_res
-                    and customer_group_res[0][0]
-                    and is_enabled_price_list(customer_group_res[0][0])
-                ):
-                    return customer_group_res[0][0]
-
-        pos_doc = get_current_pos_profile()
-        pos_pl = getattr(pos_doc, "selling_price_list", None)
-
-        if pos_pl:
-            return pos_pl
-
-        # Selling Settings fallback
-        selling_settings_sql = """
-            SELECT selling_price_list
-            FROM `tabSelling Settings` ss
-            LIMIT 1
-        """
-        selling_settings_sql = apply_sql_permissions(selling_settings_sql)
-        settings_res = frappe.db.sql(selling_settings_sql)
-        if settings_res and settings_res[0][0]:
-            return settings_res[0][0]
-
-        return None
-
-    except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Error getting price list with customer priority",
+def get_price_list_with_customer_priority(customer=None, pos_profile=None):
+    """The list to price from: the customer's default, then their group's, then the till's,
+    then Selling Settings - the first that is enabled and the user may use. A restricted user
+    whose chain names none of their lists gets the first list they may use."""
+    for candidate in _price_list_chain(customer, pos_profile):
+        if is_allowed_price_list(candidate):
+            return candidate
+    permitted = permitted_price_lists()
+    if permitted:
+        return frappe.db.get_value(
+            "Price List",
+            {"name": ["in", permitted], "enabled": 1, "selling": 1},
+            "name",
+            order_by="name asc",
         )
-        return None
+    return None
+
+
+def _price_list_chain(customer, pos_profile):
+    if customer:
+        row = frappe.db.get_value(
+            "Customer", customer, ["default_price_list", "customer_group"], as_dict=True
+        )
+        if row:
+            yield row.default_price_list
+            if row.customer_group:
+                yield frappe.db.get_value("Customer Group", row.customer_group, "default_price_list")
+    if pos_profile is None:
+        try:
+            pos_profile = get_current_pos_profile()
+        except Exception:
+            pos_profile = None
+    if pos_profile:
+        yield pos_profile.get("selling_price_list")
+    yield frappe.db.get_single_value("Selling Settings", "selling_price_list")

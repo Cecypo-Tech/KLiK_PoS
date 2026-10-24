@@ -5,6 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, nowdate
 
+from klik_pos.api.item.item_price import get_price_list_with_customer_priority
+
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
     _apply_pos_tax_treatment,
@@ -378,7 +380,8 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     so.delivery_date = nowdate()
     so.company = pos_profile.company
     so.currency = pos_profile.currency
-    so.selling_price_list = pos_profile.selling_price_list
+    # A held order is priced from the till, as checkout re-prices it; only the User Permission check applies.
+    so.selling_price_list = get_price_list_with_customer_priority(None, pos_profile)
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = opening_entry
     so.custom_is_klik_held = 1
