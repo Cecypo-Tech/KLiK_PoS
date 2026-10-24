@@ -95,7 +95,6 @@ fixtures = [
 			]
 		],
 	},
-	{"doctype": "Role", "filters": [["name", "=", "KLiK Only"]]},
 ]
 # Includes in <head>
 # ------------------
@@ -167,11 +166,13 @@ doctype_js.update({"Company": "public/js/company.js"})
 
 before_install = "klik_pos.setup.install.before_install"
 after_install = [
+	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
 	"klik_pos.patches.v16_0.add_item_listing_indexes.execute",
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
 ]
 after_migrate = [
+	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
 	# Idempotent; the stamped column may arrive with frappe_mpsa_payments after klik.
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
