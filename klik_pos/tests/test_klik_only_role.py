@@ -50,3 +50,6 @@ class TestKlikOnlyRole(FrappeTestCase):
 		self.addCleanup(frappe.db.set_value, "Role", POS_ONLY_ROLE, "disabled", 0)
 		ensure_pos_only_role()
 		self.assertEqual(frappe.db.get_value("Role", POS_ONLY_ROLE, "disabled"), 1)
+
+	def test_a_system_manager_reaches_the_desk_even_with_the_role(self):
+		self._visit("/desk/sales-invoice", ["Sales User", "KLiK Only", "System Manager"])
