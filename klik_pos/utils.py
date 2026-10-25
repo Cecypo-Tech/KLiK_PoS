@@ -9,8 +9,9 @@ def before_request():
 	path = frappe.request.path
 	if not any(path == p or path.startswith(p + "/") for p in ("/desk", "/app")):
 		return
-	# Administrator is handed every role on the site, this one included.
-	if frappe.session.user == "Administrator" or POS_ONLY_ROLE not in frappe.get_roles():
+	# A System Manager is never shut out - Administrator included, which holds every role.
+	roles = frappe.get_roles()
+	if POS_ONLY_ROLE not in roles or "System Manager" in roles:
 		return
 	redirect = RequestRedirect("/klik_pos")
 	redirect.code = 302  # 308 is cached by the browser for good, even after the role is removed
