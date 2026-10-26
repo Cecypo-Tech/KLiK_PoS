@@ -10,11 +10,15 @@ export interface LineSplit {
 export interface PlanInput {
   /** A stock item that may not go negative, with a known balance. */
   limited: boolean;
+  /** In stock units. */
   available: number;
+  /** In the line's unit. */
   requested: number;
-  /** What the cart's other lines of this item already take. */
+  /** What the cart's other lines of this item already take, in stock units (linesStockQty). */
   otherLinesQty: number;
   losEnabled: boolean;
+  /** Stock units per one of the line's unit, e.g. 1/15 for kg of a wire stocked in 15 kg rolls. */
+  factor?: number;
 }
 
 export interface LosAdjustment {
@@ -32,12 +36,30 @@ export function splitForLoS(requested: number, availableLeft: number): LineSplit
 }
 
 /** The line's quantity and LoS for a requested amount, or null when the till must refuse it. */
-export function planLineQty({ limited, available, requested, otherLinesQty, losEnabled }: PlanInput): LineSplit | null {
+export function planLineQty({ limited, available, requested, otherLinesQty, losEnabled, factor }: PlanInput): LineSplit | null {
   if (!limited) return { quantity: requested, los_qty: 0 };
-  const left = Math.max(0, available - otherLinesQty);
+  const left = roundQty(Math.max(0, available - otherLinesQty) / stockFactor({ conversion_factor: factor }));
   if (requested <= left) return { quantity: requested, los_qty: 0 };
   return losEnabled ? splitForLoS(requested, left) : null;
 }
+
+/** Stock units in one of the line's unit; 1 when the line has no factor. */
+export const stockFactor = (line: { conversion_factor?: number }) =>
+  Number(line.conversion_factor) > 0 ? Number(line.conversion_factor) : 1;
+
+/** Stock units the cart's lines of one item hold (but `exceptId`), each line in its own unit. */
+export const linesStockQty = (
+  lines: { id: string; item_code?: string; quantity: number; conversion_factor?: number }[],
+  code: string,
+  exceptId?: string,
+) =>
+  lines
+    .filter((line) => line.id !== exceptId && (line.item_code || line.id) === code)
+    .reduce((sum, line) => sum + line.quantity * stockFactor(line), 0);
+
+/** The refusal for a request stock cannot cover, in the line's unit. */
+export const noStockMessage = (name: string, uom: string | undefined, stockAvailable: number, factor?: number) =>
+  `Only ${(stockAvailable / stockFactor({ conversion_factor: factor })).toLocaleString("en-US", { maximumFractionDigits: 2 })} ${uom || "units"} of ${name} available`;
 
 /** The checkout preview's corrections, by position in the request - skipped for a line that is
  * no longer the item the server saw there. */

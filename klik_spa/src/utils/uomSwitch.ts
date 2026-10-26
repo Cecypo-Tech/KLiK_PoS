@@ -20,6 +20,21 @@ export function uomMaps(data: {
   return { uoms: Array.from(new Set(rows.map((row) => row.uom))), prices, factors };
 }
 
+/** A cart line moved to another unit. Its `available` is kept in the line's unit (the
+ * listing gives it so), so it is converted with the line: 100 rolls become 1,500 kg. */
+export function lineInUom<T extends { available?: number; conversion_factor?: number }>(
+  line: T,
+  uom: string,
+  price: number,
+  conversionFactor?: number,
+): T & { uom: string; price: number } {
+  if (!conversionFactor) return { ...line, uom, price };
+  const from = Number(line.conversion_factor) > 0 ? Number(line.conversion_factor) : 1;
+  const available =
+    typeof line.available === "number" ? Math.round((line.available * from) / conversionFactor * 1e6) / 1e6 : line.available;
+  return { ...line, uom, price, conversion_factor: conversionFactor, available };
+}
+
 /** The unit after `current`, wrapping round; null when there is only one. */
 export function nextUom(uoms: string[], current: string | undefined): string | null {
   if (uoms.length < 2) return null;

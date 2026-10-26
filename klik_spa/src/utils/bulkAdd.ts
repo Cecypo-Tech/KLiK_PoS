@@ -1,5 +1,5 @@
 import type { CartItem } from "../../types";
-import { losToast, planLineQty } from "./lossOfSale";
+import { linesStockQty, losToast, noStockMessage, planLineQty, stockFactor } from "./lossOfSale";
 
 export interface BulkEntry {
   item: Omit<CartItem, "quantity">;
@@ -33,20 +33,22 @@ export function addEntries(cartItems: CartItem[], entries: BulkEntry[], helpers:
   for (const { item, qty } of entries) {
     const code = item.item_code || item.id;
     const existing = items.find((c) => c.id === item.id || (c.item_code || c.id) === code);
-    const sameItemQty = items.filter((c) => (c.item_code || c.id) === code).reduce((sum, c) => sum + c.quantity, 0);
+    const target = existing ?? item;
+    const stockAvailable = (item.available ?? 0) * stockFactor(item);
     const plan = planLineQty({
       limited: helpers.limited(item),
-      available: item.available ?? 0,
+      available: stockAvailable,
       requested: existing ? existing.quantity + (existing.los_qty ?? 0) + qty : qty,
-      otherLinesQty: sameItemQty - (existing?.quantity ?? 0),
+      otherLinesQty: linesStockQty(items, code, existing?.id),
       losEnabled: helpers.losEnabled(item),
+      factor: target.conversion_factor,
     });
     if (!plan) {
-      refusals.push(`Only ${item.available} ${item.uom || "units"} of ${item.name} available`);
+      refusals.push(noStockMessage(item.name, target.uom, stockAvailable, target.conversion_factor));
       lineIds.push(null);
       continue;
     }
-    if (plan.los_qty > (existing?.los_qty ?? 0)) warnings.push(losToast(item.name, item.uom, plan));
+    if (plan.los_qty > (existing?.los_qty ?? 0)) warnings.push(losToast(item.name, target.uom, plan));
     const tax = {
       item_tax_template: item.item_tax_template,
       item_tax_rate: item.item_tax_rate,
