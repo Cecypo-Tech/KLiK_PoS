@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { CartItem } from "../../../types";
+import { switchUom, uomMaps } from "../../utils/uomSwitch";
 
 interface UOMSelectFieldProps {
   item: CartItem;
@@ -58,25 +59,7 @@ export const UOMSelectField = ({
         const data = await response.json();
         if (data?.message) {
           const uomData = data.message as UOMPriceResponse;
-          const rows = Array.isArray(uomData.uoms) ? uomData.uoms : [];
-          const uoms = rows
-            .map((row) => row.uom)
-            .filter((uom): uom is string => Boolean(uom));
-
-          const uniqueUOMs = Array.from(new Set(uoms));
-
-          const prices: Record<string, number> = {};
-          const factors: Record<string, number> = {};
-
-          for (const row of rows) {
-            if (!row.uom) continue;
-            prices[row.uom] = Number(row.price) || 0;
-            factors[row.uom] = Number(row.conversion_factor) || 1;
-          }
-
-          if (uomData.base_uom && !factors[uomData.base_uom]) {
-            factors[uomData.base_uom] = 1;
-          }
+          const { uoms: uniqueUOMs, prices, factors } = uomMaps(uomData);
 
           if (uomData.base_uom) {
             setDefaultUOM(uomData.base_uom);
@@ -159,20 +142,11 @@ export const UOMSelectField = ({
     }).format(value);
 
   const handleUOMSelect = (newUOM: string) => {
-    const directUOMPrice = uomPrices[newUOM];
-    const currentFactor = uomConversionFactors[selectedUOM] || 1;
-    const targetFactor = uomConversionFactors[newUOM] || 1;
-    const stockUOMPrice = currentFactor > 0 ? item.price / currentFactor : item.price;
-    const fallbackConvertedPrice = stockUOMPrice * targetFactor;
-    const newPrice =
-      typeof directUOMPrice === "number" && directUOMPrice > 0
-        ? directUOMPrice
-        : fallbackConvertedPrice;
-
+    const next = switchUom({ prices: uomPrices, factors: uomConversionFactors }, selectedUOM, item.price, newUOM);
     setSelectedUOM(newUOM);
     setIsDropdownOpen(false);
     setSearchQuery("");
-    onUOMChange(item.id, newUOM, Number(newPrice.toFixed(6)), targetFactor);
+    onUOMChange(item.id, next.uom, next.price, next.conversionFactor);
   };
 
   return (
