@@ -297,13 +297,20 @@ class TestReservationAgainstAQueuedDraft(StockReservationTestCase):
 			sre.save(ignore_permissions=True)
 
 	def test_a_failed_draft_can_be_retried(self):
-		from klik_pos.api.sales_invoice import retry_failed_sales_invoice
+		from unittest.mock import patch
+
+		from klik_pos.api import sales_invoice
 
 		doc = self._draft_invoice(queue_status="Failed")
 		doc.db_set({"queue_error": "x", "enable_background_invoice_submission": 1})
 
-		result = retry_failed_sales_invoice(doc.name)
+		# enqueue is after-commit: unpatched, the class teardown's commit would hand the
+		# worker a job for an invoice the test has already purged.
+		with patch.object(sales_invoice.frappe, "enqueue") as enqueue:
+			result = sales_invoice.retry_failed_sales_invoice(doc.name)
 
 		self.assertTrue(result.get("success"), result)
+		enqueue.assert_called_once()
+		self.assertEqual(enqueue.call_args.kwargs["invoice_name"], doc.name)
 		self.assertEqual(len(_active_entries(doc.name)), 1)
 		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "queue_status"), "Queued")
