@@ -1375,8 +1375,8 @@ def _mark_invoice_queued(doc, requested_by=None):
 		doc.queue_error = ""
 	if hasattr(doc, "queue_last_attempt_at"):
 		doc.queue_last_attempt_at = None
-	if requested_by and hasattr(doc, "owner"):
-		doc.owner = requested_by
+	# owner is deliberately left alone: Frappe 16 treats it as set-once, and Frappe sets
+	# it to the session user on insert anyway. requested_by stays for the callers' sake.
 
 
 def _finalize_submitted_invoice(doc, amount_paid, mode_of_payment, business_type, customer):
