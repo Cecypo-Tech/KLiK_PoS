@@ -7,6 +7,7 @@ import type { BundleEntry, CartItem, ItemTaxInfo } from "../../../types";
 import { QuantityInput } from "./QuantityInput";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { UOMSelectField } from "./UOMSelectField";
+import { nextUom, switchUom, uomMaps } from "../../utils/uomSwitch";
 import { SerialBatchBundleModal } from "./SerialBatchBundleSelector";
 import { useCartStore } from "../../stores/cartStore";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
@@ -512,8 +513,34 @@ export const CartItemRow = ({
 
   const hasBundleEntries = bundleEntries.length > 0;
 
+  const cycleUom = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const customerParam = selectedCustomer?.id ? `&customer=${encodeURIComponent(selectedCustomer.id)}` : "";
+      const response = await fetch(
+        `/api/method/klik_pos.api.item.item_details.get_item_uoms_and_prices?item_code=${encodeURIComponent(item.item_code || item.id)}${customerParam}`,
+        { credentials: "include" }
+      );
+      const maps = uomMaps((await response.json())?.message || {});
+      const to = nextUom(maps.uoms, item.uom);
+      if (!to) {
+        toast.info(`${item.name} is sold in one unit only`);
+        return;
+      }
+      const next = switchUom(maps, item.uom || "", item.price, to);
+      onUOMChange(item.id, next.uom, next.price, next.conversionFactor);
+    } catch (error) {
+      console.error("Could not switch unit:", error);
+      toast.error("Could not switch unit");
+    }
+  };
+
   const currentWarehouseStock = fullItemData?.warehouse_stock?.find(wh => wh.warehouse === warehouse);
-  const availableStock = currentWarehouseStock?.bal_qty || 0;
+  // Stock is counted in the stock UOM; the line may be in another, e.g. kg of a wire stocked in rolls.
+  const uomFactor = Number(item.conversion_factor) > 0 ? Number(item.conversion_factor) : 1;
+  const availableStock = (currentWarehouseStock?.bal_qty || 0) / uomFactor;
+  const availableStockLabel = availableStock.toLocaleString(undefined, { maximumFractionDigits: 2 });
   const valuationRate = typeof currentWarehouseStock?.val_rate === "number" ? currentWarehouseStock.val_rate : null;
   // val_rate is per stock UOM and never includes sales tax; discountedPrice is per the line's
   // UOM and includes whatever tax is baked into the rate. The list's tax_info (carried onto the
@@ -698,12 +725,13 @@ export const CartItemRow = ({
                 onClick={(e) => (e.target as HTMLInputElement).select()}
                 className={`w-7 text-center font-semibold text-gray-900 dark:text-white text-sm border-l border-gray-200 dark:border-gray-600 py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
               />
-              {/* The UOM picker lives in the expanded panel; the label opens it. */}
+              {/* The UOM picker lives in the expanded panel; the label opens it. Right-click flips to the next unit. */}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
+                onContextMenu={cycleUom}
                 className="max-w-[2.5rem] truncate px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 border-r border-gray-200 dark:border-gray-600 hover:text-beveren-600 dark:hover:text-beveren-400"
-                title={item.uom ? `Unit: ${item.uom}` : "Change unit"}
+                title={item.uom ? `Unit: ${item.uom} (right-click for the next unit)` : "Change unit"}
               >
                 {item.uom || "Nos"}
               </button>
@@ -983,7 +1011,7 @@ export const CartItemRow = ({
                   <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800 flex items-center gap-2">
                     <AlertTriangle size={16} className="text-yellow-600 dark:text-yellow-400" />
                     <span className="text-xs text-yellow-700 dark:text-yellow-300">
-                      Only {availableStock} units available in {warehouse}
+                      Only {availableStockLabel} {item.uom || "units"} available in {warehouse}
                     </span>
                   </div>
                 ) : null}
@@ -993,7 +1021,7 @@ export const CartItemRow = ({
                     <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
                       <p className="text-[10px] text-gray-400 uppercase font-semibold">Stock Balance</p>
                       <p className="text-base font-bold text-gray-900 dark:text-white">
-                        {currentWarehouseStock.bal_qty.toLocaleString()} {fullItemData?.uom}
+                        {availableStockLabel} {item.uom || fullItemData?.uom}
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5">in {warehouse}</p>
                     </div>
@@ -1001,12 +1029,12 @@ export const CartItemRow = ({
                       <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
                         <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate</p>
                         <p className="whitespace-nowrap text-base font-bold text-gray-900 dark:text-white">
-                          {formatCurrencyWithSymbol(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate, currency_symbol)}
+                          {formatCurrencyWithSymbol(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate * uomFactor, currency_symbol)}
                           {isInclusiveTax && <span className="ml-1 text-[9px] font-medium text-gray-500">(incl. VAT)</span>}
                         </p>
                         <p className="text-[10px] text-gray-500 mt-0.5">
                           {isInclusiveTax
-                            ? `${formatCurrencyWithSymbol(currentWarehouseStock.val_rate, currency_symbol)} (excl. VAT)`
+                            ? `${formatCurrencyWithSymbol(currentWarehouseStock.val_rate * uomFactor, currency_symbol)} (excl. VAT)`
                             : `per ${item.uom || fullItemData?.uom}`}
                         </p>
                       </div>
