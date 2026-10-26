@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyLosAdjustments, losToast, planLineQty, qtyToSend, splitForLoS } from "./lossOfSale";
+import { applyLosAdjustments, linesStockQty, losToast, noStockMessage, planLineQty, qtyToSend, splitForLoS } from "./lossOfSale";
 
 const plan = (over: Partial<Parameters<typeof planLineQty>[0]> = {}) =>
   planLineQty({ limited: true, available: 10, requested: 16, otherLinesQty: 0, losEnabled: true, ...over });
@@ -25,6 +25,15 @@ describe("planLineQty", () => {
   });
   it("leaves unlimited stock alone", () => {
     expect(plan({ limited: false, losEnabled: false })).toEqual({ quantity: 16, los_qty: 0 });
+  });
+  it("limits a line in another unit by the stock it converts to", () => {
+    // 100 rolls in stock; the line sells by the kg, 15 kg to a roll.
+    const kg = { available: 100, factor: 1 / 15 };
+    expect(plan({ ...kg, requested: 200, losEnabled: false })).toEqual({ quantity: 200, los_qty: 0 });
+    expect(plan({ ...kg, requested: 1600 })).toEqual({ quantity: 1500, los_qty: 100 });
+    expect(plan({ ...kg, requested: 1600, losEnabled: false })).toBeNull();
+    // Another line already holds 40 rolls.
+    expect(plan({ ...kg, otherLinesQty: 40, requested: 1000 })).toEqual({ quantity: 900, los_qty: 100 });
   });
   it("treats a stepper minus as a smaller request", () => {
     // "10 + LoS 6", minus one: 15 requested
@@ -62,4 +71,22 @@ describe("qtyToSend", () => {
     expect(qtyToSend(false, 10)).toBeNull();
     expect(qtyToSend(false, 0)).toBeNull();
   });
+});
+
+describe("linesStockQty", () => {
+  it("adds the item's other lines in stock units, whatever unit each is in", () => {
+    const lines = [
+      { id: "1", item_code: "WIRE", quantity: 2, conversion_factor: 1 },
+      { id: "2", item_code: "WIRE", quantity: 30, conversion_factor: 1 / 15 },
+      { id: "3", item_code: "NAIL", quantity: 9 },
+    ];
+    expect(linesStockQty(lines, "WIRE")).toBeCloseTo(4);
+    expect(linesStockQty(lines, "WIRE", "1")).toBeCloseTo(2);
+    expect(linesStockQty(lines, "NAIL")).toBe(9);
+  });
+});
+
+it("noStockMessage states the stock in the line's unit", () => {
+  expect(noStockMessage("Wire", "kg", 100, 1 / 15)).toBe("Only 1,500 kg of Wire available");
+  expect(noStockMessage("Box", undefined, 5, 12)).toBe("Only 0.42 units of Box available");
 });

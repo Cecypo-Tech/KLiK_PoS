@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextUom, switchUom, uomMaps } from "./uomSwitch";
+import { lineInUom, nextUom, switchUom, uomMaps } from "./uomSwitch";
 
 // Binding wire: sold by the roll (stock UOM) or by the kg; a roll is 15 kg.
 const maps = uomMaps({
@@ -39,5 +39,16 @@ describe("switchUom", () => {
   });
   it("converts the current price through the stock unit when the unit has no price", () => {
     expect(switchUom(maps, "kg(s)", 201, "Coil").price).toBeCloseTo(201 * 15 * 0.5);
+  });
+});
+
+describe("lineInUom", () => {
+  it("moves the line's stock figure into the new unit", () => {
+    const line = { uom: "Roll(s)", price: 3000, conversion_factor: 1, available: 100 };
+    expect(lineInUom(line, "kg(s)", 201, 1 / 15)).toEqual({ uom: "kg(s)", price: 201, conversion_factor: 1 / 15, available: 1500 });
+  });
+  it("keeps the factor and stock when no factor is given", () => {
+    const line = { uom: "Nos", price: 5, available: 7 };
+    expect(lineInUom(line, "Nos", 6)).toEqual({ uom: "Nos", price: 6, available: 7 });
   });
 });

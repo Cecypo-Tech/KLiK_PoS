@@ -8,7 +8,8 @@ import { clearDraftInvoiceCache } from '../utils/draftInvoiceCache'
 import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
-import { applyLosAdjustments, losToast, planLineQty, type LosAdjustment } from '../utils/lossOfSale'
+import { applyLosAdjustments, linesStockQty, losToast, noStockMessage, planLineQty, stockFactor, type LosAdjustment } from '../utils/lossOfSale'
+import { lineInUom } from '../utils/uomSwitch'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
@@ -58,11 +59,6 @@ const losEnabledFor = (item: { has_serial_no?: boolean; has_batch_no?: boolean; 
   !item.has_serial_no &&
   !item.has_batch_no &&
   !item.is_product_bundle;
-
-const sameItemQty = (items: CartItem[], code: string, exceptId?: string) =>
-  items
-    .filter((cartItem) => cartItem.id !== exceptId && (cartItem.item_code || cartItem.id) === code)
-    .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
 
 const fetchItemTaxDetails = async (
   itemCode: string,
@@ -323,9 +319,8 @@ export const useCartStore = create<CartState>()(
         const existingItem = state.cartItems.find((cartItem) =>
           cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
         );
-        const totalMatchingQty = state.cartItems
-          .filter((cartItem) => (cartItem.item_code || cartItem.id) === incomingCode)
-          .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
+        // Stock and the cart's other lines in stock units; each line may be in its own unit.
+        const stockAvailable = (item.available ?? 0) * stockFactor(item);
 
         const limited = hasFiniteAvailableStock(item);
         const losEnabled = losEnabledFor(item);
@@ -337,16 +332,17 @@ export const useCartStore = create<CartState>()(
         if (existingItem) {
           const plan = planLineQty({
             limited,
-            available: item.available ?? 0,
+            available: stockAvailable,
             requested: existingItem.quantity + (existingItem.los_qty ?? 0) + 1,
-            otherLinesQty: totalMatchingQty - existingItem.quantity,
+            otherLinesQty: linesStockQty(state.cartItems, incomingCode, existingItem.id),
             losEnabled,
+            factor: existingItem.conversion_factor,
           });
           if (!plan) {
-            toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
+            toast.error(noStockMessage(item.name, existingItem.uom, stockAvailable, existingItem.conversion_factor));
             return;
           }
-          if (plan.los_qty > (existingItem.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
+          if (plan.los_qty > (existingItem.los_qty ?? 0)) toast.warning(losToast(item.name, existingItem.uom, plan));
 
           const targetId = existingItem.id;
           const taxDetails = await fetchItemTaxDetails(
@@ -379,10 +375,11 @@ export const useCartStore = create<CartState>()(
         } else {
           const plan = planLineQty({
             limited,
-            available: item.available ?? 0,
+            available: stockAvailable,
             requested: 1,
-            otherLinesQty: totalMatchingQty,
+            otherLinesQty: linesStockQty(state.cartItems, incomingCode),
             losEnabled,
+            factor: item.conversion_factor,
           });
           if (!plan) return;
           if (plan.los_qty > 0) toast.warning(losToast(item.name, item.uom, plan));
@@ -434,22 +431,21 @@ export const useCartStore = create<CartState>()(
         const existingItem = state.cartItems.find((cartItem) =>
           cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
         );
-        const totalMatchingQty = state.cartItems
-          .filter((cartItem) => (cartItem.item_code || cartItem.id) === incomingCode)
-          .reduce((sum, cartItem) => sum + cartItem.quantity, 0);
-
+        const target = existingItem ?? item;
+        const stockAvailable = (item.available ?? 0) * stockFactor(item);
         const plan = planLineQty({
           limited: hasFiniteAvailableStock(item),
-          available: item.available ?? 0,
+          available: stockAvailable,
           requested: existingItem ? existingItem.quantity + (existingItem.los_qty ?? 0) + quantity : quantity,
-          otherLinesQty: totalMatchingQty - (existingItem?.quantity ?? 0),
+          otherLinesQty: linesStockQty(state.cartItems, incomingCode, existingItem?.id),
           losEnabled: losEnabledFor(item),
+          factor: target.conversion_factor,
         });
         if (!plan) {
-          toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
+          toast.error(noStockMessage(item.name, target.uom, stockAvailable, target.conversion_factor));
           return null;
         }
-        if (plan.los_qty > (existingItem?.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
+        if (plan.los_qty > (existingItem?.los_qty ?? 0)) toast.warning(losToast(item.name, target.uom, plan));
 
         let lineId: string;
         if (existingItem) {
@@ -542,15 +538,17 @@ export const useCartStore = create<CartState>()(
 
         const item = state.cartItems.find((cartItem) => cartItem.id === id);
         if (!item) return;
+        const stockAvailable = (item.available ?? 0) * stockFactor(item);
         const plan = planLineQty({
           limited: hasFiniteAvailableStock(item),
-          available: item.available ?? 0,
+          available: stockAvailable,
           requested: quantity,
-          otherLinesQty: sameItemQty(state.cartItems, item.item_code || item.id, id),
+          otherLinesQty: linesStockQty(state.cartItems, item.item_code || item.id, id),
           losEnabled: losEnabledFor(item),
+          factor: item.conversion_factor,
         });
         if (!plan) {
-          toast.error(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available`);
+          toast.error(noStockMessage(item.name, item.uom, stockAvailable, item.conversion_factor));
           return;
         }
         if (plan.los_qty > (item.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
@@ -580,15 +578,17 @@ export const useCartStore = create<CartState>()(
           return;
         }
 
+        const stockAvailable = (item.available ?? 0) * stockFactor(item);
         const plan = planLineQty({
           limited: hasFiniteAvailableStock(item),
-          available: item.available ?? 0,
+          available: stockAvailable,
           requested,
-          otherLinesQty: sameItemQty(state.cartItems, item.item_code || item.id, id),
+          otherLinesQty: linesStockQty(state.cartItems, item.item_code || item.id, id),
           losEnabled: losEnabledFor(item),
+          factor: item.conversion_factor,
         });
         if (!plan) {
-          toast.warning(`Only ${item.available} ${item.uom || 'units'} of ${item.name} available.`);
+          toast.warning(`${noStockMessage(item.name, item.uom, stockAvailable, item.conversion_factor)}.`);
           return;
         }
         if (plan.los_qty > (item.los_qty ?? 0)) toast.warning(losToast(item.name, item.uom, plan));
@@ -619,10 +619,9 @@ export const useCartStore = create<CartState>()(
         set((state) => ({
           cartItems: state.cartItems.map((item) => {
             if (item.id === id) {
-              // The factor turns this UOM into stock units, which the net weight needs.
-              return conversionFactor
-                ? { ...item, uom, price, conversion_factor: conversionFactor }
-                : { ...item, uom, price };
+              // The factor turns this UOM into stock units, which the net weight and the stock
+              // limits need; the line's available stock moves into the new unit with it.
+              return lineInUom(item, uom, price, conversionFactor);
             }
             return item;
           })

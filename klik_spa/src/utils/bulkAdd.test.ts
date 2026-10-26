@@ -36,6 +36,16 @@ describe("addEntries", () => {
     expect(result.refusals).toEqual(["Only 1 Nos of A available"]);
   });
 
+  it("checks a line in another unit against the stock it converts to", () => {
+    // 100 rolls in stock; the cart line was switched to kg, 15 kg to a roll.
+    const kgLine = { ...item("W", { uom: "kg", conversion_factor: 1 / 15 }), quantity: 1000 } as CartItem;
+    const roll = item("W", { uom: "Roll", conversion_factor: 1, available: 100 });
+    expect(addEntries([kgLine], [{ item: roll, qty: 400 }], helpers).cartItems[0]?.quantity).toBe(1400);
+    const refused = addEntries([kgLine], [{ item: roll, qty: 600 }], helpers);
+    expect(refused.cartItems[0]?.quantity).toBe(1000);
+    expect(refused.refusals).toEqual(["Only 1,500 kg of W available"]);
+  });
+
   it("puts new lines on top when the till says so", () => {
     const result = addEntries([{ ...item("Z"), quantity: 1 } as CartItem], [{ item: item("A"), qty: 1 }], {
       ...helpers,
