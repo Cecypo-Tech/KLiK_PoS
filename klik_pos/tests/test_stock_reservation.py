@@ -128,7 +128,10 @@ class StockReservationTestCase(FrappeTestCase):
 		frappe.db.commit()
 		super().tearDownClass()
 
-	def _draft_invoice(self, reserve_stock=1):
+	def _draft_invoice(self, reserve_stock=1, queue_status="Queued"):
+		"""A draft as the reserve step sees it in production: every caller of
+		_reserve_stock_for_queued_invoice has marked the draft Queued (or Processing)
+		and saved it first. queue_status=None gives a plain draft nobody queued."""
 		doc = frappe.new_doc("Sales Invoice")
 		doc.customer = self.customer
 		doc.company = self.company
@@ -139,6 +142,8 @@ class StockReservationTestCase(FrappeTestCase):
 		)
 		doc.insert(ignore_permissions=True)
 		self.addCleanup(self._purge_invoice, doc.name)
+		if queue_status:
+			doc.db_set("queue_status", queue_status)
 		return doc
 
 	def _purge_invoice(self, name):
@@ -238,3 +243,67 @@ class TestReservationCanBeReleasedWithoutRights(StockReservationTestCase):
 
 	def test_cancelling_nothing_is_a_no_op(self):
 		_cancel_sales_invoice_reservations("SINV-DOES-NOT-EXIST")
+
+
+class TestReservationAgainstAQueuedDraft(StockReservationTestCase):
+	"""ERPNext 16.52 (52176ecc7f) refuses a reservation unless the voucher is submitted.
+	klik holds stock for a draft while it waits in the submit queue, so the override lets
+	exactly that draft through and nothing else."""
+
+	def setUp(self):
+		self._set_reservation_enabled(True)
+
+	def test_a_queued_draft_can_reserve(self):
+		doc = self._draft_invoice(queue_status="Queued")
+		_reserve_stock_for_queued_invoice(doc)
+		self.assertEqual(len(_active_entries(doc.name)), 1)
+
+	def test_a_processing_draft_can_reserve(self):
+		doc = self._draft_invoice(queue_status="Processing")
+		_reserve_stock_for_queued_invoice(doc)
+		self.assertEqual(len(_active_entries(doc.name)), 1)
+
+	def test_a_plain_draft_is_still_refused(self):
+		doc = self._draft_invoice(queue_status=None)
+		with self.assertRaisesRegex(frappe.ValidationError, "must be submitted to reserve stock"):
+			_reserve_stock_for_queued_invoice(doc)
+		self.assertEqual(_active_entries(doc.name), [])
+
+	def test_a_draft_sales_order_is_still_refused(self):
+		so = frappe.new_doc("Sales Order")
+		so.customer = self.customer
+		so.company = self.company
+		so.delivery_date = frappe.utils.add_days(frappe.utils.nowdate(), 1)
+		so.append("items", {"item_code": ITEM_CODE, "qty": 1, "rate": 10, "warehouse": self.warehouse})
+		so.insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "Sales Order", so.name, force=True, ignore_permissions=True)
+
+		sre = frappe.new_doc("Stock Reservation Entry")
+		sre.update(
+			{
+				"item_code": ITEM_CODE,
+				"warehouse": self.warehouse,
+				"voucher_type": "Sales Order",
+				"voucher_no": so.name,
+				"voucher_detail_no": so.items[0].name,
+				"voucher_qty": 1,
+				"reserved_qty": 1,
+				"available_qty": 1,
+				"company": self.company,
+				"stock_uom": "Nos",
+			}
+		)
+		with self.assertRaisesRegex(frappe.ValidationError, "must be submitted to reserve stock"):
+			sre.save(ignore_permissions=True)
+
+	def test_a_failed_draft_can_be_retried(self):
+		from klik_pos.api.sales_invoice import retry_failed_sales_invoice
+
+		doc = self._draft_invoice(queue_status="Failed")
+		doc.db_set({"queue_error": "x", "enable_background_invoice_submission": 1})
+
+		result = retry_failed_sales_invoice(doc.name)
+
+		self.assertTrue(result.get("success"), result)
+		self.assertEqual(len(_active_entries(doc.name)), 1)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "queue_status"), "Queued")

@@ -75,6 +75,7 @@ doc_events = {
 extend_doctype_class = {
 	"Sales Invoice": "klik_pos.api.sales_invoice.CustomSalesInvoice",
 	"POS Opening Entry": "klik_pos.api.pos_entry.KlikPOSOpeningEntry",
+	"Stock Reservation Entry": "klik_pos.overrides.stock_reservation_entry.KlikStockReservationEntry",
 }
 
 # Migration hooks

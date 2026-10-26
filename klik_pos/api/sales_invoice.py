@@ -2875,11 +2875,20 @@ def retry_failed_sales_invoice(invoice_name):
 			# marks the invoice Queued again, so a refusal leaves it exactly as it was.
 			doc.validate_pos_opening_entry()
 
-		_validate_reserved_stock_for_items(doc, exclude_invoice=doc.name)
-		_reserve_stock_for_queued_invoice(doc)
-
+		# Queued first: the Stock Reservation Entry override lets only a Queued or
+		# Processing klik draft reserve (klik_pos.overrides.stock_reservation_entry).
 		_update_queue_fields(doc, QUEUE_STATUSES["queued"], error_message="")
 		doc.save(ignore_permissions=True)
+
+		try:
+			_validate_reserved_stock_for_items(doc, exclude_invoice=doc.name)
+			_reserve_stock_for_queued_invoice(doc)
+		except Exception as reserve_error:
+			_raise_lock_race(reserve_error)
+			# Back to Failed with the reason, not Queued with no job behind it.
+			_update_queue_fields(doc, QUEUE_STATUSES["failed"], error_message=str(reserve_error))
+			doc.save(ignore_permissions=True)
+			return {"success": False, "message": str(reserve_error)}
 
 		frappe.enqueue(
 			"klik_pos.api.sales_invoice.process_queued_sales_invoice",
@@ -2888,7 +2897,6 @@ def retry_failed_sales_invoice(invoice_name):
 			invoice_name=doc.name,
 			requested_by=frappe.session.user,
 		)
-		doc.save(ignore_permissions=True)
 
 		return {"success": True, "queue_status": doc.queue_status}
 
