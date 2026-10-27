@@ -46,7 +46,6 @@ export function CartItemDetails({
           <QuantityInput item={item} onUpdateQuantity={onUpdateQuantity} isMobile={isMobile} />
         </div>
         <div>
-          <label className="block text-sm mb-2">UOM</label>
           <UOMSelectField item={item} onUOMChange={onUOMChange} selectedCustomer={selectedCustomer} isMobile={isMobile} />
         </div>
       </div>

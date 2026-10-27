@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineInUom, nextUom, switchUom, uomMaps } from "./uomSwitch";
+import { lineInUom, nextUom, switchUom, uomLabel, uomMaps } from "./uomSwitch";
 
 // Binding wire: sold by the roll (stock UOM) or by the kg; a roll is 15 kg.
 const maps = uomMaps({
@@ -50,5 +50,18 @@ describe("lineInUom", () => {
   it("keeps the factor and stock when no factor is given", () => {
     const line = { uom: "Nos", price: 5, available: 7 };
     expect(lineInUom(line, "Nos", 6)).toEqual({ uom: "Nos", price: 6, available: 7 });
+  });
+});
+
+describe("uomLabel", () => {
+  it("names the factor off the stock unit, to four places", () => {
+    expect(uomLabel("kg(s)", "Roll(s)", 1 / 15)).toBe("UOM - Factor 0.0667");
+    expect(uomLabel("kg(s)", "Nos", 0.022)).toBe("UOM - Factor 0.022");
+  });
+
+  it("is plain UOM in the stock unit or before the units load", () => {
+    expect(uomLabel("Roll(s)", "Roll(s)", 1)).toBe("UOM");
+    expect(uomLabel("kg(s)", "", 0.5)).toBe("UOM");
+    expect(uomLabel("", "Roll(s)", 1)).toBe("UOM");
   });
 });

@@ -50,3 +50,10 @@ export function switchUom({ prices, factors }: Pick<UomMaps, "prices" | "factors
   const price = direct > 0 ? direct : (fromPrice / fromFactor) * conversionFactor;
   return { uom: toUom, price: Number(price.toFixed(6)), conversionFactor };
 }
+
+/** The UOM field's label: carries the conversion factor when the line is not in the stock unit. */
+export function uomLabel(selectedUom: string, stockUom: string, factor: number) {
+  if (!selectedUom || !stockUom || selectedUom === stockUom) return "UOM";
+  const formatted = new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(factor);
+  return `UOM - Factor ${formatted}`;
+}
