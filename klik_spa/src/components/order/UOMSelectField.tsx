@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { CartItem } from "../../../types";
-import { switchUom, uomMaps } from "../../utils/uomSwitch";
+import { switchUom, uomLabel, uomMaps } from "../../utils/uomSwitch";
 
 interface UOMSelectFieldProps {
   item: CartItem;
   onUOMChange: (itemId: string, selectedUOM: string, newPrice: number, conversionFactor?: number) => void;
   isMobile?: boolean;
   selectedCustomer?: { id: string } | null;
+  labelClassName?: string;
 }
 
 interface UOMDataRow {
@@ -27,6 +28,7 @@ export const UOMSelectField = ({
   onUOMChange,
   isMobile,
   selectedCustomer,
+  labelClassName = "block text-sm mb-2",
 }: UOMSelectFieldProps) => {
   const [availableUOMs, setAvailableUOMs] = useState<string[]>(
     item.uom ? [item.uom] : []
@@ -135,12 +137,6 @@ export const UOMSelectField = ({
     uom.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const formatConversionFactor = (value: number) =>
-    new Intl.NumberFormat(undefined, {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4,
-    }).format(value);
-
   const handleUOMSelect = (newUOM: string) => {
     const next = switchUom({ prices: uomPrices, factors: uomConversionFactors }, selectedUOM, item.price, newUOM);
     setSelectedUOM(newUOM);
@@ -151,6 +147,9 @@ export const UOMSelectField = ({
 
   return (
     <div className="relative">
+      <label className={labelClassName}>
+        {uomLabel(selectedUOM, defaultUOM, uomConversionFactors[selectedUOM] || 1)}
+      </label>
       <button
         type="button"
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -173,19 +172,6 @@ export const UOMSelectField = ({
           />
         </svg>
       </button>
-
-      {selectedUOM && defaultUOM && selectedUOM !== defaultUOM && (
-        <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
-          <div className="flex items-center gap-2">
-            <label className="text-gray-600 dark:text-gray-400 font-medium text-xs">
-              Conversion Factor:
-            </label>
-            <div className="px-2 py-1 bg-white dark:bg-gray-600 rounded border border-gray-200 dark:border-gray-500 text-gray-900 dark:text-white font-mono text-xs">
-              {formatConversionFactor(uomConversionFactors[selectedUOM] || 1)}
-            </div>
-          </div>
-        </div>
-      )}
 
       {isDropdownOpen && (
         <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-hidden">

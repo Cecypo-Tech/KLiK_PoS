@@ -725,13 +725,12 @@ export const CartItemRow = ({
                 onClick={(e) => (e.target as HTMLInputElement).select()}
                 className={`w-7 text-center font-semibold text-gray-900 dark:text-white text-sm border-l border-gray-200 dark:border-gray-600 py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
               />
-              {/* The UOM picker lives in the expanded panel; the label opens it. Right-click flips to the next unit. */}
+              {/* Clicking the unit flips to the next one; the full UOM picker is in the expanded panel. */}
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
-                onContextMenu={cycleUom}
+                onClick={cycleUom}
                 className="max-w-[2.5rem] truncate px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 border-r border-gray-200 dark:border-gray-600 hover:text-beveren-600 dark:hover:text-beveren-400"
-                title={item.uom ? `Unit: ${item.uom} (right-click for the next unit)` : "Change unit"}
+                title={item.uom ? `Unit: ${item.uom} (click for the next unit)` : "Change unit"}
               >
                 {item.uom || "Nos"}
               </button>
@@ -787,10 +786,8 @@ export const CartItemRow = ({
                   />
                 </div>
                 <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    UOM
-                  </label>
                   <UOMSelectField
+                    labelClassName="block text-gray-700 dark:text-gray-300 font-medium text-sm mb-2"
                     item={item}
                     onUOMChange={onUOMChange}
                     isMobile={isMobile}
