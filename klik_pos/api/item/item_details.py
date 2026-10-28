@@ -14,7 +14,8 @@ def get_batch_nos_with_qty(item_code):
     pos_doc = get_current_pos_profile()
     warehouse = pos_doc.warehouse
 
-    if not item_code or not warehouse:
+    # Not batch-tracked, nothing to find - and Batch read is not every cashier's to have.
+    if not item_code or not warehouse or not frappe.db.get_value("Item", item_code, "has_batch_no"):
         return []
 
     batches = frappe.get_list(
@@ -146,7 +147,9 @@ def get_item_uoms_and_prices(item_code, customer=None):
 
 @frappe.whitelist()
 def get_serial_nos_for_item(item_code: str):
-    if not item_code:
+    # The till asks whenever it does not know the item's tracking. Not serial-tracked, nothing
+    # to find - and Serial No read is not every cashier's to have.
+    if not item_code or not frappe.db.get_value("Item", item_code, "has_serial_no"):
         return []
 
     try:
