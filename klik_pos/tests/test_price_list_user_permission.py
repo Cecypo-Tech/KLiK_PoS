@@ -24,6 +24,8 @@ from klik_pos.api.item.pricing import get_selling_price_lists
 USER = "price-list-perm@example.com"
 ALLOWED = "_Test KLiK PL Allowed"
 OTHER = "_Test KLiK PL Other"
+# Sorts after ALLOWED: the default must win on being the default, not on its name.
+BRANCH_RETAIL = "_Test KLiK PL Branch Retail"
 ITEM = "_Test KLiK PL Perm Item"
 CUSTOMER = "_Test KLiK PL Perm Customer"
 
@@ -33,7 +35,7 @@ class TestPriceListUserPermission(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
-		for name in (ALLOWED, OTHER):
+		for name in (ALLOWED, OTHER, BRANCH_RETAIL):
 			if not frappe.db.exists("Price List", name):
 				frappe.get_doc(
 					{"doctype": "Price List", "price_list_name": name, "selling": 1, "currency": "INR"}
@@ -67,7 +69,7 @@ class TestPriceListUserPermission(FrappeTestCase):
 		frappe.db.delete("Item Price", {"item_code": ITEM})
 		frappe.delete_doc("Customer", CUSTOMER, force=True, ignore_missing=True)
 		frappe.delete_doc("Item", ITEM, force=True, ignore_missing=True)
-		for name in (ALLOWED, OTHER):
+		for name in (ALLOWED, OTHER, BRANCH_RETAIL):
 			frappe.delete_doc("Price List", name, force=True, ignore_missing=True)
 		frappe.db.commit()
 		super().tearDownClass()
@@ -85,9 +87,15 @@ class TestPriceListUserPermission(FrappeTestCase):
 		frappe.db.delete("User Permission", {"user": USER, "allow": "Price List"})
 		frappe.clear_cache(user=USER)
 
-	def _restrict_to(self, price_list):
+	def _restrict_to(self, price_list, is_default=0):
 		frappe.get_doc(
-			{"doctype": "User Permission", "user": USER, "allow": "Price List", "for_value": price_list}
+			{
+				"doctype": "User Permission",
+				"user": USER,
+				"allow": "Price List",
+				"for_value": price_list,
+				"is_default": is_default,
+			}
 		).insert(ignore_permissions=True)
 		frappe.clear_cache(user=USER)
 		frappe.set_user(USER)
@@ -113,6 +121,14 @@ class TestPriceListUserPermission(FrappeTestCase):
 		self._restrict_to(ALLOWED)
 		self.assertEqual(get_price_list_with_customer_priority(CUSTOMER), ALLOWED)
 		self.assertEqual(get_price_list_with_customer_priority(None), ALLOWED)
+
+	def test_the_fallback_is_the_users_default_list(self):
+		frappe.set_user("Administrator")
+		self._restrict_to(ALLOWED)
+		frappe.set_user("Administrator")
+		self._restrict_to(BRANCH_RETAIL, is_default=1)
+		self.assertEqual(get_price_list_with_customer_priority(CUSTOMER), BRANCH_RETAIL)
+		self.assertEqual(get_price_list_with_customer_priority(None), BRANCH_RETAIL)
 
 	def test_an_explicit_list_the_user_may_not_use_is_refused(self):
 		self._restrict_to(ALLOWED)

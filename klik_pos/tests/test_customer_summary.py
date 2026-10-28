@@ -110,7 +110,10 @@ class TestCustomerAccountSummary(FrappeTestCase):
 		# agree with an equally empty result - a test that passes while proving nothing.
 		# Also a till that shows every cashier's invoices: on one that does not, the summary
 		# counts the caller's own invoices and never asks the receivables module.
-		for module in (customer_summary, receivables, cashier_scope):
+		patcher = patch.object(customer_summary, "get_user_default_company", return_value=COMPANY)
+		patcher.start()
+		cls.addClassCleanup(patcher.stop)
+		for module in (receivables, cashier_scope):
 			patcher = patch.object(
 				module,
 				"get_current_pos_profile",

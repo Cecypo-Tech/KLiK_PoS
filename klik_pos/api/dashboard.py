@@ -31,6 +31,7 @@ from frappe import _
 from frappe.utils import add_days, add_to_date, flt, get_first_day, getdate, nowdate
 
 from klik_pos.api.sales_invoice import _can_view_sales_dashboard
+from klik_pos.klik_pos.utils import get_user_default_company
 
 VALID_RANGES = ("shift", "today", "week", "month", "custom")
 
@@ -161,7 +162,7 @@ def _resolve_company(company: str | None) -> str:
 	if not _can_view_sales_dashboard(roles):
 		raise frappe.PermissionError(_("Not permitted to view the Sales Dashboard"))
 
-	default_company = frappe.defaults.get_user_default("Company")
+	default_company = get_user_default_company()
 	company = (company or default_company or "").strip()
 	if not company:
 		raise frappe.ValidationError(_("No company given and no default company is set"))

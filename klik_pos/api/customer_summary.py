@@ -12,24 +12,12 @@ from frappe.utils import flt
 
 from klik_pos.api.cashier_scope import own_invoice_filter, restricted_to_own
 from klik_pos.api.receivables import get_customer_receivables
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_user_default_company
 
 
 def _default_company():
-	"""Resolve the company for the currency figure, POS profile first.
-
-	Falls back to the user's default company when no POS profile resolves for the current
-	session (e.g. no POS Opening Entry and no POS Profile User row) — get_current_pos_profile
-	throws in that case rather than returning None.
-	"""
-	try:
-		pos_profile = get_current_pos_profile()
-		if pos_profile and pos_profile.company:
-			return pos_profile.company
-	except Exception:
-		pass
-
-	return frappe.defaults.get_user_default("Company")
+	"""The company for the currency figure: the till's, else the user's."""
+	return get_user_default_company()
 
 
 def _outstanding_for(customer):
