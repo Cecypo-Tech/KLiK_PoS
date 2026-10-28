@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { keepPick, readPick, warehouseAfterLoad } from "../utils/pickedWarehouse";
+import { pickToSend } from "../utils/warehouseHeader";
 
 /** The user the till page was rendered (or last logged in) for - see utils/csrfRetry. */
 const tillUser = () => (typeof window === "undefined" ? undefined : (window as { klik_user?: string }).klik_user);
@@ -469,3 +470,9 @@ export const usePOSProfileStore = create<POSDetailsState>()(
     }
   )
 );
+
+/** The warehouse to send with a request: a pick away from the till's own, else none. */
+export const sentWarehouse = () => {
+  const { warehouse, posDetails } = usePOSProfileStore.getState();
+  return pickToSend(warehouse, posDetails);
+};
