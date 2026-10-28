@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { toast } from 'react-toastify';
 import type { MenuItem, Customer, ItemGroup } from '../../types';
-import { usePOSProfileStore } from './posProfileStore';
+import { sentWarehouse, usePOSProfileStore } from './posProfileStore';
 import { useCartStore } from './cartStore';
 import { applyStockUpdates, chunkCodes, stockRefreshCodes } from '../utils/stockRefresh';
 import { getCSRFToken } from '../utils/csrf';
@@ -117,7 +117,7 @@ async function fetchStockFor(codes: string[]): Promise<Record<string, number>> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': getCSRFToken() ?? '' },
         credentials: 'include',
-        body: JSON.stringify({ item_codes: chunk.join(','), warehouse: usePOSProfileStore.getState().warehouse || undefined }),
+        body: JSON.stringify({ item_codes: chunk.join(','), warehouse: sentWarehouse() || undefined }),
       });
       if (response.ok) {
         const data = await response.json();
@@ -233,7 +233,7 @@ export const useProductStore = create<ProductStoreState>()(
             params.append('price_list', priceList);
           }
 
-          const selectedWarehouse = usePOSProfileStore.getState().warehouse;
+          const selectedWarehouse = sentWarehouse();
           if (selectedWarehouse) {
             params.append('warehouse', selectedWarehouse);
           }
@@ -834,7 +834,7 @@ export const useProductStore = create<ProductStoreState>()(
       fetchItemGroups: async () => {
         try {
           const params = new URLSearchParams();
-          const warehouse = usePOSProfileStore.getState().warehouse;
+          const warehouse = sentWarehouse();
           if (warehouse) params.append('warehouse', warehouse);
           const response = await fetch(
             `/api/method/klik_pos.api.item.item_listing.get_item_groups?${params.toString()}`

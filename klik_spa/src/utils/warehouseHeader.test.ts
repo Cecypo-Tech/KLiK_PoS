@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WAREHOUSE_HEADER, withWarehouseHeader } from "./warehouseHeader";
+import { WAREHOUSE_HEADER, pickToSend, withWarehouseHeader } from "./warehouseHeader";
 
 const sent = (base: ReturnType<typeof vi.fn>) => new Headers(base.mock.calls[0][1]?.headers);
 
@@ -28,5 +28,22 @@ describe("withWarehouseHeader", () => {
     const base = vi.fn().mockResolvedValue(new Response("{}"));
     await withWarehouseHeader(base, () => "مستودع - ش")("/api/method/x");
     expect(decodeURIComponent(sent(base).get(WAREHOUSE_HEADER) ?? "")).toBe("مستودع - ش");
+  });
+});
+
+describe("pickToSend", () => {
+  // The till's own warehouse was sent as if picked. After a switch of till it was the last
+  // till's, and a till that does not allow switching refused every request until its details
+  // reloaded (KRUNAL: "Till Staff POS does not allow switching warehouse", dozens a day).
+  it("sends nothing for the till's own warehouse", () => {
+    expect(pickToSend("Stores A - DC", { warehouse: "Stores A - DC" })).toBeNull();
+  });
+
+  it("sends a warehouse picked away from the till's own", () => {
+    expect(pickToSend("Stores B - DC", { warehouse: "Stores A - DC" })).toBe("Stores B - DC");
+  });
+
+  it("sends nothing when nothing is picked", () => {
+    expect(pickToSend(null, { warehouse: "Stores A - DC" })).toBeNull();
   });
 });

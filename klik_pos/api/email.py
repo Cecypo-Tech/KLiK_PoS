@@ -4,7 +4,7 @@ import frappe
 from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.utils import fmt_money, now
 
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile
 
 
 @frappe.whitelist()
@@ -62,7 +62,7 @@ def send_invoice_email(**kwargs):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send Invoice Email Failed")
-		frappe.throw(f"Failed to send invoice email: {e!s}")
+		frappe.throw(f"Failed to send invoice email: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -79,7 +79,7 @@ def get_email_templates():
 		return templates
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Email Templates Failed")
-		frappe.throw(f"Failed to get Email templates: {e!s}")
+		frappe.throw(f"Failed to get Email templates: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -97,7 +97,7 @@ def get_email_template(template_name):
         }
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Get Email Template Failed")
-        frappe.throw(f"Failed to get Email template: {e!s}")
+        frappe.throw(f"Failed to get Email template: {error_reason(e)}")
 
 
 def _format_account(doc: EmailAccount, source: str) -> dict:

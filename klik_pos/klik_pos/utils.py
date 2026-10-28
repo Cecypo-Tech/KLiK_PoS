@@ -18,6 +18,16 @@ def _till_cache():
 	return frappe.local.klik_till_cache
 
 
+def error_reason(error):
+	"""What went wrong, for the cashier. A bare PermissionError has no message of its own, so
+	"Failed to create POS Opening Entry: {0}" used to end in nothing."""
+	if str(error):
+		return str(error)
+	if isinstance(error, frappe.PermissionError):
+		return _("you do not have permission for this. Ask your manager to check your role.")
+	return error.__class__.__name__
+
+
 # The till's picked warehouse, sent with every request (klik_spa/src/utils/warehouseHeader.ts).
 WAREHOUSE_HEADER = "X-Klik-Warehouse"
 
