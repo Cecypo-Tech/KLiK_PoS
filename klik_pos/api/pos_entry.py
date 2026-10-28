@@ -1,4 +1,5 @@
 import json
+import sys
 import traceback
 
 import frappe
@@ -11,7 +12,12 @@ from klik_pos.api.cache import clear_backend_cache
 from klik_pos.api.sales_invoice import delete_draft_invoices_for_opening_entry
 from klik_pos.api.sales_order import delete_held_orders_for_opening_entry
 from klik_pos.api.shift import ensure_may_close_on_till
-from klik_pos.klik_pos.utils import clear_pos_profile_cache, get_current_pos_profile, get_user_default_company
+from klik_pos.klik_pos.utils import (
+	clear_pos_profile_cache,
+	error_reason,
+	get_current_pos_profile,
+	get_user_default_company,
+)
 
 
 @frappe.whitelist()
@@ -141,12 +147,13 @@ def create_opening_entry():
 
 	except frappe.ValidationError:
 		# Already worded for the cashier; wrapping it again showed every message twice.
+		_log_if_masking("POS Opening Entry Creation Failed")
 		raise
 	except Exception as e:
 		# Log error with full traceback in Error Log
 		frappe.log_error(message=traceback.format_exc(), title="POS Opening Entry Creation Failed")
 		# Throw user-friendly message
-		frappe.throw(_("Failed to create POS Opening Entry: {0}").format(str(e)))
+		frappe.throw(_("Failed to create POS Opening Entry: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -354,11 +361,25 @@ def create_closing_entry():
 
 	except (frappe.PermissionError, frappe.ValidationError):
 		# Already worded for the cashier; wrapping it again showed every message twice, and
-		# a refusal is not a bug worth an Error Log.
+		# a refusal is not a bug worth an Error Log - unless it is covering for one.
+		_log_if_masking("POS Closing Entry Creation Failed")
 		raise
 	except Exception as e:
 		frappe.log_error(message=traceback.format_exc(), title="POS Closing Entry Creation Failed")
-		frappe.throw(_("Failed to create POS Closing Entry: {0}").format(str(e)))
+		frappe.throw(_("Failed to create POS Closing Entry: {0}").format(error_reason(e)))
+
+
+def _log_if_masking(title):
+	"""Error Log the refusal being handled if it was raised while handling another exception.
+
+	Such a refusal is covering for the real failure. ERPNext's create_merge_logs rolls a failed
+	close back, then fails to comment on the closing it just undid: a cashier without write on
+	POS Opening Entry was told only "Could not find Reference Name: POS-CLO-...". The traceback
+	still holds the PermissionError underneath; nothing else does.
+	"""
+	error = sys.exc_info()[1]
+	if error is not None and error.__context__ is not None:
+		frappe.log_error(message=traceback.format_exc(), title=title)
 
 
 def _parse_request_data():

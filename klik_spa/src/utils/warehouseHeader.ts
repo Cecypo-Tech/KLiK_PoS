@@ -18,3 +18,8 @@ export function withWarehouseHeader(base: Fetch, picked: () => string | null | u
     return base(input, { ...init, headers });
   };
 }
+
+/** The warehouse to send: a pick away from the till's own, else none (the server uses the till's). */
+export function pickToSend(picked: string | null | undefined, till: { warehouse?: string } | null | undefined) {
+  return picked && picked !== till?.warehouse ? picked : null;
+}

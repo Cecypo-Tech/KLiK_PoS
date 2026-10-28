@@ -4,7 +4,7 @@ import frappe
 from frappe.utils import fmt_money, now
 
 from klik_pos.api.whatsap.utils import send_whatsapp_message
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile
 
 
 def _send_invoice_whatsapp(invoice_name=None, mobile_no=None, message=None, customer_name=None):
@@ -53,7 +53,7 @@ def _send_invoice_whatsapp(invoice_name=None, mobile_no=None, message=None, cust
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send WhatsApp Failed")
-		frappe.throw(f"Failed to send WhatsApp message: {e!s}")
+		frappe.throw(f"Failed to send WhatsApp message: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -120,7 +120,7 @@ def send_invoice_whatsapp(**kwargs):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send Invoice WhatsApp Failed")
-		frappe.throw(f"Failed to send WhatsApp message: {e!s}")
+		frappe.throw(f"Failed to send WhatsApp message: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -164,7 +164,7 @@ def send_template_whatsapp(**kwargs):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send Template WhatsApp Failed")
-		frappe.throw(f"Failed to send WhatsApp message: {e!s}")
+		frappe.throw(f"Failed to send WhatsApp message: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -200,7 +200,7 @@ def get_whatsapp_setup():
 		}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get WhatsApp Setup Failed")
-		frappe.throw(f"Failed to get WhatsApp setup: {e!s}")
+		frappe.throw(f"Failed to get WhatsApp setup: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -231,7 +231,7 @@ def get_whatsapp_templates():
 		return templates
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get WhatsApp Templates Failed")
-		frappe.throw(f"Failed to get WhatsApp templates: {e!s}")
+		frappe.throw(f"Failed to get WhatsApp templates: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -257,4 +257,4 @@ def get_whatsapp_template(template_name):
 		}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get WhatsApp Template Failed")
-		frappe.throw(f"Failed to get WhatsApp template: {e!s}")
+		frappe.throw(f"Failed to get WhatsApp template: {error_reason(e)}")

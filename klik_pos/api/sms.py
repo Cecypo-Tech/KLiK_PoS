@@ -4,7 +4,7 @@ import frappe
 from frappe.core.doctype.sms_settings.sms_settings import send_sms
 from frappe.utils import fmt_money, now
 
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile
 
 
 @frappe.whitelist()
@@ -60,7 +60,7 @@ Thank you!
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send Invoice SMS Failed")
-		frappe.throw(f"Failed to send SMS: {e!s}")
+		frappe.throw(f"Failed to send SMS: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -99,7 +99,7 @@ def send_sms_message(**kwargs):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Send SMS Failed")
-		frappe.throw(f"Failed to send SMS: {e!s}")
+		frappe.throw(f"Failed to send SMS: {error_reason(e)}")
 
 
 @frappe.whitelist()
@@ -123,5 +123,5 @@ def get_sms_gateway_settings():
 		return {
 			"status": "error",
 			"enabled": False,
-			"message": f"Failed to get SMS gateway: {e!s}",
+			"message": f"Failed to get SMS gateway: {error_reason(e)}",
 		}
