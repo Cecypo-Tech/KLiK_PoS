@@ -124,5 +124,23 @@ def clear_pos_profile_cache(user=None):
 
 
 def get_user_default_company():
-	user = frappe.session.user
-	return frappe.defaults.get_user_default(user, "Company")
+	"""The till's company, else the user's default one, else their default Company permission.
+
+	frappe.defaults.get_user_default("Company") alone is not enough: a desk Session Default is
+	cleared on logout, and Frappe then offers the global default company - which it drops
+	again when the user is restricted to another company, returning None.
+	"""
+	try:
+		company = frappe.db.get_value("POS Profile", _resolve_pos_profile_name(), "company")
+	except Exception:
+		# frappe.throw queued its message for the client; no till is not an error here.
+		frappe.clear_last_message()
+		company = None
+	if company:
+		return company
+	if company := frappe.defaults.get_user_default("Company"):
+		return company
+	from frappe.permissions import get_user_permissions
+
+	perms = get_user_permissions(frappe.session.user).get("Company") or []
+	return next((p.doc for p in perms if p.is_default), perms[0].doc if len(perms) == 1 else None)

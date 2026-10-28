@@ -121,7 +121,7 @@ class TestOpeningConflict(OpeningConflictCase):
 
 
 class TestCreateOpeningEntryUsesTheSameRule(OpeningConflictCase):
-	def _create(self):
+	def _create(self, user_default=COMPANY):
 		frappe.local.form_dict = frappe._dict(
 			pos_profile=self.profile,
 			opening_balance=[{"mode_of_payment": "Cash", "opening_amount": 0}],
@@ -129,7 +129,7 @@ class TestCreateOpeningEntryUsesTheSameRule(OpeningConflictCase):
 		new_doc = MagicMock()
 		new_doc.return_value.name = "POS-OPE-FAKE"
 		with (
-			patch.object(pos_entry.frappe.defaults, "get_user_default", return_value=COMPANY),
+			patch.object(pos_entry.frappe.defaults, "get_user_default", return_value=user_default),
 			patch.object(pos_entry.frappe, "new_doc", new_doc),
 			patch.object(pos_entry, "clear_pos_profile_cache"),
 		):
@@ -139,6 +139,11 @@ class TestCreateOpeningEntryUsesTheSameRule(OpeningConflictCase):
 		_shift(self.profile, CASHIER, status="Closed", closing_entry=None)
 
 		self.assertEqual(self._create()["name"], "POS-OPE-FAKE")
+
+	def test_regression_no_saved_default_company_opens_on_the_tills_company(self):
+		# Desk Session Defaults are cleared on logout, and a cashier of a non-default company
+		# then has no user default at all: the till's own company decides.
+		self.assertEqual(self._create(user_default=None)["name"], "POS-OPE-FAKE")
 
 	def test_own_stale_shift_blocks_opening_with_one_readable_message(self):
 		entry = _shift(self.profile, CASHIER, days_ago=1)

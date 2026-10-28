@@ -2,7 +2,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_current_pos_profile, get_user_default_company
 
 from ..sql_builder import apply_sql_permissions
 
@@ -158,7 +158,7 @@ def fetch_item_price(
                 if calc:
                     return calc
 
-            default_company = frappe.defaults.get_user_default("Company")
+            default_company = get_user_default_company()
             if not default_company:
                 company_sql = """
                     SELECT default_company FROM `tabGlobal Defaults` LIMIT 1
@@ -264,7 +264,7 @@ def fetch_item_price(
             if calc:
                 return calc
 
-        default_company = frappe.defaults.get_user_default("Company")
+        default_company = get_user_default_company()
         if not default_company:
             company_sql = """
                 SELECT default_company FROM `tabGlobal Defaults` LIMIT 1
@@ -463,12 +463,18 @@ def _calculate_price_from_default_uom(
 def get_price_list_with_customer_priority(customer=None, pos_profile=None):
     """The list to price from: the customer's default, then their group's, then the till's,
     then Selling Settings - the first that is enabled and the user may use. A restricted user
-    whose chain names none of their lists gets the first list they may use."""
+    whose chain names none of their lists gets their default one, else the first they may use."""
     for candidate in _price_list_chain(customer, pos_profile):
         if is_allowed_price_list(candidate):
             return candidate
     permitted = permitted_price_lists()
     if permitted:
+        from frappe.permissions import get_user_permissions
+
+        perms = get_user_permissions(frappe.session.user).get("Price List") or []
+        default = next((p.doc for p in perms if p.is_default), None)
+        if is_allowed_price_list(default):
+            return default
         return frappe.db.get_value(
             "Price List",
             {"name": ["in", permitted], "enabled": 1, "selling": 1},

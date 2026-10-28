@@ -7,7 +7,7 @@ from erpnext.accounts.party import get_party_details
 from frappe import _
 from frappe.utils.nestedset import get_descendants_of
 
-from klik_pos.klik_pos.utils import get_current_pos_profile
+from klik_pos.klik_pos.utils import get_current_pos_profile, get_user_default_company
 from klik_pos.api.loyalty import get_customer_loyalty_summary
 from klik_pos.api.customer_summary import last_visit_sql, total_orders_sql, total_spent_sql
 from .sql_builder import apply_sql_permissions
@@ -191,7 +191,7 @@ def get_walkin_details_by_phone(phone: str):
 
 
 def get_user_company_and_currency():
-    default_company = frappe.defaults.get_user_default("Company")
+    default_company = get_user_default_company()
     if not default_company:
         default_company = frappe.db.get_single_value(
             "Global Defaults", "default_company"

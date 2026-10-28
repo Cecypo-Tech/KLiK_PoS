@@ -11,7 +11,7 @@ from klik_pos.api.cache import clear_backend_cache
 from klik_pos.api.sales_invoice import delete_draft_invoices_for_opening_entry
 from klik_pos.api.sales_order import delete_held_orders_for_opening_entry
 from klik_pos.api.shift import ensure_may_close_on_till
-from klik_pos.klik_pos.utils import clear_pos_profile_cache, get_current_pos_profile
+from klik_pos.klik_pos.utils import clear_pos_profile_cache, get_current_pos_profile, get_user_default_company
 
 
 @frappe.whitelist()
@@ -82,7 +82,8 @@ def create_opening_entry():
 		else:
 			pos_profile = get_current_pos_profile().name if get_current_pos_profile() else None
 
-		company = frappe.defaults.get_user_default("Company")
+		company = frappe.db.get_value("POS Profile", pos_profile, "company") if pos_profile else None
+		company = company or get_user_default_company()
 
 		if not company:
 			frappe.throw(_("No default company found for user {0}").format(user))
