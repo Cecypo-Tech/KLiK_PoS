@@ -325,28 +325,32 @@ export default function InvoiceHistoryPage() {
 
   const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
     const qzEnabled = [1, "1", true].includes(posDetails?.custom_enable_qz_print as 1 | "1" | true);
-    // The server refuses these anyway (Sales Order before_print); don't offer them.
+    // The server refuses these anyway (Sales Order has_permission); shown, but disabled.
     const printBlocked = heldOrderPrintBlocked();
+    const blockedTitle = "Printing held orders is blocked on this till";
     const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
     // Icons only, so on a touch screen each needs a finger-sized target.
-    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
+    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent";
     return (
       <>
-        {!printBlocked && (
-          <button type="button" title="Print" aria-label="Print" className={button}
-            onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
-            <Printer className={icon} />
-          </button>
+        <button type="button" title={printBlocked ? blockedTitle : "Print"} aria-label="Print" className={button}
+          disabled={printBlocked}
+          onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
+          <Printer className={icon} />
+        </button>
+        {qzEnabled && (
+          <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20}
+            blockedTitle={printBlocked ? blockedTitle : undefined} />
         )}
-        {qzEnabled && !printBlocked && <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20} />}
         {shareTools.copy_message_script && (
           <button type="button" title="Copy as message" aria-label="Copy as message" className={button}
             onClick={() => void handleCopyHeldOrderMessage(orderId)}>
             <Copy className={icon} />
           </button>
         )}
-        {shareTools.copy_image && !printBlocked && (
-          <button type="button" title="Copy as image" aria-label="Copy as image" className={button}
+        {shareTools.copy_image && (
+          <button type="button" title={printBlocked ? blockedTitle : "Copy as image"} aria-label="Copy as image" className={button}
+            disabled={printBlocked}
             onClick={() => handleCopyHeldOrderImage(orderId)}>
             <ImageIcon className={icon} />
           </button>
@@ -354,6 +358,7 @@ export default function InvoiceHistoryPage() {
       </>
     );
   };
+
 
   const { modes } = useAllPaymentModes();
   const { cartItems, selectedCustomer: cartCustomer } = useCartStore();
