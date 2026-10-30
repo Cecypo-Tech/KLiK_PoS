@@ -319,25 +319,33 @@ export default function InvoiceHistoryPage() {
     });
   };
 
+  // POS Profile "Block Printing Held Orders": copy as image renders the print format too.
+  const heldOrderPrintBlocked = () =>
+    [1, "1", true].includes(posDetails?.custom_block_held_order_print as 1 | "1" | true);
+
   const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
     const qzEnabled = [1, "1", true].includes(posDetails?.custom_enable_qz_print as 1 | "1" | true);
+    // The server refuses these anyway (Sales Order before_print); don't offer them.
+    const printBlocked = heldOrderPrintBlocked();
     const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
     // Icons only, so on a touch screen each needs a finger-sized target.
     const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
     return (
       <>
-        <button type="button" title="Print" aria-label="Print" className={button}
-          onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
-          <Printer className={icon} />
-        </button>
-        {qzEnabled && <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20} />}
+        {!printBlocked && (
+          <button type="button" title="Print" aria-label="Print" className={button}
+            onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
+            <Printer className={icon} />
+          </button>
+        )}
+        {qzEnabled && !printBlocked && <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20} />}
         {shareTools.copy_message_script && (
           <button type="button" title="Copy as message" aria-label="Copy as message" className={button}
             onClick={() => void handleCopyHeldOrderMessage(orderId)}>
             <Copy className={icon} />
           </button>
         )}
-        {shareTools.copy_image && (
+        {shareTools.copy_image && !printBlocked && (
           <button type="button" title="Copy as image" aria-label="Copy as image" className={button}
             onClick={() => handleCopyHeldOrderImage(orderId)}>
             <ImageIcon className={icon} />
@@ -1084,6 +1092,10 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
   const handleViewInvoice = (invoice: SalesInvoice) => {
     const isHeldOrder = !!(invoice as SalesInvoice & { isHeldOrder?: boolean }).isHeldOrder;
     if (isHeldOrder) {
+      if (heldOrderPrintBlocked()) {
+        toast.warn("Printing held orders is blocked on this till");
+        return;
+      }
       // Held drafts are Sales Order docs; there is no in-app detail view for
       // them, so fall back to ERPNext's normal print route with the
       // doctype's default print format.
