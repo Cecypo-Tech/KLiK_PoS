@@ -31,6 +31,9 @@ add_to_apps_screen = [
 	}
 ]
 
+# Held orders a till blocks from printing: see overrides/sales_order.py.
+has_permission = {"Sales Order": "klik_pos.overrides.sales_order.held_order_print_permission"}
+
 doc_events = {
 	# Walk-in Tax ID -> tax_id on every save (setup/walkin_fields.py, overrides/walkin_tax_id.py).
 	"Quotation": {"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id"},
