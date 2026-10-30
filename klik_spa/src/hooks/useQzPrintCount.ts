@@ -9,7 +9,7 @@ const RECOUNT_AFTER_MS = 8000;
  * The QZ print count for an invoice, and a way to recount after a reprint.
  * Fetches nothing (count 0) while QZ printing is off or there is no invoice.
  */
-export function useQzPrintCount(invoiceName: string, enabled: boolean) {
+export function useQzPrintCount(invoiceName: string, enabled: boolean, doctype: string = "Sales Invoice") {
   const [count, setCount] = useState(0);
   const [round, setRound] = useState(0);
 
@@ -20,13 +20,13 @@ export function useQzPrintCount(invoiceName: string, enabled: boolean) {
     }
     // A reply for the previous invoice must not land on this one.
     let current = true;
-    void qzPrintCount(invoiceName).then((n) => {
+    void qzPrintCount(invoiceName, doctype).then((n) => {
       if (current) setCount(n);
     });
     return () => {
       current = false;
     };
-  }, [invoiceName, enabled, round]);
+  }, [invoiceName, enabled, doctype, round]);
 
   const recountSoon = useCallback(() => {
     window.setTimeout(() => setRound((r) => r + 1), RECOUNT_AFTER_MS);

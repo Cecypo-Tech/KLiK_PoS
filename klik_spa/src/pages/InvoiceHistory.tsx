@@ -44,6 +44,7 @@ import { useAllPaymentModes } from "../hooks/usePaymentModes";
 import PaymentDialog from "../components/dialog/PaymentDialog";
 import { addDraftInvoiceToCart } from "../utils/draftInvoiceToCart";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
+import HeldOrderQzButton from "../components/HeldOrderQzButton";
 import {
   applyHeldOrderAction,
   callMethod,
@@ -319,6 +320,7 @@ export default function InvoiceHistoryPage() {
   };
 
   const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
+    const qzEnabled = [1, "1", true].includes(posDetails?.custom_enable_qz_print as 1 | "1" | true);
     const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
     // Icons only, so on a touch screen each needs a finger-sized target.
     const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
@@ -328,6 +330,7 @@ export default function InvoiceHistoryPage() {
           onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
           <Printer className={icon} />
         </button>
+        {qzEnabled && <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20} />}
         {shareTools.copy_message_script && (
           <button type="button" title="Copy as message" aria-label="Copy as message" className={button}
             onClick={() => void handleCopyHeldOrderMessage(orderId)}>
