@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { qzNextStep, qzPrintCount } from "./qzPrint";
+import { qzNextStep, qzPrintCount, qzPrintOptions, qzReprint } from "./qzPrint";
 
-vi.mock("react-toastify", () => ({ toast: {} }));
+vi.mock("react-toastify", () => ({ toast: { success: () => {}, warn: () => {}, error: () => {} } }));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -55,5 +55,19 @@ describe("qzNextStep", () => {
   it("asks when more than one rule matches, even if some are at their limit", () => {
     const options = [ok("Invoice"), capped("Packing")];
     expect(qzNextStep(options)).toEqual({ kind: "choose", options });
+  });
+});
+
+describe("a held order (Sales Order)", () => {
+  it("asks for and prints the Sales Order's rules, not a Sales Invoice's", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const fetch = serve({ ok: true, json: async () => ({ message: [] }) });
+
+    await qzPrintOptions("SAL-ORD-1", "Sales Order");
+    await qzReprint("SAL-ORD-1", "Sales Order", ["SO - A"]);
+
+    const bodies = fetch.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(bodies[0]).toEqual({ reference_doctype: "Sales Order", reference_name: "SAL-ORD-1" });
+    expect(bodies[1]).toMatchObject({ reference_doctype: "Sales Order", rules: JSON.stringify(["SO - A"]) });
   });
 });

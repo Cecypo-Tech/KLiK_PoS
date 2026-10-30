@@ -9,10 +9,15 @@ import { useQzPrintCount } from "./useQzPrintCount";
  * picker. Render <QzRulePicker {...picker} /> beside the button.
  *
  * `reprintBlocked`: the POS Profile's Prevent Invoice Reprinting applies and
- * this invoice has already been printed.
+ * this invoice has already been printed. `doctype`: a held order is a Sales Order.
  */
-export function useQzPrint(invoiceName: string, enabled: boolean, reprintBlocked: boolean) {
-  const { count, recountSoon } = useQzPrintCount(invoiceName, enabled);
+export function useQzPrint(
+  invoiceName: string,
+  enabled: boolean,
+  reprintBlocked: boolean,
+  doctype: string = "Sales Invoice",
+) {
+  const { count, recountSoon } = useQzPrintCount(invoiceName, enabled, doctype);
   // True from the click until the print is queued or the picker is cancelled,
   // so a second tap can't queue a duplicate forced reprint.
   const [busy, setBusy] = useState(false);
@@ -20,7 +25,7 @@ export function useQzPrint(invoiceName: string, enabled: boolean, reprintBlocked
 
   const send = async (rules: string[]) => {
     try {
-      await qzReprint(invoiceName, "Sales Invoice", rules);
+      await qzReprint(invoiceName, doctype, rules);
       recountSoon();
     } catch {
       // qzReprint has already shown the error.
@@ -38,14 +43,14 @@ export function useQzPrint(invoiceName: string, enabled: boolean, reprintBlocked
     setBusy(true);
     let options: QzRuleOption[];
     try {
-      options = await qzPrintOptions(invoiceName);
+      options = await qzPrintOptions(invoiceName, doctype);
     } catch {
       setBusy(false);
       return;
     }
     const step = qzNextStep(options);
     if (step.kind === "none") {
-      toast.warn("No print rule matches this invoice");
+      toast.warn("No print rule matches this document");
       setBusy(false);
     } else if (step.kind === "limit") {
       toast.warn("Print limit reached");
