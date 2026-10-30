@@ -6,7 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.overrides.sales_order import refuse_printing_a_held_order
+from klik_pos.overrides.sales_order import held_order_print_permission, refuse_printing_a_held_order
 
 
 def _order(docstatus=0, held=1, till="T"):
@@ -37,3 +37,18 @@ class TestHeldOrderPrintBlock(FrappeTestCase):
 			refuse_printing_a_held_order(_order(docstatus=1), "before_print")
 			refuse_printing_a_held_order(_order(held=0), "before_print")
 			refuse_printing_a_held_order(_order(till=None), "before_print")
+
+
+class TestHeldOrderPrintPermission(FrappeTestCase):
+	"""The same block as a print permission, so a QZ button can ask before offering itself."""
+
+	def test_denies_print_on_a_blocked_held_draft(self):
+		with _till_blocks(1):
+			self.assertFalse(held_order_print_permission(_order(), ptype="print"))
+
+	def test_leaves_every_other_check_alone(self):
+		with _till_blocks(1):
+			self.assertTrue(held_order_print_permission(_order(), ptype="read"))
+			self.assertTrue(held_order_print_permission(None, ptype="print"))
+		with _till_blocks(0):
+			self.assertTrue(held_order_print_permission(_order(), ptype="print"))
