@@ -31,3 +31,18 @@ def refuse_submitting_a_paid_mpesa_order(doc, method=None):
 			).format(doc.name, push),
 			title=_("Finish the M-Pesa sale"),
 		)
+
+
+def refuse_printing_a_held_order(doc, method=None, *args, **kwargs):
+	"""Sales Order before_print: a till with Block Printing Held Orders refuses to print its
+	held orders. Every print route (print view, PDF, QZ) runs before_print, so one check
+	covers them all; the till only hides its buttons."""
+	if doc.docstatus != 0 or not doc.get("custom_is_klik_held") or not doc.get("custom_pos_profile"):
+		return
+	if frappe.db.get_value("POS Profile", doc.custom_pos_profile, "custom_block_held_order_print"):
+		frappe.throw(
+			_("Held order {0} can't be printed: till {1} blocks printing held orders.").format(
+				doc.name, doc.custom_pos_profile
+			),
+			frappe.PermissionError,
+		)
