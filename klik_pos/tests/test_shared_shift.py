@@ -958,3 +958,19 @@ class TestCanPrintZReport(FrappeTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user(email)
 		self.assertFalse(can_print_z_report(closing))
+
+class TestPaymentEntryDateIndex(FrappeTestCase):
+	def test_posting_date_index_is_in_the_meta(self):
+		"""add_index alone is dropped by the next updatedb; the Property Setter keeps it."""
+		from klik_pos.setup.pos_opening_entry_links import ensure_payment_entry_pos_fields
+
+		ensure_payment_entry_pos_fields()
+		ensure_payment_entry_pos_fields()  # idempotent
+		self.assertEqual(frappe.get_meta("Payment Entry").get_field("posting_date").search_index, 1)
+		self.assertEqual(
+			frappe.db.count(
+				"Property Setter",
+				{"doc_type": "Payment Entry", "field_name": "posting_date", "property": "search_index"},
+			),
+			1,
+		)
