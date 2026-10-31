@@ -9,7 +9,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("postClosingEntry", () => {
   it("reports success when the server closes the shift", async () => {
     vi.stubGlobal("fetch", respond(200, { message: { name: "POS-CLO-1" } }));
-    expect(await postClosingEntry([], "tok")).toEqual({ ok: true });
+    expect(await postClosingEntry([], "tok")).toEqual({ ok: true, name: "POS-CLO-1" });
   });
 
   it("reports a manager-only refusal in the server's words", async () => {

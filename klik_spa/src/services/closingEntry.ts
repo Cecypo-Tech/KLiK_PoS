@@ -9,7 +9,7 @@ interface ClosingBalance {
   banked_amount?: number;
 }
 
-export type ClosingResult = { ok: true } | { ok: false; error: string };
+export type ClosingResult = { ok: true; name: string } | { ok: false; error: string };
 
 /** Posts the shift close, and reports a refusal in the server's own words - a manager-only
  * rule, in particular, must not be mistaken for success. */
@@ -31,7 +31,7 @@ export async function postClosingEntry(
     // A proxy error page is HTML, not JSON; it still has to read as a failure.
     const data = await res.json().catch(() => null);
     if (res.ok && data?.message) {
-      return { ok: true };
+      return { ok: true, name: data.message.name };
     }
     return { ok: false, error: extractErrorMessage(data, "Failed to close the shift") };
   } catch (err) {
