@@ -58,6 +58,19 @@ PAYABLE_TOTAL = """CASE
 	ELSE si.base_grand_total
 END"""
 
+# A Payment Entry saved without a mode is still money that arrived. The account it landed in
+# names the mode when exactly one enabled mode uses that account; otherwise it gets its own
+# row. Dropping it instead made Allparts' page call 278,000 of DTB receipts "unaccounted".
+NO_MODE = "No mode of payment"
+PAYMENT_ENTRY_MODE = f"""COALESCE(
+	NULLIF(pe.mode_of_payment, ''),
+	(SELECT IF(COUNT(DISTINCT mpa.parent) = 1, MIN(mpa.parent), NULL)
+		FROM `tabMode of Payment Account` mpa
+		INNER JOIN `tabMode of Payment` mp ON mp.name = mpa.parent AND mp.enabled = 1
+		WHERE mpa.default_account = pe.paid_to AND mpa.company = pe.company),
+	'{NO_MODE}'
+)"""
+
 REGISTER_DOCTYPE = "Mpesa C2B Payment Register"
 REGISTER_URL_DOCTYPE = "Mpesa C2B Payment Register URL"
 
@@ -125,6 +138,7 @@ def get_dashboard_summary(
 		"returns": int(billed["returns"]),
 		"returns_total": flt(billed["returns_total"], 2),
 		"currency": _company_currency(company),
+		"outside_tills": _outside_tills(scope),
 	}
 	identity["unexplained"] = flt(
 		identity["billed"]
@@ -328,6 +342,7 @@ def _empty_response(company, scope) -> dict:
 			"returns": 0,
 			"returns_total": 0.0,
 			"currency": _company_currency(company),
+			"outside_tills": _outside_tills(scope),
 		},
 		"collected_by_mode": [],
 		"exceptions": [],
@@ -387,6 +402,35 @@ def _billed(condition: str, params: dict) -> dict:
 	return row[0] if row else frappe._dict()
 
 
+def _outside_tills(scope: dict) -> dict:
+	"""Invoices of the same company and dates that no chosen till rang: desk invoices, and
+	other tills when the reader narrowed the picker.
+
+	Sales Report Enhanced counts every invoice and this page counts tills, so without this
+	line the two disagree by an amount nobody can explain - 3M on Allparts' first month,
+	all of it invoices raised in the Desk before the tills went live. A shift has no dates,
+	so it has nothing to compare against.
+	"""
+	if not scope.get("date_from"):
+		return {"invoices": 0, "amount": 0.0}
+	row = frappe.db.sql(
+		f"""
+		SELECT COUNT(*), COALESCE(SUM({PAYABLE_TOTAL}), 0)
+		FROM `tabSales Invoice` si
+		WHERE si.company = %(company)s AND si.docstatus = 1
+			AND si.posting_date BETWEEN %(date_from)s AND %(date_to)s
+			AND (si.pos_profile IS NULL OR si.pos_profile NOT IN %(profiles)s)
+		""",
+		{
+			"company": scope["company"],
+			"date_from": scope["date_from"],
+			"date_to": scope["date_to"],
+			"profiles": tuple(scope["pos_profiles"]) or ("",),
+		},
+	)[0]
+	return {"invoices": int(row[0]), "amount": flt(row[1], 2)}
+
+
 def _collected_at_sale(condition: str, params: dict) -> tuple[list, float]:
 	"""What the till took at the moment of sale, by mode, and the change it gave back.
 
@@ -437,7 +481,7 @@ def _collected_later(condition: str, params: dict) -> list:
 	return frappe.db.sql(
 		f"""
 		SELECT
-			pe.mode_of_payment AS mode,
+			{PAYMENT_ENTRY_MODE} AS mode,
 			COALESCE(SUM(per.allocated_amount * COALESCE(NULLIF(pe.source_exchange_rate, 0), 1)), 0)
 				AS amount,
 			COUNT(DISTINCT per.reference_name) AS count
@@ -448,9 +492,8 @@ def _collected_later(condition: str, params: dict) -> list:
 			AND per.reference_doctype = 'Sales Invoice'
 			AND per.docstatus = 1
 			AND pe.docstatus = 1
-			AND pe.payment_type = 'Receive'
-			AND pe.mode_of_payment IS NOT NULL AND pe.mode_of_payment != ''{exclude_stamped}
-		GROUP BY pe.mode_of_payment
+			AND pe.payment_type = 'Receive'{exclude_stamped}
+		GROUP BY mode
 		""",
 		params,
 		as_dict=True,
@@ -467,7 +510,7 @@ def _collected_at_sale_via_payment_entries(condition: str, params: dict) -> list
 		return []
 	return frappe.db.sql(
 		f"""
-		SELECT pe.mode_of_payment AS mode,
+		SELECT {PAYMENT_ENTRY_MODE} AS mode,
 			COALESCE(SUM(per.allocated_amount * COALESCE(NULLIF(pe.source_exchange_rate, 0), 1)), 0) AS amount,
 			COUNT(DISTINCT per.reference_name) AS count
 		FROM `tabPayment Entry Reference` per
@@ -477,8 +520,7 @@ def _collected_at_sale_via_payment_entries(condition: str, params: dict) -> list
 			AND per.reference_doctype = 'Sales Invoice' AND per.docstatus = 1
 			AND pe.docstatus = 1 AND pe.payment_type = 'Receive'
 			AND pe.custom_pos_opening_entry IS NOT NULL AND pe.custom_pos_opening_entry != ''
-			AND pe.mode_of_payment IS NOT NULL AND pe.mode_of_payment != ''
-		GROUP BY pe.mode_of_payment
+		GROUP BY mode
 		""",
 		params,
 		as_dict=True,
