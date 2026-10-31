@@ -1,5 +1,6 @@
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 
 def ensure_payment_entry_pos_fields():
@@ -15,6 +16,7 @@ def ensure_payment_entry_pos_fields():
 				"module": "KLiK PoS",
 				"read_only": 1,
 				"no_copy": 1,
+				"search_index": 1,  # the Z-report and shift close look entries up by shift
 			},
 			{
 				"fieldname": "custom_is_created_from_klik",
@@ -28,6 +30,13 @@ def ensure_payment_entry_pos_fields():
 		]
 	}
 	create_custom_fields(custom_fields, update=True)
+	# The Z-report's day scope reads a branch's Payment Entries by date; ERPNext leaves it unindexed.
+	# A Property Setter as well as add_index: updatedb drops indexes the field meta does not ask for.
+	if frappe.get_meta("Payment Entry").get_field("posting_date").search_index != 1:
+		make_property_setter(
+			"Payment Entry", "posting_date", "search_index", "1", "Check", validate_fields_for_doctype=False
+		)
+	frappe.db.add_index("Payment Entry", ["posting_date"])  # create it now; the setter keeps it
 
 
 def ensure_pos_opening_entry_links():

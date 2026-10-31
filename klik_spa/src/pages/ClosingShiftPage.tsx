@@ -41,6 +41,7 @@ import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 import { HELP_CLOSING_SHIFT_URL } from "../utils/helpLinks";
 import ClosingCountRows from "../components/closing/ClosingCountRows";
+import ZReportPrint, { canPrintZReport } from "../components/closing/ZReportPrint";
 
 export default function ClosingShiftPage() {
   const navigate = useNavigate();
@@ -66,6 +67,8 @@ export default function ClosingShiftPage() {
   const [showSingleReturn, setShowSingleReturn] = useState(false);
   const [selectedInvoiceForReturn, setSelectedInvoiceForReturn] = useState<SalesInvoice | null>(null);
   const { createClosingEntry, isCreating } = useCreatePOSClosingEntry();
+  // Set once the shift is closed and the cashier may print the Z-report before leaving.
+  const [closedName, setClosedName] = useState<string | null>(null);
 
   // Delete confirmation states (Sales Invoice drafts)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -205,6 +208,8 @@ export default function ClosingShiftPage() {
   // Modes that keep cash in the drawer: the only ones asked how much is banked at close.
   const floatModes = useMemo(() => floatModeNames(modes || []), [modes]);
   const hasPaymentStats = Object.keys(paymentStats).length > 0;
+
+  if (closedName) return <ZReportPrint name={closedName} onContinue={() => navigate("/pos")} />;
 
   // Closing is turned off on this till (POS Profile 'Allow Closing Shift'). The server
   // refuses the figures and the close anyway; say so instead of a page of refusals.
@@ -444,8 +449,11 @@ export default function ClosingShiftPage() {
         console.warn('Failed to clear backend cache after close:', e);
       }
 
-      // Navigate to POS home for a fresh start without full reload
-      navigate('/pos');
+      // Offer the Z-report print first; otherwise straight to POS home for a fresh start
+      // Never strand the user on a closed shift: no name or no print permission means POS home.
+      if (canPrintZReport(posDetails, userInfo) && result.name && result.can_print_z_report) {
+        setClosedName(result.name);
+      } else navigate('/pos');
     } catch (err) {
       console.error("Error closing shift:", err);
     }

@@ -9,7 +9,10 @@ interface ClosingBalance {
   banked_amount?: number;
 }
 
-export type ClosingResult = { ok: true } | { ok: false; error: string };
+/** can_print_z_report: the user may print the closing, which the Z-report reprint requires. */
+export type ClosingResult =
+  | { ok: true; name: string; can_print_z_report: boolean }
+  | { ok: false; error: string };
 
 /** Posts the shift close, and reports a refusal in the server's own words - a manager-only
  * rule, in particular, must not be mistaken for success. */
@@ -31,7 +34,11 @@ export async function postClosingEntry(
     // A proxy error page is HTML, not JSON; it still has to read as a failure.
     const data = await res.json().catch(() => null);
     if (res.ok && data?.message) {
-      return { ok: true };
+      return {
+        ok: true,
+        name: data.message.name,
+        can_print_z_report: data.message.can_print_z_report === true,
+      };
     }
     return { ok: false, error: extractErrorMessage(data, "Failed to close the shift") };
   } catch (err) {
