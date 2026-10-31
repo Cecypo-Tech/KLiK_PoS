@@ -1,4 +1,4 @@
-import { Receipt, FileText, Grid3X3, BarChart3, Users, Banknote } from "lucide-react"
+import { Receipt, FileText, Grid3X3, BarChart3, Users, Banknote, Wallet } from "lucide-react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useUserInfo } from "../hooks/useUserInfo"
 import { usePOSProfileStore } from "../stores/posProfileStore"
@@ -14,6 +14,7 @@ export default function BottomNavigation() {
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
   // Closing is turned off on some tills (POS Profile 'Allow Closing Shift'): a manager closes them.
   const canCloseShift = userInfo?.can_close_shift !== false
+  const canRecordExpenses = userInfo?.can_record_expenses === true
 
    const menuItems = [
     { icon: Grid3X3, path: "/pos", label: "POS" },
@@ -22,6 +23,7 @@ export default function BottomNavigation() {
      { icon: Users, path: "/customers", label: "Customers", requiresEditCreatePermission: true },
     { icon: BarChart3, path: "/dashboard", label: "Dashboard", requiresSalesDashboard: true },
     { icon: FileText, path: "/closing_shift", label: "Closing", requiresClosing: true },
+    { icon: Wallet, path: "/expenses", label: "Expenses", requiresExpenses: true },
 
   ]
 
@@ -42,6 +44,9 @@ export default function BottomNavigation() {
       <div className="flex items-center justify-around py-2 px-4">
         {menuItems.map((item, index) => {
           if (item.requiresEditCreatePermission && posDetails?.custom_allow_to_create_and_edit_customers !== 1) {
+            return null
+          }
+          if (item.requiresExpenses && !canRecordExpenses) {
             return null
           }
           if (item.requiresClosing && !canCloseShift) {
