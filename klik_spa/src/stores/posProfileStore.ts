@@ -84,6 +84,8 @@ export interface UserInfo {
   /** Offer Closing Shift on this till (POS Profile 'Allow Closing Shift', or a manager).
    * Missing on an older backend: offered. */
   can_close_shift?: boolean;
+  /** Offer Expenses (till has a pay-from account and the user may record). */
+  can_record_expenses?: boolean;
   can_view_all_invoices?: boolean;
   admin_roles: string[];
   pos_profile: string | null;

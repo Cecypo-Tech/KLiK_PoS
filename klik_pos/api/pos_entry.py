@@ -468,9 +468,30 @@ def _opening_floats(opening_entry_name):
 	}
 
 
+def _drawer_modes_by_account(pos_profile):
+	"""{account: mode} for the modes on the profile's payments table, from the modes'
+	default accounts for the profile's company. Where several modes share an account, the first
+	in the profile's payments order wins, so the choice is deterministic."""
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	order = [p.mode_of_payment for p in profile.payments]
+	if not order:
+		return {}
+	rows = frappe.get_all(
+		"Mode of Payment Account",
+		filters={"parent": ("in", order), "company": profile.company},
+		fields=["parent", "default_account"],
+	)
+	account_of = {r.parent: r.default_account for r in rows if r.default_account}
+	by_account = {}
+	for mode in order:
+		if account := account_of.get(mode):
+			by_account.setdefault(account, mode)
+	return by_account
+
+
 def expected_by_mode(opening_entry_name):
 	"""What each mode should hold when the shift closes: its opening float plus the shift's
-	takings. The closing entry is filed from this and the Closing Shift screen shows it, so the
+	takings, less the cash paid out as expenses. The closing entry is filed from this and the Closing Shift screen shows it, so the
 	cashier counts against the figure that gets filed.
 
 	Takings are the shift's payment rows less the change handed back, plus Payment Entries
@@ -479,8 +500,14 @@ def expected_by_mode(opening_entry_name):
 	on the invoice but never counted: it was never in the cashier's hands. A mode that took
 	money but is not on the till is included, so its money cannot leave the count silently.
 
-	Returns {mode: {mode_of_payment, opening_amount, sales_amount, expected_amount,
-	transactions}}, opening modes first.
+	Expenses are the shift's draft and submitted Journal Entries (cancelled and deleted ones
+	are gone) whose pay-from account is a profile mode's default account; that mode's
+	expected_amount goes down by them. If several profile modes share the account, the first in
+	the profile's payments order takes it. An expense paid from an account no profile mode maps
+	to (a separate petty-cash box) never touched the drawer and is left out.
+
+	Returns {mode: {mode_of_payment, opening_amount, sales_amount, expense_amount,
+	expected_amount, transactions}}, opening modes first.
 	"""
 	from klik_pos.api.payment import _change_given_by_mode, _fetch_opening_payment_entry_data
 
@@ -491,7 +518,13 @@ def expected_by_mode(opening_entry_name):
 			return None
 		return modes.setdefault(
 			mode,
-			{"mode_of_payment": mode, "opening_amount": 0.0, "sales_amount": 0.0, "transactions": 0},
+			{
+				"mode_of_payment": mode,
+				"opening_amount": 0.0,
+				"sales_amount": 0.0,
+				"expense_amount": 0.0,
+				"transactions": 0,
+			},
 		)
 
 	for mode, amount in _opening_floats(opening_entry_name).items():
@@ -524,8 +557,16 @@ def expected_by_mode(opening_entry_name):
 			entry["sales_amount"] += flt(receipt.total_amount)
 			entry["transactions"] += int(receipt.transactions or 0)
 
+	from klik_pos.api.expense import expenses_for_shifts
+
+	profile = frappe.db.get_value("POS Opening Entry", opening_entry_name, "pos_profile")
+	by_account = _drawer_modes_by_account(profile) if profile else {}
+	for spent in expenses_for_shifts([opening_entry_name]):
+		if entry := row(by_account.get(spent["account"])):
+			entry["expense_amount"] += flt(spent["amount"])
+
 	for entry in modes.values():
-		entry["expected_amount"] = entry["opening_amount"] + entry["sales_amount"]
+		entry["expected_amount"] = entry["opening_amount"] + entry["sales_amount"] - entry["expense_amount"]
 	return modes
 
 
@@ -548,7 +589,7 @@ def closing_summary():
 	hidden = _hides_expected_amount(opening_entry.pos_profile)
 	if hidden:
 		for entry in modes:
-			entry.update(sales_amount=0.0, expected_amount=0.0, transactions=0)
+			entry.update(sales_amount=0.0, expense_amount=0.0, expected_amount=0.0, transactions=0)
 	return {"opening_entry": opening_entry.name, "modes": modes, "figures_hidden": hidden}
 
 

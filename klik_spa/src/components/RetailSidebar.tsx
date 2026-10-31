@@ -1,4 +1,4 @@
-import { Receipt, Grid3X3, BarChart3, Users, MonitorX, Banknote } from "lucide-react"
+import { Receipt, Grid3X3, BarChart3, Users, MonitorX, Banknote, Wallet } from "lucide-react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useUserInfo } from "../hooks/useUserInfo"
 import { usePOSProfileStore } from "../stores/posProfileStore";
@@ -15,6 +15,7 @@ export default function RetailSidebar() {
   const canAccessSalesDashboard = userInfo?.can_view_sales_dashboard ?? false
   // Closing is turned off on some tills (POS Profile 'Allow Closing Shift'): a manager closes them.
   const canCloseShift = userInfo?.can_close_shift !== false
+  const canRecordExpenses = userInfo?.can_record_expenses === true
 
   const menuItems = [
     { icon: Grid3X3, path: "/pos", label: "POS" },
@@ -23,6 +24,7 @@ export default function RetailSidebar() {
      { icon: Users, path: "/customers", label: "Customers", requiresEditCreatePermission: true },
     { icon: BarChart3, path: "/dashboard", label: "Dashboard", requiresSalesDashboard: true },
     { icon: MonitorX, path: "/closing_shift", label: "Closing Shift", requiresClosing: true },
+    { icon: Wallet, path: "/expenses", label: "Expenses", requiresExpenses: true },
 
   ]
 
@@ -70,6 +72,9 @@ export default function RetailSidebar() {
       {/* Menu Items - Flexible space */}
       <div className="flex-1 flex flex-col items-center py-6 space-y-4">
         {menuItems.map((item, index) => {
+          if (item.requiresExpenses && !canRecordExpenses) {
+            return null
+          }
           if (item.requiresClosing && !canCloseShift) {
             return null
           }
