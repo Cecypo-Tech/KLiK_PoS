@@ -49,6 +49,17 @@ class TestExpenseApi(FrappeTestCase):
 				je.cancel()
 			frappe.delete_doc("Journal Entry", name, force=True, ignore_permissions=True)
 
+	def _count(self):
+		return frappe.db.count("Journal Entry", {"custom_pos_profile": TILL})
+
+	def _refused(self, exc, *args, **kw):
+		"""record_expense(*args) is refused with `exc` (and `kw['regex']`) and writes no Journal Entry."""
+		before = self._count()
+		regex = kw.pop("regex", None)
+		with self.assertRaisesRegex(exc, regex or ""):
+			expense.record_expense(*args)
+		self.assertEqual(self._count(), before)
+
 	def _set(self, **values):
 		for k, v in values.items():
 			frappe.db.set_value("POS Profile", TILL, k, v)
@@ -69,6 +80,31 @@ class TestExpenseApi(FrappeTestCase):
 		self.assertEqual(je.custom_expense_type, "Newspaper")
 		self.assertEqual(je.user_remark, "Newspaper: Daily Nation")
 
+	def test_a_ticked_cashier_with_no_journal_entry_rights_can_record(self):
+		from klik_pos.api.shift import JOINED_SHIFT_KEY
+		from klik_pos.tests.test_opening_conflict import _user
+
+		cashier = _user("expense-cashier@example.com")
+		user = frappe.get_doc("User", cashier)
+		user.add_roles("Sales User")
+		self.assertFalse(frappe.has_permission("Journal Entry", "create", user=cashier))
+		entry = expense.get_current_pos_opening_entry()
+		profile = frappe.get_doc("POS Profile", TILL)
+		profile.append("applicable_for_users", {"user": cashier, "custom_can_record_expenses": 1})
+		profile.save(ignore_permissions=True)
+		frappe.defaults.set_user_default(JOINED_SHIFT_KEY, entry, cashier)
+
+		def cleanup():
+			frappe.set_user("Administrator")
+			frappe.defaults.clear_user_default(JOINED_SHIFT_KEY, cashier)
+
+		self.addCleanup(cleanup)
+		frappe.set_user(cashier)
+		res = expense.record_expense("Newspaper", 40, "cashier")
+		frappe.set_user("Administrator")
+		self.assertEqual(res["docstatus"], 1)
+		self.assertEqual(frappe.db.get_value("Journal Entry", res["name"], "owner"), cashier)
+
 	def test_remark_is_just_the_label_without_a_note(self):
 		res = expense.record_expense("Newspaper", 10)
 		self.assertEqual(frappe.db.get_value("Journal Entry", res["name"], "user_remark"), "Newspaper")
@@ -78,25 +114,21 @@ class TestExpenseApi(FrappeTestCase):
 		self.assertEqual(expense.record_expense("Newspaper", 50)["docstatus"], 0)
 
 	def test_refuses_unknown_type(self):
-		with self.assertRaises(frappe.ValidationError):
-			expense.record_expense("Rent", 100)
+		self._refused(frappe.ValidationError, "Rent", 100)
 
 	def test_refuses_non_positive_amount(self):
 		for bad in (0, -5, "abc"):
-			with self.assertRaises(frappe.ValidationError):
-				expense.record_expense("Newspaper", bad)
+			self._refused(frappe.ValidationError, "Newspaper", bad)
 
 	def test_refuses_user_without_tick(self):
 		frappe.db.set_value("POS Profile User", {"parent": TILL}, "custom_can_record_expenses", 0)
 		frappe.clear_document_cache("POS Profile", TILL)
 		with patch("frappe.get_roles", return_value=["Sales User"]):
-			with self.assertRaises(frappe.PermissionError):
-				expense.record_expense("Newspaper", 10)
+			self._refused(frappe.PermissionError, "Newspaper", 10)
 
 	def test_refuses_without_open_shift(self):
 		with patch("klik_pos.api.expense.get_current_pos_opening_entry", return_value=None):
-			with self.assertRaisesRegex(frappe.ValidationError, "No open shift"):
-				expense.record_expense("Newspaper", 10)
+			self._refused(frappe.ValidationError, "Newspaper", 10, regex="No open shift")
 
 	def test_no_pay_from_account_means_off(self):
 		self._set(custom_expense_account=None)
