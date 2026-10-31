@@ -82,6 +82,13 @@ export function ExpenseList({ rows, qz, currency = "" }: { rows: ShiftExpense[];
   );
 }
 
+/** Records an expense, then refreshes the list on success AND failure: a lost response may still have committed. */
+export async function submitExpense(label: string, amount: number, note: string, refresh: () => Promise<void> | void) {
+  const res = await recordExpense(label, amount, note, getCSRFToken() ?? "");
+  void refresh();
+  return res;
+}
+
 export default function ExpensesPage() {
   const { posDetails } = usePOSProfileStore();
   const [types, setTypes] = useState<{ label: string }[]>([]);
@@ -96,14 +103,13 @@ export default function ExpensesPage() {
 
   const save = async (label: string, amount: number, note: string) => {
     setSaving(true);
-    const res = await recordExpense(label, amount, note, getCSRFToken() ?? "");
+    const res = await submitExpense(label, amount, note, refresh);
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error);
       return false;
     }
     toast.success(res.docstatus === 0 ? "Expense saved, awaiting approval" : "Expense saved");
-    void refresh();
     return true;
   };
 

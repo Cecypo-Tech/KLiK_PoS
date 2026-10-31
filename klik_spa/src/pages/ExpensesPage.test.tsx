@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { ExpenseForm, ExpenseList } from "./ExpensesPage";
+import { ExpenseForm, ExpenseList, submitExpense } from "./ExpensesPage";
+
+vi.mock("../services/expense", () => ({
+  recordExpense: vi.fn(async () => ({ ok: false, error: "network" })),
+  getShiftExpenses: vi.fn(),
+  getExpenseTypes: vi.fn(),
+}));
+
+describe("submitExpense", () => {
+  it("refreshes the list even when the save fails (lost response)", async () => {
+    const refresh = vi.fn();
+    const res = await submitExpense("Fuel", 5, "", refresh);
+    expect(res.ok).toBe(false);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});
 
 vi.mock("react-toastify", () => ({ toast: {} }));
 
