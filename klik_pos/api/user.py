@@ -72,6 +72,7 @@ def get_current_user_info():
 		user_doc = frappe.get_doc("User", user)
 
 		# Get current POS profile
+		from klik_pos.api.expense import may_record_expenses
 		from klik_pos.api.shift import may_close_on_till
 		from klik_pos.klik_pos.utils import get_current_pos_profile
 
@@ -91,6 +92,7 @@ def get_current_user_info():
 				# Whether to offer Closing Shift on this till (POS Profile 'Allow Closing
 				# Shift', or a manager); the closing endpoints check the same.
 				"can_close_shift": may_close_on_till(pos_profile.name if pos_profile else None, user),
+				"can_record_expenses": may_record_expenses(pos_profile.name if pos_profile else None, user),
 				# Invoice History: every invoice of the company, not only this till's or one's own.
 				"can_view_all_invoices": bool(INVOICE_MANAGER_ROLES & set(user_roles)),
 				"admin_roles": admin_roles,
