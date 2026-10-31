@@ -357,6 +357,9 @@ def create_closing_entry():
 		return {
 			"name": doc.name,
 			"message": _("POS Closing Entry created successfully."),
+			# The Z-report reprint needs print on the closing; stock ERPNext grants it only to
+			# managers, so the SPA offers the button only when this user has it.
+			"can_print_z_report": can_print_z_report(doc.name),
 		}
 
 	except (frappe.PermissionError, frappe.ValidationError):
@@ -367,6 +370,11 @@ def create_closing_entry():
 	except Exception as e:
 		frappe.log_error(message=traceback.format_exc(), title="POS Closing Entry Creation Failed")
 		frappe.throw(_("Failed to create POS Closing Entry: {0}").format(error_reason(e)))
+
+
+def can_print_z_report(closing_name):
+	"""Whether the user may print this POS Closing Entry, which the Z-report reprint requires."""
+	return bool(frappe.has_permission("POS Closing Entry", "print", doc=closing_name))
 
 
 def _log_if_masking(title):

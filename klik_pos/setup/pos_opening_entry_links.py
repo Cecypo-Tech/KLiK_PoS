@@ -15,6 +15,7 @@ def ensure_payment_entry_pos_fields():
 				"module": "KLiK PoS",
 				"read_only": 1,
 				"no_copy": 1,
+				"search_index": 1,  # the Z-report and shift close look entries up by shift
 			},
 			{
 				"fieldname": "custom_is_created_from_klik",
@@ -28,6 +29,8 @@ def ensure_payment_entry_pos_fields():
 		]
 	}
 	create_custom_fields(custom_fields, update=True)
+	# The Z-report's day scope reads a branch's Payment Entries by date; ERPNext leaves it unindexed.
+	frappe.db.add_index("Payment Entry", ["posting_date"])
 
 
 def ensure_pos_opening_entry_links():

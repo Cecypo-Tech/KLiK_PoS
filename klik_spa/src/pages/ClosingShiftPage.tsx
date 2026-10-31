@@ -450,8 +450,10 @@ export default function ClosingShiftPage() {
       }
 
       // Offer the Z-report print first; otherwise straight to POS home for a fresh start
-      if (canPrintZReport(posDetails, userInfo)) setClosedName(result.name);
-      else navigate('/pos');
+      // Never strand the user on a closed shift: no name or no print permission means POS home.
+      if (canPrintZReport(posDetails, userInfo) && result.name && result.can_print_z_report) {
+        setClosedName(result.name);
+      } else navigate('/pos');
     } catch (err) {
       console.error("Error closing shift:", err);
     }

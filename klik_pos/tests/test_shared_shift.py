@@ -807,6 +807,7 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
 			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
 			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+			patch("klik_pos.api.pos_entry.can_print_z_report", return_value=False),
 		):
 			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
 			result = create_closing_entry()
@@ -823,11 +824,13 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
 			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
 			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+			patch("klik_pos.api.pos_entry.can_print_z_report", return_value=False),
 		):
 			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
 			result = create_closing_entry()
 
 		self.assertEqual(result["name"], "POS-CLO-FAKE")
+		self.assertIs(result["can_print_z_report"], False)  # the SPA hides Print Z-report
 
 	def test_a_cashier_closes_another_s_shift_opened_today_alone_on_the_till(self):
 		entry = _shift(self.till, OPENER)
@@ -839,6 +842,7 @@ class TestClosingRefusesAnotherCashiersStaleShift(SharedShiftCase):
 			patch("klik_pos.api.pos_entry._get_open_pos_entry", return_value=row),
 			patch("klik_pos.api.pos_entry._calculate_payment_reconciliation", return_value=[]),
 			patch("klik_pos.api.pos_entry._create_and_submit_closing_doc") as mock_create,
+			patch("klik_pos.api.pos_entry.can_print_z_report", return_value=False),
 		):
 			mock_create.return_value = frappe._dict(name="POS-CLO-FAKE")
 			result = create_closing_entry()
@@ -932,3 +936,25 @@ class TestCurrentShiftStateManagerField(SharedShiftCase):
 			self.assertTrue(current_shift_state()["manager"])
 		with patch("frappe.get_roles", return_value=["Sales User"]):
 			self.assertFalse(current_shift_state()["manager"])
+
+
+class TestCanPrintZReport(FrappeTestCase):
+	"""The Print Z-report button needs print on the closing (cecypo_qz_extension's reprint checks it)."""
+
+	def test_print_permission_on_the_closing(self):
+		from klik_pos.api.pos_entry import can_print_z_report
+
+		closing = frappe.db.get_value("POS Closing Entry", {"docstatus": 1})
+		if not closing:
+			self.skipTest("no submitted POS Closing Entry on this site")
+		frappe.set_user("Administrator")
+		self.assertTrue(can_print_z_report(closing))
+		email = "z-print-cashier@example.com"
+		if not frappe.db.exists("User", email):
+			frappe.get_doc(
+				{"doctype": "User", "email": email, "first_name": "ZCashier", "send_welcome_email": 0}
+			).insert(ignore_permissions=True).add_roles("Sales User")
+		self.addCleanup(frappe.delete_doc, "User", email, force=True, ignore_permissions=True)
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user(email)
+		self.assertFalse(can_print_z_report(closing))

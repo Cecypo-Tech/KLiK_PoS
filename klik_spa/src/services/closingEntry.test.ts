@@ -8,8 +8,21 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("postClosingEntry", () => {
   it("reports success when the server closes the shift", async () => {
+    vi.stubGlobal("fetch", respond(200, { message: { name: "POS-CLO-1", can_print_z_report: true } }));
+    expect(await postClosingEntry([], "tok")).toEqual({
+      ok: true,
+      name: "POS-CLO-1",
+      can_print_z_report: true,
+    });
+  });
+
+  it("reads a missing print permission as no Z-report button", async () => {
     vi.stubGlobal("fetch", respond(200, { message: { name: "POS-CLO-1" } }));
-    expect(await postClosingEntry([], "tok")).toEqual({ ok: true, name: "POS-CLO-1" });
+    expect(await postClosingEntry([], "tok")).toEqual({
+      ok: true,
+      name: "POS-CLO-1",
+      can_print_z_report: false,
+    });
   });
 
   it("reports a manager-only refusal in the server's words", async () => {
