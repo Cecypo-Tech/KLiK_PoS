@@ -21,6 +21,7 @@ import {
   Printer,
   Copy,
   Image as ImageIcon,
+  X,
 } from "lucide-react";
 
 import InvoiceViewModal from "../components/InvoiceViewModal";
@@ -683,6 +684,22 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
     );
   }
 
+  // Filters are remembered across sessions, so a stale date or name can hide a whole tab
+  // (a cashier on Allparts lost every held order to one). One click puts them back.
+  const filtersActive = Boolean(
+    searchTerm || customerFilter || fromDate || toDate || paymentFilter !== "all" ||
+      (canViewOtherCashiers && cashierFilter !== "all")
+  );
+  const clearFilters = () => {
+    setSearchTerm("");
+    setCustomerFilter("");
+    setFromDate("");
+    setToDate("");
+    setPaymentFilter("all");
+    // A user held to their own sales is put back on themselves by the effect above.
+    setCashierFilter("all");
+  };
+
   // Define render functions before they are used
   const renderFilters = () => (
     <div className="w-full max-w-none bg-white/95 dark:bg-gray-800/95 rounded-xl p-3 border border-gray-200 dark:border-gray-700 mb-4 backdrop-blur">
@@ -752,6 +769,17 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
               </option>
             ))}
           </select>
+        )}
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            title="Clear filters"
+            aria-label="Clear filters"
+            className="sm:order-last self-start sm:self-auto p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-500 hover:text-red-600 hover:border-red-300 dark:text-gray-400 dark:hover:text-red-400"
+          >
+            <X size={16} />
+          </button>
         )}
       </div>
         {hasMore && (
