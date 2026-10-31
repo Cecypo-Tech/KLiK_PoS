@@ -44,6 +44,8 @@ export interface DashboardIdentity {
   returns: number;
   returns_total: number;
   currency: string;
+  /** Billed in the same dates but on no chosen till (desk invoices, unpicked tills). */
+  outside_tills?: { invoices: number; amount: number };
 }
 
 export interface ModeRow {

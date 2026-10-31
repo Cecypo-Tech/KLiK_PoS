@@ -42,6 +42,12 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
         </p>
       )}
 
+      {identity.outside_tills && identity.outside_tills.invoices > 0 && (
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          {`${formatMoney(identity.outside_tills.amount)} more billed off these tills (${identity.outside_tills.invoices} invoice${identity.outside_tills.invoices === 1 ? "" : "s"}), not counted here`}
+        </p>
+      )}
+
       {identity.unexplained !== 0 && (
         <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

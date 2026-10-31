@@ -27,7 +27,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
-from klik_pos.api.dashboard import get_dashboard_summary
+from klik_pos.api.dashboard import NO_MODE, get_dashboard_summary
 from klik_pos.api.mpesa import is_mpesa_mode
 
 COMPANY = "Dev Co"
@@ -49,7 +49,7 @@ def _payable(doc) -> float:
 	return flt(doc.base_grand_total)
 
 
-def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_against=None):
+def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_against=None, till=PROFILE):
 	"""A submitted invoice for the till.
 
 	`shares` splits the payable total across the POS Profile's own payment rows, in order.
@@ -100,14 +100,14 @@ def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_
 
 	si.insert(ignore_permissions=True)
 	si.submit()
-	if not is_pos:
+	if not is_pos and till:
 		# Deni and returns still belong to the till that rang them.
-		frappe.db.set_value("Sales Invoice", si.name, "pos_profile", PROFILE, update_modified=False)
+		frappe.db.set_value("Sales Invoice", si.name, "pos_profile", till, update_modified=False)
 	si.reload()
 	return si
 
 
-def _settle(invoice, amount, mode):
+def _settle(invoice, amount, mode, paid_to=None):
 	"""Collect an existing debt later, the way the customer-payment flow does."""
 	receivable, cash, currency = frappe.db.get_value(
 		"Company", COMPANY, ["default_receivable_account", "default_cash_account", "default_currency"]
@@ -120,7 +120,8 @@ def _settle(invoice, amount, mode):
 	pe.posting_date = DAY_TWO
 	pe.mode_of_payment = mode
 	pe.paid_from = receivable
-	pe.paid_to = cash
+	pe.paid_to = paid_to or cash
+	pe.reference_no, pe.reference_date = f"T-{invoice.name}", DAY_TWO  # a bank account demands them
 	pe.paid_amount = pe.received_amount = amount
 	pe.source_exchange_rate = pe.target_exchange_rate = 1
 	pe.paid_from_account_currency = pe.paid_to_account_currency = currency
@@ -377,6 +378,63 @@ class TestDashboardSummary(FrappeTestCase):
 		self.assertAlmostEqual(cash["amount"], cash_before + 100.0, places=2)
 		self.assertAlmostEqual(summary["identity"]["collected_later"], before["identity"]["collected_later"], places=2)
 		self.assertEqual(summary["identity"]["unexplained"], 0.0)
+
+	def test_a_payment_entry_with_no_mode_takes_the_mode_of_its_account(self):
+		"""Allparts had 278,000 of bank receipts saved without a mode. Dropping them made the
+		page report that money as unaccounted for; the account they landed in says what it was."""
+		row = frappe.db.sql(
+			"""
+			SELECT mpa.default_account, MIN(mpa.parent)
+			FROM `tabMode of Payment Account` mpa
+			INNER JOIN `tabMode of Payment` mp ON mp.name = mpa.parent AND mp.enabled = 1
+			INNER JOIN `tabAccount` a ON a.name = mpa.default_account
+			WHERE mpa.company = %(company)s AND a.account_currency = %(currency)s
+			GROUP BY mpa.default_account
+			HAVING COUNT(DISTINCT mpa.parent) = 1
+			LIMIT 1
+			""",
+			{"company": COMPANY, "currency": frappe.db.get_value("Company", COMPANY, "default_currency")},
+		)
+		if not row:
+			self.skipTest(f"{COMPANY} has no account mapped to exactly one Mode of Payment")
+		account, mode = row[0]
+
+		debt = _invoice(DAY_TWO, [(1, 70)], is_pos=False)
+		_settle(debt, 70, None, paid_to=account)
+
+		summary = _summary()
+
+		later = next(r for r in summary["collected_by_mode"] if r["mode"] == mode)
+		self.assertAlmostEqual(later["later"], 70.0, places=2)
+		self.assertEqual(summary["identity"]["unexplained"], 0.0)
+
+	def test_a_payment_entry_with_no_mode_and_a_shared_account_is_still_counted(self):
+		"""The cash account carries several modes, so the mode cannot be guessed - but the
+		money arrived, and is shown under its own row rather than vanishing."""
+		debt = _invoice(DAY_TWO, [(1, 80)], is_pos=False)
+		_settle(debt, 80, None)
+
+		summary = _summary()
+
+		unnamed = next(r for r in summary["collected_by_mode"] if r["mode"] == NO_MODE)
+		self.assertAlmostEqual(unnamed["later"], 80.0, places=2)
+		self.assertEqual(summary["identity"]["unexplained"], 0.0)
+
+	def test_invoices_off_the_chosen_tills_are_reported_not_billed(self):
+		"""Sales Report Enhanced counts every invoice; this page counts the tills. Allparts saw
+		a 3M gap between the two and could not tell why - the page now says it."""
+		before = _summary()
+
+		desk = _invoice(DAY_TWO, [(1, 90)], is_pos=False, till=None)
+
+		summary = _summary()
+
+		self.assertEqual(summary["identity"]["billed"], before["identity"]["billed"])
+		outside = summary["identity"]["outside_tills"]
+		self.assertEqual(outside["invoices"], before["identity"]["outside_tills"]["invoices"] + 1)
+		self.assertAlmostEqual(
+			outside["amount"], before["identity"]["outside_tills"]["amount"] + _payable(desk), places=2
+		)
 
 
 class TestDashboardSummaryScopeAndPermissions(FrappeTestCase):
