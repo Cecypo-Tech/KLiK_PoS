@@ -1,0 +1,135 @@
+{% autoescape true %}
+{#- The shift Z-report on an 80mm roll (72mm print area): Print Format "Z Report". Same figures as
+the ESC/POS slip; one column of label/amount rows, so nothing is cut on the roll. -#}
+{%- macro money(amount) -%}{{ frappe.utils.fmt_money(amount, currency=currency) }}{%- endmacro -%}
+{%- macro row(label, value, cls="") -%}
+<tr class="{{ cls }}"><td>{{ label }}</td><td class="r">{{ value }}</td></tr>
+{%- endmacro -%}
+<style>
+	/* Left-aligned, never centred: QZ rasterizes at twice the head width and refuses ink past it. */
+	.z80 { width: 100%; max-width: 72mm; margin: 0; font-family: Arial, Helvetica, sans-serif;
+		font-size: 12px; line-height: 1.3; color: #000; }
+	.z80 .c { text-align: center; }
+	.z80 .co { font-size: 15px; font-weight: bold; }
+	.z80 .t { font-size: 13px; font-weight: bold; margin: 4px 0 2px; letter-spacing: 1px; }
+	.z80 h4 { font-size: 12px; font-weight: bold; margin: 6px 0 1px; padding-top: 3px;
+		border-top: 1px dashed #000; text-transform: uppercase; }
+	.z80 table { width: 100%; border-collapse: collapse; }
+	.z80 td { padding: 0; vertical-align: top; }
+	.z80 .r { text-align: right; white-space: nowrap; padding-left: 6px; }
+	.z80 .b td { font-weight: bold; }
+	.z80 .ind td:first-child { padding-left: 8px; }
+	.z80 .sub td { font-size: 12px; padding-left: 8px; }
+	.z80 .tot td { font-weight: bold; border-top: 1px solid #000; }
+	.z80 .grand td { font-size: 13px; font-weight: bold; border-top: 2px solid #000; padding-top: 2px; }
+	.z80 .muted { font-style: italic; }
+</style>
+{%- set R = report -%}
+{%- set shift = R.pos_profile -%}
+<div class="z80">
+	<div class="c co">{{ R.company }}</div>
+	{%- if R.tax_id %}<div class="c">{{ _("Tax ID") }}: {{ R.tax_id }}</div>{% endif %}
+	{%- if R.warehouse %}<div class="c">{{ R.warehouse }}</div>{% endif %}
+	<div class="c t">{{ _("Z REPORT") }}</div>
+	<table>
+		{{ row(_("Report"), R.report_no) }}
+		{%- if shift %}{{ row(_("Till"), R.pos_profile) }}{% endif %}
+		{%- if R.cashier %}{{ row(_("Cashier"), R.cashier_name or R.cashier) }}{% endif %}
+		{{ row(_("Opened") if shift else _("From"), (R.period_start or "")[:16]) }}
+		{{ row(_("Closed") if shift else _("To"), (R.period_end or "")[:16]) }}
+		{%- if R.first_doc %}
+		{{ row(_("First invoice"), R.first_doc) }}
+		{{ row(_("Last invoice"), R.last_doc) }}
+		{%- endif %}
+		{{ row(_("Sales"), R.sales_count) }}
+		{%- if R.printed_by %}{{ row(_("Printed by"), R.printed_by_name or R.printed_by) }}{% endif %}
+		{{ row(_("Printed on"), (R.printed_at or "")[:16]) }}
+	</table>
+
+	{%- if R.users %}
+	<h4>{{ _("Sales by user") }}</h4>
+	<table>
+		{%- for u in R.users %}
+		{{ row(u.full_name or u.user, money(u.total), "b") }}
+		{%- for m in u.modes %}{{ row(m.mode, money(m.amount), "ind") }}{% endfor %}
+		{%- if u.on_credit %}{{ row(_("On credit (not in totals)"), money(u.on_credit), "ind muted") }}{% endif %}
+		{%- endfor %}
+	</table>
+	{%- endif %}
+
+	<h4>{{ _("Tender types") }}</h4>
+	<table>
+		{%- for t in R.tenders %}{{ row(t.mode, money(t.amount)) }}{% endfor %}
+		{{ row(_("Total"), money(R.tender_total), "tot") }}
+		{%- if R.on_credit_total %}{{ row(_("On credit (not in totals)"), money(R.on_credit_total), "muted") }}{% endif %}
+		{%- if R.written_off_total %}{{ row(_("Written off"), money(R.written_off_total), "muted") }}{% endif %}
+	</table>
+
+	{%- if R.credit_collected %}
+	<h4>{{ _("Credit collected / deposits") }}</h4>
+	<table>
+		{%- for t in R.credit_collected %}{{ row(t.mode, money(t.amount)) }}{% endfor %}
+		{{ row(_("Total"), money(R.credit_total), "tot") }}
+	</table>
+	{%- endif %}
+
+	{%- if R.returns.count or R.returns.modes %}
+	<h4>{{ _("Returns") }}</h4>
+	<table>
+		{{ row(_("Count"), R.returns.count) }}
+		{%- for t in R.returns.modes %}{{ row(t.mode, money(t.amount)) }}{% endfor %}
+		{{ row(_("Total"), money(R.returns.total), "tot") }}
+	</table>
+	{%- endif %}
+
+	{%- if R.discount_total %}
+	<h4>{{ _("Discounts") }}</h4>
+	<table>{{ row(_("Discounts (net of returns)"), money(R.discount_total)) }}</table>
+	{%- endif %}
+
+	{%- if R.grand_total or R.tax_total %}
+	<h4>{{ _("Tax") }}</h4>
+	<table>
+		{{ row(_("Taxable total"), money(R.net_total)) }}
+		{%- for t in R.taxes %}{{ row(t.description, money(t.amount), "ind") }}{% endfor %}
+		{%- if R.tax_total %}{{ row(_("Tax total"), money(R.tax_total)) }}{% endif %}
+		{{ row(_("Grand total"), money(R.grand_total), "tot") }}
+	</table>
+	{%- endif %}
+
+	{%- if R.expenses %}
+	<h4>{{ _("Expenses") }}</h4>
+	<table>
+		{%- for e in R.expenses %}
+		{{ row(e.label or e.name, money(e.amount)) }}
+		<tr class="sub"><td colspan="2">{{ e.user_name or e.user }}{% if e.note %}: {{ e.note }}{% endif %}
+			{%- if e.pending %} <i>({{ _("awaiting approval") }})</i>{% endif %}</td></tr>
+		{%- endfor %}
+		{{ row(_("Total"), money(R.expense_total), "tot") }}
+	</table>
+	{%- endif %}
+
+	{%- if R.cash_position %}
+	<h4>{{ _("Cash position") }}</h4>
+	<table>
+		{%- for c in R.cash_position %}
+		{{ row(c.mode, "", "b") }}
+		{%- if c.opening %}{{ row(_("Opening"), money(c.opening), "ind") }}{% endif %}
+		{%- if c["in"] %}{{ row(_("In"), money(c["in"]), "ind") }}{% endif %}
+		{%- if c.out %}{{ row(_("Out"), money(c.out), "ind") }}{% endif %}
+		{{ row(_("Expected"), money(c.expected), "ind") }}
+		{%- if c.counted is not none %}
+		{{ row(_("Counted"), money(c.counted), "ind") }}
+		{%- if c.difference %}{{ row(_("Diff"), money(c.difference), "ind b") }}{% endif %}
+		{%- endif %}
+		{%- endfor %}
+	</table>
+	{%- endif %}
+
+	<table style="margin-top: 6px;">{{ row(_("Total balance"), money(R.total_balance), "grand") }}</table>
+
+	{%- if R.excluded_invoices or R.excluded_payment_entries %}
+	<p class="muted" style="margin-top: 4px;">{{ _("Not counted: {0} invoices, {1} payments (no branch)").format(R.excluded_invoices or 0, R.excluded_payment_entries or 0) }}</p>
+	{%- endif %}
+</div>
+{% endautoescape %}
