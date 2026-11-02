@@ -118,6 +118,13 @@ describe("checkoutExtrasFromHeldOrder", () => {
 });
 
 describe("heldItemToCartItem", () => {
+  it("keeps the price list the line was priced from, so the minimum is judged on it", () => {
+    const line = heldItemToCartItem({ item_code: "H4", item_name: "H4 Bulb", quantity: 1, price: 400, selectedPriceList: "Distributor" });
+    expect((line as unknown as { selected_price_list?: string }).selected_price_list).toBe("Distributor");
+    const plain = heldItemToCartItem({ item_code: "H4", item_name: "H4 Bulb", quantity: 1, price: 450 });
+    expect((plain as unknown as { selected_price_list?: string }).selected_price_list).toBeUndefined();
+  });
+
   it("keeps the Loss of Sale split the server worked out at this till", () => {
     const line = heldItemToCartItem({ item_code: "F049", item_name: "Filter", quantity: 40, los_qty: 60, price: 450 });
     expect(line.quantity).toBe(40);

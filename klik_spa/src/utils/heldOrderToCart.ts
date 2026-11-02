@@ -83,5 +83,9 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
   );
   useCartStore.getState().setCheckoutExtras(checkoutExtrasFromHeldOrder(od, flags));
 
-  return loadCachedItemsToCart();
+  const loaded = await loadCachedItemsToCart();
+  // The list the cart was on when held. Set directly, not through setSelectedPriceList:
+  // that re-prices the cart and would overwrite the held rates.
+  if (od.selling_price_list) useCartStore.setState({ selectedPriceList: od.selling_price_list });
+  return loaded;
 }

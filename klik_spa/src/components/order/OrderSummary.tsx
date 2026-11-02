@@ -84,6 +84,7 @@ export default function OrderSummary({
       const restorable = shouldRestorePersistedDiscount(item as CartItem & { original_price?: number });
       const discountAmount = restorable ? persistedDiscountAmount : 0;
       const discountPercentage = restorable ? persistedDiscountPercentage : 0;
+      const selectedPriceList = (item as CartItem & { selected_price_list?: string }).selected_price_list;
       if (serialBatchBundle || item.bundle_entries) {
         saved[item.id] = {
           discountPercentage,
@@ -92,13 +93,15 @@ export default function OrderSummary({
           customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
           serial_batch_bundle: serialBatchBundle,
           bundle_entries: item.bundle_entries,
+          ...(selectedPriceList ? { selectedPriceList } : {}),
         };
-      } else if (discountAmount > 0 || discountPercentage > 0 || persistedCustomRate !== undefined && persistedCustomRate !== null) {
+      } else if (discountAmount > 0 || discountPercentage > 0 || persistedCustomRate !== undefined && persistedCustomRate !== null || selectedPriceList) {
         saved[item.id] = {
           discountPercentage,
           discountAmount,
           customRate: persistedCustomRate,
           customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
+          ...(selectedPriceList ? { selectedPriceList } : {}),
         };
       }
     });
@@ -211,12 +214,14 @@ export default function OrderSummary({
         const discountAmount = restorable ? persistedDiscountAmount : 0;
         const discountPercentage = restorable ? persistedDiscountPercentage : 0;
 
+        const selectedPriceList = (item as CartItem & { selected_price_list?: string }).selected_price_list;
         if (
           discountAmount > 0
           || discountPercentage > 0
           || (persistedCustomRate !== undefined && persistedCustomRate !== null)
           || serialBatchBundle
           || bundleEntries
+          || selectedPriceList
         ) {
           next[item.id] = {
             discountPercentage,
@@ -225,6 +230,7 @@ export default function OrderSummary({
             customRateIncludesTax: (item as CartItem & { custom_rate_includes_tax?: boolean }).custom_rate_includes_tax,
             serial_batch_bundle: serialBatchBundle,
             bundle_entries: bundleEntries,
+            ...(selectedPriceList ? { selectedPriceList } : {}),
           };
         }
       });

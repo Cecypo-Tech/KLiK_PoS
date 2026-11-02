@@ -26,6 +26,8 @@ import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../se
 import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
 import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalHeldOrderMpesa, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
 import { priceApprovalMessage } from "../../utils/priceApproval";
+import { checkoutPriceList, floorBlockMessage, authorisationStillValid, type FloorAuthorisation } from "../../utils/priceFloor";
+import PriceFloorPanel from "./PriceFloorPanel";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
@@ -324,6 +326,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // answer already in flight, waited out the debounce and asked the server the same thing.
   const taxPreviewInFlightRef = useRef<Map<string, ReturnType<typeof validateCheckoutInvoice>>>(new Map());
   const taxPreviewCacheRef = useRef<Map<string, CachedTaxPreviewEntry>>(new Map());
+  // Minimum selling price (cecypo_powerpack): the preview's below-list lines, and the
+  // supervisor's authorisation for exactly those lines.
+  const [floorAuth, setFloorAuth] = useState<FloorAuthorisation | null>(null);
+  const lastPreviewPayloadRef = useRef<Record<string, unknown> | null>(null);
+  const selectedPriceList = useCartStore((s) => s.selectedPriceList);
   const initializedCreditDefaultRef = useRef(false);
   const initializedOrderDiscountRef = useRef(false);
   // State, not a ref: the write-back below must wait for the render that holds the restored
@@ -331,6 +338,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [checkoutExtrasRestored, setCheckoutExtrasRestored] = useState(false);
 
   const { posDetails } = usePOSProfileStore();
+  const cartPriceList = checkoutPriceList(posDetails, selectedPriceList);
   const posLoading = false;
   const {
     activeSalesperson: currentSalesperson,
@@ -1015,6 +1023,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           discountPercentage: discountData.discountPercentage || 0,
           discountAmount: discountData.discountAmount || 0,
           serial_batch_bundle: discountData.serial_batch_bundle || null,
+          selectedPriceList: discountData.selectedPriceList || "",
         };
       }),
       customer: selectedCustomer,
@@ -1083,6 +1092,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       walkin_name: walkinDetails.name || null,
       walkin_phone: walkinDetails.phone || null,
       extra_fields: extraFields,
+      selling_price_list: cartPriceList,
+      price_authorisation:
+        floorAuth && authorisationStillValid(floorAuth, backendTaxPreview?.price_floor?.rows ?? [])
+          ? floorAuth.token
+          : undefined,
       loyalty: appliedLoyalty
         ? {
             loyalty_program: appliedLoyalty.loyalty_program,
@@ -1410,8 +1424,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           description: item.description || "",
           item_tax_template: item.item_tax_template || "",
           item_tax_rate: normalizedItemTaxRate,
+          selectedPriceList: discountData.selectedPriceList || "",
         };
       }),
+      selling_price_list: cartPriceList,
       SalesTaxCharges: selectedSalesTaxCharges,
       businessType: posDetails?.business_type || "",
       deliveryCharge: Number(deliveryCharge || 0),
@@ -1426,6 +1442,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     };
 
     const previewCacheKey = JSON.stringify(previewPayload);
+    // What a supervisor authorises: the cart exactly as previewed (no payment context).
+    lastPreviewPayloadRef.current = { ...previewPayload, status: "held" };
 
     const fetchBackendTaxPreview = async () => {
       const step = taxPreviewStep({
@@ -1483,9 +1501,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               description: item.description || "",
               item_tax_template: item.item_tax_template || "",
               item_tax_rate: item.item_tax_rate || {},
+              selectedPriceList: discountData.selectedPriceList || "",
             };
           }),
           itemDiscounts,
+          selling_price_list: cartPriceList,
           SalesTaxCharges: selectedSalesTaxCharges,
           businessType: posDetails?.business_type,
           deliveryCharge,
@@ -1591,6 +1611,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     dueDate,
     allowPartialPayments,
     getEffectiveItemRate,
+    cartPriceList,
   ]);
 
   const mpesaCustomer = selectedCustomer?.id || selectedCustomer?.name || undefined;
@@ -2031,6 +2052,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           item_code: code,
           discountPercentage,
           discountAmount,
+          selectedPriceList: discountData.selectedPriceList || "",
         };
       });
 
@@ -2061,6 +2083,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         status: "held",
         businessType: posDetails?.business_type,
         salesperson: currentSalesperson?.name || null,
+        selling_price_list: cartPriceList,
         // Buyer, extra fields, shipping rule, delivery, discount and tax template - built the
         // same way as the cart's Hold, from what checkout shows now.
         ...heldOrderPayloadExtras({
@@ -2191,9 +2214,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       outstandingAmount,
       outstandingLabel: formatCurrencyWithSymbol(outstandingAmount, displayCurrencySymbol),
       alreadySubmittedAs,
-      priceApprovalMessage: heldOrderApproval
-        ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach)
-        : null,
+      priceApprovalMessage:
+        (heldOrderApproval ? priceApprovalMessage(heldOrderApproval.state, heldOrderApproval.priceBreach) : null)
+        ?? floorBlockMessage(backendTaxPreview?.price_floor, floorAuth),
       mpesaUncoveredLabel: mpesaUncovered > 0 ? formatCurrencyWithSymbol(mpesaUncovered, displayCurrencySymbol) : null,
       overpaidNonCashLabel: voucherOverpay > 0 ? formatCurrencyWithSymbol(voucherOverpay, displayCurrencySymbol) : null,
     });
@@ -3227,6 +3250,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       </div>
                     </label>
                   </div>
+                  <PriceFloorPanel
+                    floor={backendTaxPreview?.price_floor ?? null}
+                    authorisation={floorAuth}
+                    getPreviewPayload={() => lastPreviewPayloadRef.current}
+                    formatMoney={(value) => formatCurrencyWithSymbol(value, displayCurrencySymbol)}
+                    onAuthorised={setFloorAuth}
+                    onFixPrices={() => closeDialog(false)}
+                    disabled={invoiceSubmitted || isProcessingPayment}
+                  />
                   {!reconciliation.ok && (
                     <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
                       <p className="font-semibold">This sale is on hold</p>
@@ -3603,6 +3635,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   </span>
                 </div>
               </label>
+              <PriceFloorPanel
+                floor={backendTaxPreview?.price_floor ?? null}
+                authorisation={floorAuth}
+                getPreviewPayload={() => lastPreviewPayloadRef.current}
+                formatMoney={(value) => formatCurrencyWithSymbol(value, displayCurrencySymbol)}
+                onAuthorised={setFloorAuth}
+                onFixPrices={() => closeDialog(false)}
+                disabled={invoiceSubmitted || isProcessingPayment}
+              />
               <div className="flex items-center gap-3">
                <ActionButtons
                   invoiceSubmitted={invoiceSubmitted}
