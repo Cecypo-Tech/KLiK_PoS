@@ -112,7 +112,16 @@ def get_customers(limit: int = 100, start: int = 0, search: str = ""):
                 c.email_id,
                 c.mobile_no,
                 c.tax_id,
-                addr.city,
+                -- The primary address's town, else any linked address's: an address added
+                -- to a customer is often never set as its primary.
+                COALESCE(NULLIF(addr.city, ''), (
+                    SELECT ad.city FROM `tabDynamic Link` dl
+                    JOIN `tabAddress` ad ON ad.name = dl.parent
+                    WHERE dl.parenttype = 'Address' AND dl.link_doctype = 'Customer'
+                        AND dl.link_name = c.name AND ad.disabled = 0 AND IFNULL(ad.city, '') != ''
+                    ORDER BY ad.is_primary_address DESC, ad.modified DESC
+                    LIMIT 1
+                )) as city,
                 c.custom_is_walkin as is_walkin,
                 COALESCE(({total_orders_sql("c.name")}), 0) as custom_total_orders,
                 COALESCE(({total_spent_sql("c.name")}), 0) as custom_total_spent,
