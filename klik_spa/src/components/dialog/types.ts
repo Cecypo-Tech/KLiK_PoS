@@ -72,6 +72,8 @@ export interface BackendTaxPreviewLine {
 
 export interface BackendTaxPreview {
   tax_breakdown: BackendTaxBreakdownLine[];
+  /** Minimum selling price on a till that enforces it (cecypo_powerpack). Absent otherwise. */
+  price_floor?: import("../../utils/priceFloor").PriceFloor;
   /** The lines the preview invoice actually priced. Absent on an older backend. */
   items?: BackendTaxPreviewLine[];
   net_total: number;

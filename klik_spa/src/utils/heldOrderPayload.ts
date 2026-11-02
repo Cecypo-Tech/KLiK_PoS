@@ -118,5 +118,7 @@ export function heldItemToCartItem(item: any): CartItem {
     item_tax_template: item.item_tax_template || '',
     item_tax_rate: item.item_tax_rate || {},
     description: item.description || '',
+    // The list a line was priced from (per-line switch); OrderSummary restores it.
+    selected_price_list: item.selectedPriceList || undefined,
   } as unknown as CartItem;
 }
