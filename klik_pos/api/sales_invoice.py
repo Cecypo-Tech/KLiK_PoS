@@ -467,6 +467,30 @@ def _apply_klik_invoice_flags(doc, is_held=None, is_submitted=None):
 		_set_checkbox_field_value(doc, "custom_is_submitted", is_submitted)
 
 
+def _powerpack_floor_installed():
+	return "cecypo_powerpack" in frappe.get_installed_apps() and frappe.get_meta("POS Profile").has_field(
+		"powerpack_enforce_list_floor"
+	)
+
+
+def _price_floor_report(doc):
+	"""cecypo_powerpack's minimum-price lines for this till, or nothing when it is not installed."""
+	if not _powerpack_floor_installed():
+		return {"enforced": False, "rows": []}
+	from cecypo_powerpack.pos_list_floor import till_floor_report
+
+	return till_floor_report(doc)
+
+
+def _apply_price_authorisation(doc, data):
+	"""A supervisor's authorisation from the till, checked again by PowerPack when the invoice saves."""
+	token = data.get("price_authorisation") if isinstance(data, dict) else None
+	if token and _powerpack_floor_installed():
+		from cecypo_powerpack.pos_supervisor_pin import apply_authorisation
+
+		apply_authorisation(doc, token)
+
+
 def _refuse_unapproved_price_breach(doc):
 	"""Stop a checkout the minimum-selling-price rule would only fail later.
 
@@ -2079,6 +2103,64 @@ def mark_invoice_as_printed(invoice_name):
 		return {"success": False, "error": str(e)}
 
 
+def _build_preview_doc(data):
+	"""The checkout's invoice, built but not saved, and the Loss of Sale split it made.
+
+	Shared by validate_checkout_invoice and the supervisor's price authorisation, so a
+	supervisor authorises exactly the cart the preview showed.
+	"""
+	if isinstance(data, str):
+		data = json.loads(data)
+	(
+		customer,
+		items,
+		amount_paid,
+		sales_and_tax_charges,
+		mode_of_payment,
+		business_type,
+		roundoff_amount,
+		delivery_charge,
+		delivery_personnel,
+		is_credit_sale,
+		allow_partial_payment,
+		due_date,
+		salesperson,
+		tax_id,
+		enable_background_submission,
+		loyalty_redemption,
+	) = parse_invoice_data(data)
+
+	# Before payment: shorten lines to the stock there is and tell the till what changed.
+	los_adjustments = split_cart_items(items, _get_active_pos_profile())
+
+	preview_doc = build_sales_invoice_doc(
+		customer,
+		items,
+		amount_paid,
+		sales_and_tax_charges,
+		mode_of_payment,
+		business_type,
+		roundoff_amount,
+		delivery_charge,
+		include_payments=False,
+		delivery_personnel=delivery_personnel,
+		is_credit_sale=is_credit_sale,
+		due_date=due_date,
+		salesperson=salesperson,
+		tax_id=tax_id,
+		create_batch_and_serial_bundle=False,
+		enable_background_submission=enable_background_submission,
+		loyalty_redemption=loyalty_redemption,
+		walkin_name=data.get("walkin_name"),
+		walkin_phone=data.get("walkin_phone"),
+		extra_fields=_parse_extra_fields(data),
+		order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
+		shipping_rule=data.get("shipping_rule") or None,
+		selling_price_list=data.get("selling_price_list") or None,
+	)
+	return preview_doc, los_adjustments
+
+
 @frappe.whitelist()
 def validate_checkout_invoice(data):
 	"""
@@ -2086,53 +2168,7 @@ def validate_checkout_invoice(data):
 	This catches batch/serial and item-account issues early before payment submission.
 	"""
 	try:
-		(
-			customer,
-			items,
-			amount_paid,
-			sales_and_tax_charges,
-			mode_of_payment,
-			business_type,
-			roundoff_amount,
-			delivery_charge,
-			delivery_personnel,
-			is_credit_sale,
-			allow_partial_payment,
-			due_date,
-			salesperson,
-			tax_id,
-			enable_background_submission,
-			loyalty_redemption,
-		) = parse_invoice_data(data)
-
-		# Before payment: shorten lines to the stock there is and tell the till what changed.
-		los_adjustments = split_cart_items(items, _get_active_pos_profile())
-
-		preview_doc = build_sales_invoice_doc(
-			customer,
-			items,
-			amount_paid,
-			sales_and_tax_charges,
-			mode_of_payment,
-			business_type,
-			roundoff_amount,
-			delivery_charge,
-			include_payments=False,
-			delivery_personnel=delivery_personnel,
-			is_credit_sale=is_credit_sale,
-			due_date=due_date,
-			salesperson=salesperson,
-			tax_id=tax_id,
-			create_batch_and_serial_bundle=False,
-			enable_background_submission=enable_background_submission,
-			loyalty_redemption=loyalty_redemption,
-			walkin_name=data.get("walkin_name"),
-			walkin_phone=data.get("walkin_phone"),
-			extra_fields=_parse_extra_fields(data),
-			order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
-			shipping_rule=data.get("shipping_rule") or None,
-			selling_price_list=data.get("selling_price_list") or None,
-		)
+		preview_doc, los_adjustments = _build_preview_doc(data)
 
 		validate_required_salesperson(preview_doc)
 
@@ -2195,6 +2231,8 @@ def validate_checkout_invoice(data):
 				"disable_rounded_total": int(preview_doc.disable_rounded_total or 0),
 				"shipping_amount": flt(shipping_amount),
 				"total_net_weight": flt(preview_doc.get("total_net_weight") or 0),
+				# Lines below their price list's minimum, on a till that enforces it.
+				"price_floor": _price_floor_report(preview_doc),
 			},
 		}
 
@@ -2451,6 +2489,7 @@ def _queue_sales_invoice(data, source_order=None):
 
 		if source_order and doc.meta.has_field("powerpack_source_order"):
 			doc.powerpack_source_order = source_order
+		_apply_price_authorisation(doc, data)
 		_apply_remarks(doc, data)
 
 		validate_required_salesperson(doc)
