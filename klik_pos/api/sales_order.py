@@ -5,7 +5,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, nowdate
 
-from klik_pos.api.item.item_price import get_price_list_with_customer_priority
 
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
@@ -20,6 +19,8 @@ from klik_pos.api.sales_invoice import (
     _set_customer,
     get_current_pos_opening_entry,
     parse_invoice_data,
+    resolve_selling_price_list,
+    set_line_price_list,
 )
 from klik_pos.overrides.loss_of_sale import LOS_FIELD, PROFILE_FLAG as LOS_PROFILE_FLAG, split_held_items
 
@@ -282,6 +283,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
             "item_tax_template": item.get("item_tax_template") or "",
             "item_tax_rate": item.get("item_tax_rate") or {},
             "description": item.get("description") or "",
+            "selectedPriceList": discount_data.get("selectedPriceList") or "",
         }
 
     # Persist the full frontend customer object (if sent) so resume can restore it
@@ -304,6 +306,8 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
         "SalesTaxCharges": sales_and_tax_charges,
         "roundOffAmount": flt(roundoff_amount),
         "customer": customer_data,
+        # The list the cart was on; the held order records it (if the cashier may use it).
+        "selling_price_list": (data.get("selling_price_list") or None) if isinstance(data, dict) else None,
         "walkin_name": data.get("walkin_name") if isinstance(data, dict) else None,
         "walkin_phone": data.get("walkin_phone") if isinstance(data, dict) else None,
         "extra_fields": _parse_extra_fields(data),
@@ -359,6 +363,7 @@ def _so_item_row(so, pos_profile, item, warehouse):
         "delivery_date": nowdate(),
         "warehouse": warehouse,
     }
+    set_line_price_list(row, "Sales Order Item", item.get("price_list"))
     item_tax_template, item_tax_rate = _resolve_item_tax_details_for_line(so, item, pos_profile)
     if item_tax_template:
         row["item_tax_template"] = item_tax_template
@@ -381,7 +386,7 @@ def _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, or
     so.company = pos_profile.company
     so.currency = pos_profile.currency
     # A held order is priced from the till, as checkout re-prices it; only the User Permission check applies.
-    so.selling_price_list = get_price_list_with_customer_priority(None, pos_profile)
+    so.selling_price_list = resolve_selling_price_list(cart_meta.get("selling_price_list"), None, pos_profile)
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = opening_entry
     so.custom_is_klik_held = 1
@@ -433,6 +438,7 @@ def _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, 
     # under them.
     so.custom_pos_profile = pos_profile.name
     so.custom_pos_opening_entry = get_current_pos_opening_entry() or ""
+    so.selling_price_list = resolve_selling_price_list(cart_meta.get("selling_price_list"), None, pos_profile)
     # Orders held before this flag existed carry 0; see _build_sales_order_doc.
     so.ignore_pricing_rule = 1
     so.set("items", [])
@@ -622,6 +628,7 @@ def get_held_order_details(order_id):
                 "item_tax_template": d.get("item_tax_template") or "",
                 "item_tax_rate": d.get("item_tax_rate") or {},
                 "description": d.get("description") or "",
+                "selectedPriceList": d.get("selectedPriceList") or "",
             })
 
         return {
@@ -633,6 +640,7 @@ def get_held_order_details(order_id):
             "walkin_phone": cart_meta.get("walkin_phone"),
             "extra_fields": cart_meta.get("extra_fields") or {},
             "shipping_rule": cart_meta.get("shipping_rule"),
+            "selling_price_list": so.selling_price_list,
             "items": items,
             "cart_meta": cart_meta,
             "remarks": so.get("remarks") or "",

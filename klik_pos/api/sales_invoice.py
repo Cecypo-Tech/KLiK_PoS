@@ -17,7 +17,7 @@ from klik_pos.api.payment_rows import mode_label
 from klik_pos.klik_pos.utils import get_current_pos_profile, requested_warehouse
 from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
-from .item.item_price import get_price_list_with_customer_priority
+from .item.item_price import get_price_list_with_customer_priority, is_allowed_price_list
 from .loyalty import (
 	apply_loyalty_redemption,
 	get_invoice_loyalty_summary,
@@ -2131,6 +2131,7 @@ def validate_checkout_invoice(data):
 			extra_fields=_parse_extra_fields(data),
 			order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
 			shipping_rule=data.get("shipping_rule") or None,
+			selling_price_list=data.get("selling_price_list") or None,
 		)
 
 		validate_required_salesperson(preview_doc)
@@ -2445,6 +2446,7 @@ def _queue_sales_invoice(data, source_order=None):
 			extra_fields=_parse_extra_fields(data),
 			order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
 			shipping_rule=data.get("shipping_rule") or None,
+			selling_price_list=data.get("selling_price_list") or None,
 		)
 
 		if source_order and doc.meta.has_field("powerpack_source_order"):
@@ -2970,6 +2972,7 @@ def _create_draft_invoice(data):
 				extra_fields=extra_fields,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
 				shipping_rule=data.get("shipping_rule") or None,
+				selling_price_list=data.get("selling_price_list") or None,
 			)
 		else:
 			doc = build_sales_invoice_doc(
@@ -2995,6 +2998,7 @@ def _create_draft_invoice(data):
 				extra_fields=extra_fields,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
 				shipping_rule=data.get("shipping_rule") or None,
+				selling_price_list=data.get("selling_price_list") or None,
 			)
 
 			validate_required_salesperson(doc)
@@ -3142,6 +3146,8 @@ def parse_invoice_data(data):
 			"discountAmount": discount_amount,
 			# The cashier's own wording for this line, from the cart's pen dialog.
 			"description": (item.get("description") or "").strip(),
+			# The list this line was priced from at the till (per-line switch); "" for the cart's own.
+			"price_list": item.get("selectedPriceList") or discount_data.get("selectedPriceList") or "",
 			# Asked for but not in stock: Loss of Sale, recorded on the invoice line.
 			"los_qty": max(flt(item.get("los_qty") or 0), 0),
 		})
@@ -3334,8 +3340,12 @@ def build_sales_invoice_doc(
 	extra_fields=None,
 	order_discount_amount=0.0,
 	shipping_rule=None,
+	selling_price_list=None,
 ):
-	"""Main function to build a sales invoice document."""
+	"""Main function to build a sales invoice document.
+
+	selling_price_list: the list the cart was on, recorded when the cashier may use it.
+	"""
 	if shipping_rule and flt(delivery_charge) > 0:
 		frappe.throw(
 			_("Choose a Shipping Rule or a Delivery Charge, not both - the customer would pay for delivery twice.")
@@ -3374,7 +3384,9 @@ def build_sales_invoice_doc(
 
 	# Configure POS profile and company settings
 	pos_profile = _get_active_pos_profile()
-	_set_pos_profile_fields(doc, pos_profile, customer, business_type, amount_paid, allow_partial_payment)
+	_set_pos_profile_fields(
+		doc, pos_profile, customer, business_type, amount_paid, allow_partial_payment, selling_price_list
+	)
 
 	# Order-level discount, gated by the POS Profile's Allow Discount Change permission
 	# (same flag that gates per-item discount fields on the frontend).
@@ -3499,6 +3511,7 @@ def _update_existing_draft_invoice(
 	extra_fields=None,
 	order_discount_amount=0.0,
 	shipping_rule=None,
+	selling_price_list=None,
 ):
 	rebuilt_doc = build_sales_invoice_doc(
 		customer,
@@ -3524,6 +3537,7 @@ def _update_existing_draft_invoice(
 		extra_fields=extra_fields,
 		order_discount_amount=order_discount_amount,
 		shipping_rule=shipping_rule,
+		selling_price_list=selling_price_list,
 	)
 
 	_set_customer(invoice_doc, rebuilt_doc.customer)
@@ -3742,12 +3756,34 @@ def _get_active_pos_profile():
 		raise
 
 
-def _set_pos_profile_fields(doc, pos_profile, customer, business_type, amount_paid=0.0, allow_partial_payment=False):
+def resolve_selling_price_list(requested, customer, pos_profile):
+	"""The list the cart was on when the cashier may use it, else customer -> group -> till.
+
+	The minimum selling price judges a till sale against this list, so a list the cashier has
+	no User Permission for is never recorded just because the request named it.
+	"""
+	if requested and is_allowed_price_list(requested):
+		return requested
+	return get_price_list_with_customer_priority(customer, pos_profile)
+
+
+LINE_PRICE_LIST_FIELD = "powerpack_line_price_list"  # cecypo_powerpack's, when installed
+
+
+def set_line_price_list(row, doctype, price_list):
+	"""Record the list a line was priced from (per-line switch), if the field exists and the cashier may use it."""
+	if price_list and frappe.get_meta(doctype).has_field(LINE_PRICE_LIST_FIELD) and is_allowed_price_list(price_list):
+		row[LINE_PRICE_LIST_FIELD] = price_list
+
+
+def _set_pos_profile_fields(
+	doc, pos_profile, customer, business_type, amount_paid=0.0, allow_partial_payment=False, requested_price_list=None
+):
 	"""Set POS profile, company, currency and POS-specific fields."""
 	doc.pos_profile = pos_profile.name
 	doc.company = pos_profile.company
 	doc.currency = get_customer_billing_currency(customer)
-	price_list = get_price_list_with_customer_priority(customer, pos_profile)
+	price_list = resolve_selling_price_list(requested_price_list, customer, pos_profile)
 	if price_list:
 		doc.selling_price_list = price_list
 	doc.conversion_rate = 1.0
@@ -4511,6 +4547,8 @@ def _prepare_item_data(doc, item, item_data_map, pos_profile):
 	if item_tax_rate:
 		item_data["item_tax_rate"] = frappe.as_json(item_tax_rate)
 
+	set_line_price_list(item_data, "Sales Invoice Item", item.get("price_list"))
+
 	# Add optional fields
 	_add_uom_to_item(item_data, item)
 	_add_batch_to_item(item_data, item, item_data_map.get(item_code, {}))
@@ -5042,6 +5080,17 @@ class CustomSalesInvoice(SalesInvoice):
 			)
 
 	def set_pos_fields(self, for_validate=False):
+		# ERPNext resets selling_price_list from customer -> group -> till on every pass,
+		# which threw away the list a klik cart was priced from (POS-06134). The minimum
+		# selling price judges a till sale against that list, so a klik sale keeps the one
+		# build_sales_invoice_doc recorded (resolve_selling_price_list already checked it).
+		recorded = self.selling_price_list if self.get("custom_is_created_from_klik") else None
+		pos = self._klik_set_pos_fields(for_validate)
+		if recorded:
+			self.selling_price_list = recorded
+		return pos
+
+	def _klik_set_pos_fields(self, for_validate=False):
 		# A return carries the taxes it was built with. It takes the refunding till (see
 		# _stamp_return_with_refunding_shift), and ERPNext fills an empty taxes_and_charges
 		# from the till and then pulls that template's rows into an empty taxes table - so
@@ -6120,6 +6169,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				extra_fields=_ef,
 				order_discount_amount=flt(data.get("orderDiscountAmount") or 0),
 				shipping_rule=data.get("shipping_rule") or None,
+				selling_price_list=data.get("selling_price_list") or None,
 			)
 
 			_set_customer(invoice_doc, rebuilt_doc.customer)
