@@ -18,7 +18,7 @@ export function useInvoiceDetails(invoiceId: string | null) {
       setIsLoading(true);
       try {
 
-        const response = await fetch(`/api/method/klik_pos.api.sales_invoice.get_invoice_details?invoice_id=${invoiceId}`, {
+        const response = await fetch(`/api/method/klik_pos.api.sales_invoice.get_invoice_details?invoice_id=${encodeURIComponent(invoiceId)}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
