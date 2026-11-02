@@ -53,7 +53,7 @@ const router = createBrowserRouter([
         element: <ProtectedRoute element={<InvoiceHistoryPage />} />,
       },
       {
-        path: "invoice/:id",
+        path: "invoice/*", // splat: invoice names like TW/POS/00013 contain slashes
         element: <ProtectedRoute element={<InvoiceViewPage />} />,
       },
       {

@@ -57,8 +57,7 @@ import CustomerPaymentEntryModal from "../components/customer/CustomerPaymentEnt
 
 export default function InvoiceViewPage() {
 
-  const { id } = useParams()
-  const invoiceId = id ?? ""
+  const invoiceId = useParams()["*"] ?? ""
 
   const { invoice, isLoading, error, refetch } = useInvoiceDetails(invoiceId);
   const { statistics: customerStats, isLoading: statsLoading } = useCustomerStatistics(invoice?.customer || null);
