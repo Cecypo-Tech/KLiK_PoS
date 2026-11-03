@@ -28,6 +28,7 @@ import {
   resolveActivePriceList,
   type PricePopupPosition,
 } from "../../utils/priceOptions";
+import { rateBoxMinimum } from "../../utils/priceFloor";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -813,6 +814,15 @@ export const CartItemRow = ({
                     onBlur={() => {
                       setIsRateEditing(false);
                       setRateInputValue("");
+                      // Discount off on a list-floor till: the rate cannot go under the line's list.
+                      const minimum = rateBoxMinimum(
+                        posDetails,
+                        itemDiscount.selectedPriceList && shownLinePriceList ? Number(shownLinePriceList.rate || 0) : listRate,
+                      );
+                      if (minimum !== null && editableRate < minimum) {
+                        handleRateChange(minimum);
+                        toast.warning(`${item.name}: can't sell below ${formatCurrencyWithSymbol(minimum, currency_symbol)}. Rate reset to the minimum.`);
+                      }
                     }}
                     onChange={(e) => {
                       const value = e.target.value.trim();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authorisationStillValid, checkoutPriceList, floorBlockMessage, floorRowsKey, type FloorRow } from "./priceFloor";
+import { authorisationStillValid, checkoutPriceList, floorBlockMessage, floorRowsKey, rateBoxMinimum, type FloorRow } from "./priceFloor";
 
 const row = (over: Partial<FloorRow> = {}): FloorRow => ({
   idx: 1,
@@ -72,5 +72,21 @@ describe("floorBlockMessage", () => {
     expect(floorBlockMessage({ enforced: false, rows: [] }, null)).toBeNull();
     expect(floorBlockMessage({ enforced: true, rows: [] }, null)).toBeNull();
     expect(floorBlockMessage(null, null)).toBeNull();
+  });
+});
+
+describe("rateBoxMinimum", () => {
+  const till = { powerpack_enforce_list_floor: 1, allow_discount_change: 0, powerpack_list_floor_discount_allowance: 0 };
+  it("is the list price on a floor till with discount off", () => {
+    expect(rateBoxMinimum(till, 1050)).toBe(1050);
+  });
+  it("takes off the till's allowance", () => {
+    expect(rateBoxMinimum({ ...till, powerpack_list_floor_discount_allowance: 10 }, 1000)).toBe(900);
+  });
+  it("is null where the cashier may discount, the till has no floor, or there is no list price", () => {
+    expect(rateBoxMinimum({ ...till, allow_discount_change: 1 }, 1050)).toBeNull();
+    expect(rateBoxMinimum({ ...till, powerpack_enforce_list_floor: 0 }, 1050)).toBeNull();
+    expect(rateBoxMinimum(till, 0)).toBeNull();
+    expect(rateBoxMinimum(null, 1050)).toBeNull();
   });
 });
