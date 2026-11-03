@@ -268,9 +268,11 @@ export default function InvoiceHistoryPage() {
     }
   }, [searchTerm]);
 
+  // Again on every tab switch (the Held count shows on all of them): a manager's approval
+  // elsewhere then turns the badge green without a page reload.
   useEffect(() => {
     void refetchHeldOrders();
-  }, [refetchHeldOrders]);
+  }, [refetchHeldOrders, activeTab]);
 
   // Copy and Image on a held order's row: each only when the site has it (see
   // get_held_order_share_tools).
@@ -830,6 +832,12 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   <SortableHeaderButton label="Invoice" sortKey="id" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                 </th>
+                {/* Up front: the table scrolls under the pinned Actions, so a badge by Status went unseen. */}
+                {activeTab === "Held" && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Approval
+                  </th>
+                )}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                   <SortableHeaderButton label="Date" sortKey="date" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                 </th>
@@ -864,6 +872,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.id}</div>
                   </td>
+                  {activeTab === "Held" && (
+                    <td className="px-6 py-4 whitespace-nowrap [&>span:first-child]:ml-0">{renderApprovalBadge(invoice)}</td>
+                  )}
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900 dark:text-white">{formatDateTime(invoice.date, invoice.time)}</div>
                   </td>
@@ -894,7 +905,6 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={getStatusBadge(invoice.status)}>{invoice.status}</span>
-                    {renderApprovalBadge(invoice)}
                   </td>
                   {posDetails?.is_zatca_enabled && (
                     <td className="px-6 py-4 whitespace-nowrap">
