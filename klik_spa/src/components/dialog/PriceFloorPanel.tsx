@@ -17,6 +17,8 @@ interface Props {
   formatMoney: (value: number) => string;
   onAuthorised: (auth: FloorAuthorisation) => void;
   onFixPrices: () => void;
+  /** Hold the sale and send it to a manager to approve remotely. Absent: no button. */
+  onAskManager?: () => void;
   disabled?: boolean;
 }
 
@@ -28,6 +30,7 @@ export default function PriceFloorPanel({
   formatMoney,
   onAuthorised,
   onFixPrices,
+  onAskManager,
   disabled,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -65,6 +68,16 @@ export default function PriceFloorPanel({
         >
           Fix prices
         </button>
+        {onAskManager && (
+          <button
+            type="button"
+            onClick={onAskManager}
+            disabled={disabled}
+            className="flex-1 rounded-lg border border-red-400 px-3 py-2 font-medium hover:bg-red-100 disabled:opacity-50 dark:hover:bg-red-900/30"
+          >
+            Ask manager
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setDialogOpen(true)}

@@ -31,6 +31,7 @@ import PriceFloorPanel from "./PriceFloorPanel";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
 import { paymentShortfallError } from "../../utils/paymentShortfall";
+import { APPROVAL_REQUESTED_EVENT } from "../../utils/approvalWatch";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
 import {
   appliedFromReceipts,
@@ -1441,6 +1442,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
             loyalty_points: appliedLoyalty.loyalty_points,
           }
         : null,
+      // A resumed held order: a manager's approval of it covers the price floor.
+      held_order_id: getOriginalHeldOrderId() || null,
     };
 
     const previewCacheKey = JSON.stringify(previewPayload);
@@ -1519,6 +1522,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 loyalty_points: appliedLoyalty.loyalty_points,
               }
             : null,
+          held_order_id: getOriginalHeldOrderId() || null,
           // Preview-only context: avoid checkout payment validation until user submits payment.
           status: "held",
         };
@@ -2016,7 +2020,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   };
 
-  const handleHoldOrder = async () => {
+  // askManager: only a literal true - the Hold button passes its click event here.
+  const handleHoldOrder = async (askManager?: unknown) => {
+    const askingManager = askManager === true;
     if (!selectedCustomer) {
       toast.error("Kindly select a customer");
       return;
@@ -2113,6 +2119,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           : null,
         // The M-Pesa order (its push failed) becomes the held order, rather than a copy.
         held_order_id: getOriginalHeldOrderId() || mpesaOrderName,
+        request_price_approval: askingManager,
       };
 
       const result = await createHeldOrder(orderData);
@@ -2127,7 +2134,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
 
       clearCart();
       if (result.approval_requested) {
-        toast.success("Held and sent for price approval");
+        window.dispatchEvent(new Event(APPROVAL_REQUESTED_EVENT));
+        toast.success(askingManager ? "Sent to a manager. You'll see their answer here." : "Held and sent for price approval");
       } else {
         toast.success(orderData.held_order_id ? "Order updated and held successfully!" : "Order held successfully!");
       }
@@ -3263,7 +3271,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     formatMoney={(value) => formatCurrencyWithSymbol(value, displayCurrencySymbol)}
                     onAuthorised={setFloorAuth}
                     onFixPrices={() => closeDialog(false)}
-                    disabled={invoiceSubmitted || isProcessingPayment}
+                    onAskManager={allow_holding_invoices ? () => void handleHoldOrder(true) : undefined}
+                    disabled={invoiceSubmitted || isProcessingPayment || isHoldingOrder}
                   />
                   {!reconciliation.ok && (
                     <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
@@ -3648,7 +3657,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 formatMoney={(value) => formatCurrencyWithSymbol(value, displayCurrencySymbol)}
                 onAuthorised={setFloorAuth}
                 onFixPrices={() => closeDialog(false)}
-                disabled={invoiceSubmitted || isProcessingPayment}
+                onAskManager={allow_holding_invoices ? () => void handleHoldOrder(true) : undefined}
+                disabled={invoiceSubmitted || isProcessingPayment || isHoldingOrder}
               />
               <div className="flex items-center gap-3">
                <ActionButtons

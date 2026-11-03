@@ -12,6 +12,7 @@ import RetailSidebar from "./components/RetailSidebar";
 import PermissionHealthBanner from "./components/PermissionHealthBanner";
 import UnresolvedSalesBanner from "./components/UnresolvedSalesBanner";
 import { useQueueFailureAlerts } from "./hooks/useQueueFailureAlerts";
+import { useApprovalWatch } from "./hooks/useApprovalWatch";
 import { CartCustomerInfoModal } from "./components/order/WalkinInfoModal";
 
 const queryClient = new QueryClient();
@@ -25,6 +26,8 @@ function App() {
   // A queued invoice that fails to submit does so after checkout has returned success,
   // so the alert has to reach the cashier wherever they are by then.
   useQueueFailureAlerts();
+  // A manager approving a sale the cashier sent them, from wherever they are.
+  useApprovalWatch();
 
   // The banners sit above the page, and pages size themselves to the screen (h-screen):
   // without this the page overflows by the banners' height and its bottom - the till's
