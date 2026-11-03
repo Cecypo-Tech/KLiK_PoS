@@ -19,7 +19,27 @@ interface Props {
   onFixPrices: () => void;
   /** Hold the sale and send it to a manager to approve remotely. Absent: no button. */
   onAskManager?: () => void;
+  /** Override for tests; otherwise read once from the site's supervisors. */
+  noApprovers?: boolean;
   disabled?: boolean;
+}
+
+const NO_APPROVERS = "No approvers are set up for this site: fix the prices to continue.";
+
+// One look per page load: who may approve does not change mid-shift.
+let approversCheck: Promise<boolean> | null = null;
+
+/** True once the site is known to have no supervisor who could approve. */
+function useNoApprovers(active: boolean) {
+  const [none, setNone] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    approversCheck ??= getSupervisors().then((list) => list.length === 0).catch(() => false);
+    let live = true;
+    void approversCheck.then((value) => live && setNone(value));
+    return () => { live = false; };
+  }, [active]);
+  return none;
 }
 
 /** Lines below their price list's minimum, and the supervisor's way through. */
@@ -31,9 +51,13 @@ export default function PriceFloorPanel({
   onAuthorised,
   onFixPrices,
   onAskManager,
+  noApprovers: noApproversProp,
   disabled,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const loaded = useNoApprovers(!noApproversProp && Boolean(floor?.rows?.length));
+  // Where nobody may approve, the ways through stay visible but off: the cashier knows they exist.
+  const noApprovers = noApproversProp ?? loaded;
   const rows = floor?.rows ?? [];
   if (!rows.length) return null;
 
@@ -72,7 +96,8 @@ export default function PriceFloorPanel({
           <button
             type="button"
             onClick={onAskManager}
-            disabled={disabled}
+            disabled={disabled || noApprovers}
+            title={noApprovers ? NO_APPROVERS : undefined}
             className="flex-1 rounded-lg border border-red-400 px-3 py-2 font-medium hover:bg-red-100 disabled:opacity-50 dark:hover:bg-red-900/30"
           >
             Ask manager
@@ -81,12 +106,14 @@ export default function PriceFloorPanel({
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
-          disabled={disabled}
+          disabled={disabled || noApprovers}
+          title={noApprovers ? NO_APPROVERS : undefined}
           className="flex-1 rounded-lg bg-red-600 px-3 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
         >
           Authorise
         </button>
       </div>
+      {noApprovers && <p className="mt-2 text-xs">{NO_APPROVERS}</p>}
       {dialogOpen && (
         <SupervisorAuthoriseDialog
           onClose={() => setDialogOpen(false)}
