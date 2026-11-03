@@ -212,6 +212,26 @@ def _available_held_order_actions(so):
     return actions
 
 
+APPROVER_ACTIONS = ("Approve", "Reject")
+
+
+def _my_approval_actions(order_name):
+    """Approve / Reject, where the caller may take them on this order now: their role is
+    allowed the transition and it is not their own request (unless the workflow permits self
+    approval). Empty for anyone else, so the till shows the buttons only to an approver."""
+    from frappe.model.workflow import has_approval_access
+
+    workflow = _held_order_workflow()
+    if not workflow:
+        return []
+    so = frappe.get_doc("Sales Order", order_name)
+    return [
+        t.action
+        for t in _held_order_transitions(so, workflow)
+        if t.action in APPROVER_ACTIONS and has_approval_access(frappe.session.user, so, t)
+    ]
+
+
 def _apply_held_order_action(so, action):
     """frappe.model.workflow.apply_workflow for a held order, after klik's own access check.
 
@@ -921,6 +941,9 @@ def get_held_orders(limit=50, start=0, search="", skip_opening_entry_filter=Fals
             order["cashier"] = cashier_map.get(order.owner) or order.owner
             order["approval_state"] = order.pop(APPROVAL_STATE_FIELD, None) or None
             order["price_breach"] = cint(order.pop(PRICE_BREACH_FIELD, 0))
+            order["approval_actions"] = (
+                _my_approval_actions(order.name) if order["approval_state"] == "Price Approval Pending" else []
+            )
             order["mpesa_order"] = cint(order.pop("custom_klik_mpesa_order", 0))
 
         return {"success": True, "data": orders, "total_count": len(orders)}

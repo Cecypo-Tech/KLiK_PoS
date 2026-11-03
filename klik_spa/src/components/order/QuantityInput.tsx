@@ -66,6 +66,9 @@ export const QuantityInput = ({
       onChange={handleChange}
       onFocus={handleFocus}
       onBlur={handleBlur}
+      // Select the quantity on click, like the cart line's box: typing then replaces it
+      // instead of appending ("1" + "2" = 12, refused as more than is in stock).
+      onClick={(e) => (e.target as HTMLInputElement).select()}
       className={`w-full ${
         isMobile ? "text-sm" : "text-sm"
       } px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white`}

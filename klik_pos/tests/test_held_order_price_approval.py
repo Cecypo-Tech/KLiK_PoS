@@ -337,6 +337,42 @@ class TestHeldOrderPriceApproval(SettingsSnapshot, FrappeTestCase):
 		self.assertEqual(result["approval_state"], STATE_DRAFT)
 		self.assertEqual(frappe.db.get_value("Sales Order", order_id, "workflow_state"), STATE_DRAFT)
 
+	# ---- 4b: a manager approves or rejects from the till -------------------------------
+	# Which held orders a till user may see is _may_act_on_held_order's job, tested in
+	# test_held_order_access_rule; here the approver is taken to be at a till that sees them.
+
+	def _as_approver(self):
+		frappe.set_user("Administrator")
+		seen = patch("klik_pos.api.sales_order._may_act_on_held_order", return_value=True)
+		seen.start()
+		self.addCleanup(seen.stop)
+
+	def test_listing_offers_approve_and_reject_only_to_an_approver(self):
+		order_id = self._hold(rate=90)["order_name"]
+
+		row = next(r for r in get_held_orders(skip_opening_entry_filter=True, limit=100)["data"] if r["name"] == order_id)
+		self.assertEqual(row["approval_actions"], [])  # the cashier who asked may not approve
+
+		from klik_pos.api.sales_order import _my_approval_actions
+
+		self.assertEqual(_my_approval_actions(order_id), [])
+		frappe.set_user("Administrator")
+		self.assertEqual(sorted(_my_approval_actions(order_id)), ["Approve", "Reject"])
+
+	def test_approver_approves_from_the_till(self):
+		order_id = self._hold(rate=90)["order_name"]
+		self._as_approver()
+		result = apply_held_order_action(order_id, ACTION_APPROVE)
+		self.assertTrue(result["success"], result.get("message"))
+		self.assertEqual(result["approval_state"], STATE_APPROVED)
+
+	def test_approver_rejects_from_the_till(self):
+		order_id = self._hold(rate=90)["order_name"]
+		self._as_approver()
+		result = apply_held_order_action(order_id, "Reject")
+		self.assertTrue(result["success"], result.get("message"))
+		self.assertEqual(result["approval_state"], STATE_DRAFT)
+
 	# ---- 5: an action not on offer fails cleanly ---------------------------------------
 
 	def test_applying_an_unavailable_action_fails(self):
