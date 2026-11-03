@@ -30,6 +30,7 @@ import { checkoutPriceList, floorBlockMessage, authorisationStillValid, type Flo
 import PriceFloorPanel from "./PriceFloorPanel";
 import { heldOrderGoneMessage, staleDraftNotice } from "../../utils/staleDraft";
 import { formatCurrencyWithSymbol, getCurrencySymbol } from "../../utils/currency";
+import { paymentShortfallError } from "../../utils/paymentShortfall";
 import { calculateRemainingAmount, calculateTotalPayments, roundCurrency } from "../../utils/currencyMath";
 import {
   appliedFromReceipts,
@@ -351,6 +352,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const { modes, isLoading, error } = usePaymentModes(typeof posDetails?.name === "string" ? posDetails.name : "");
   const { salesTaxCharges, defaultTax, isLoading: salesTaxLoading } = useSalesTaxCharges();
   const navigate = useNavigate();
+  const markSaleCompleted = useCartStore((s) => s.markSaleCompleted);
   const { clearCart, walkinDetails, extraFields, shippingRule, setShippingRule, checkoutExtras, setCheckoutExtras } = useCartStore();
   const posProfileName = typeof posDetails?.name === "string" ? posDetails.name : "";
   const qzEnabled =
@@ -1782,15 +1784,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
     if (!isCreditSale) {
-      const totalPaid = calculateTotalPayments(Object.values(paymentAmounts));
-      const orderTotal = checkoutPayableTotal;
-      
-      if (totalPaid < orderTotal) {
-        const remainingAmount = orderTotal - totalPaid;
-        toast.error(`Insufficient payment. Total: ${formatCurrencyWithSymbol(orderTotal, displayCurrencySymbol)}, Paid: ${formatCurrencyWithSymbol(totalPaid, displayCurrencySymbol)}, Remaining: ${formatCurrencyWithSymbol(remainingAmount, displayCurrencySymbol)}`);
+      const shortfall = paymentShortfallError({
+        total: checkoutPayableTotal,
+        paid: calculateTotalPayments(Object.values(paymentAmounts)),
+        allowPartial: allowPartialPayments,
+        isWalkin: Boolean(selectedCustomer?.isWalkin),
+        symbol: displayCurrencySymbol,
+      });
+      if (shortfall) {
+        toast.error(shortfall);
         return;
       }
-      
+
     }
     if (isCreditSale && !dueDate) {
       toast.error("Please select a due date for this credit sale");
@@ -1806,7 +1811,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
         toast.error("Please enter payment amounts");
         return;
       }
-      if (outstandingAmount > 0) {
+      if (outstandingAmount > 0 && !allowPartialPayments) {
         toast.error("Please complete the payment before proceeding");
         return;
       }
@@ -1884,6 +1889,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       }
 
       const queued = checkoutWasQueued(response);
+      markSaleCompleted();
       setInvoiceSubmitted(true);
       setSubmissionQueued(queued);
       setSubmittedInvoice(response);

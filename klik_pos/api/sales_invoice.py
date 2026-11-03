@@ -2398,9 +2398,13 @@ def _refuse_crossing_credit_limit(doc):
 	try:
 		check_credit_limit(doc.customer, doc.company, bypass, extra_amount=flt(doc.outstanding_amount))
 	except ValidationError as error:
-		# The till shows the server message, not the exception: replace ERPNext's.
+		# The till shows the server message, not the exception: replace ERPNext's. Take it
+		# from the message log, which keeps its HTML; the exception text loses it when the
+		# server's stdin is a terminal, and the user list then runs together.
+		logged = frappe.local.message_log[-1] if frappe.local.message_log else None
+		message = (logged.get("message") if isinstance(logged, dict) else None) or str(error)
 		frappe.clear_last_message()
-		frappe.throw(f"{error}<br>" + _("Hold the order instead, or take payment."))
+		frappe.throw(f"{message}<br>" + _("Hold the order instead, or take payment."))
 
 
 def _queue_sales_invoice(data, source_order=None):

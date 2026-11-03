@@ -11,12 +11,19 @@ function cleanHtmlFromErrorMessage(message: string): string {
 
   // Remove HTML tags but preserve the text content
   let cleanedMessage = message
+    // List items read as a list, line breaks and blocks as sentence breaks: stripped bare,
+    // ERPNext's messages (the credit-limit one lists users) ran their lines together.
+    .replace(/<(?:ul|ol)\b[^>]*>\s*<li\b[^>]*>/gi, '\n')
+    .replace(/(?:<\/li>)?\s*<li\b[^>]*>/gi, ', ')
+    .replace(/(?:\s*<(?:br|\/?ul|\/?ol|\/?li|\/?p|\/?div)\b[^>]*>\s*)+/gi, '\n')
     // Remove <strong> tags but keep the content
     .replace(/<strong>(.*?)<\/strong>/gi, '$1')
     // Remove <a> tags but keep the content
     .replace(/<a[^>]*>(.*?)<\/a>/gi, '$1')
     // Remove other common HTML tags
     .replace(/<[^>]*>/g, '')
+    .trim()
+    .replace(/([.:!?])?\s*\n\s*/g, (_, mark) => (mark ? `${mark} ` : '. '))
     // Clean up extra whitespace
     .replace(/\s+/g, ' ')
     .trim();
