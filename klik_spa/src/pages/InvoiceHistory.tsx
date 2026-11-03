@@ -76,6 +76,8 @@ interface HeldOrderExtras {
   isHeldOrder?: boolean;
   approvalState?: string | null;
   priceBreach?: number;
+  /** Approve / Reject, when the caller may take them on this pending order. */
+  approvalActions?: string[];
   /** Kept for an M-Pesa push sent from it: finishing it picks the payment up. */
   mpesaOrder?: boolean;
   /** What the order would come to if checked out now, on a till that records Loss of Sale:
@@ -259,6 +261,7 @@ export default function InvoiceHistoryPage() {
         isHeldOrder: true,
         approvalState: o.approval_state ?? null,
         priceBreach: Number(o.price_breach) || 0,
+        approvalActions: Array.isArray(o.approval_actions) ? o.approval_actions : [],
         mpesaOrder: Boolean(o.mpesa_order),
         inStockTotal: o.in_stock_total === undefined || o.in_stock_total === null ? undefined : Number(o.in_stock_total),
       })) as unknown as (SalesInvoice & HeldOrderExtras)[];
@@ -945,6 +948,16 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                             <Check className="w-4 h-4" />
                             <span>Submit</span>
                           </button>
+                          {((invoice as SalesInvoice & HeldOrderExtras).approvalActions || []).map((action) => (
+                            <button
+                              key={action}
+                              onClick={() => void handleApprovalAction(invoice.id || invoice.name, action)}
+                              className={`${action === "Approve" ? "text-green-600 hover:text-green-900 dark:text-green-400" : "text-red-600 hover:text-red-900 dark:text-red-400"} flex items-center space-x-1`}
+                            >
+                              {action === "Approve" ? <Check className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                              <span>{action === "Approve" ? "Approve prices" : "Reject"}</span>
+                            </button>
+                          ))}
                           {(invoice as SalesInvoice & HeldOrderExtras).approvalState === PRICE_APPROVED && (
                             <button
                               onClick={() => setWithdrawTarget(invoice.id || invoice.name)}
@@ -1060,6 +1073,16 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                       <Check className="w-3 h-3" />
                       <span>Submit</span>
                     </button>
+                    {((invoice as SalesInvoice & HeldOrderExtras).approvalActions || []).map((action) => (
+                      <button
+                        key={action}
+                        onClick={() => void handleApprovalAction(invoice.id || invoice.name, action)}
+                        className={`flex-1 text-xs px-3 py-2 ${action === "Approve" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"} text-white rounded transition-colors flex items-center justify-center space-x-1`}
+                      >
+                        {action === "Approve" ? <Check className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                        <span>{action === "Approve" ? "Approve" : "Reject"}</span>
+                      </button>
+                    ))}
                     {(invoice as SalesInvoice & HeldOrderExtras).approvalState === PRICE_APPROVED && (
                       <button
                         onClick={() => setWithdrawTarget(invoice.id || invoice.name)}
@@ -1228,6 +1251,18 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       console.error("Error opening payment dialog for draft invoice:", error);
       const errorMessage = extractErrorFromException(error, "Failed to load invoice for payment");
       toast.error(errorMessage);
+    }
+  };
+
+  const handleApprovalAction = async (orderId: string, action: string) => {
+    try {
+      const result = await applyHeldOrderAction(orderId, action);
+      if (!result?.success) throw new Error((result as { message?: string })?.message || `Could not ${action.toLowerCase()} ${orderId}`);
+      toast.success(action === "Approve" ? `Prices on ${orderId} approved` : `Approval for ${orderId} rejected`);
+      await refetchHeldOrders();
+      //eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
+      toast.error(error?.message || `Could not ${action.toLowerCase()} ${orderId}`);
     }
   };
 
