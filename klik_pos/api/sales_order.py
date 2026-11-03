@@ -484,6 +484,9 @@ def create_held_order(data):
         validate_required_extra_fields(_parse_extra_fields(data))
 
         target_order_id = data.get("held_order_id") if isinstance(data, dict) else None
+        # 'Ask manager' at a till with the price-list floor: PowerPack judges the order on the
+        # list now and the workflow sends it for approval. A plain Hold is judged at checkout.
+        ask_manager = bool(isinstance(data, dict) and cint(data.get("request_price_approval")))
 
         # Every field is named, even the unused ones. Collapsing them to `_` rebound the
         # translation function imported at the top of this module, so the frappe.throw below
@@ -528,9 +531,11 @@ def create_held_order(data):
                 frappe.throw(_("Cannot update held order {0}: it is no longer a draft.").format(target_order_id))
             _rebuild_sales_order(so, customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
             so.custom_klik_cart_meta = json.dumps(cart_meta)
+            so.flags.powerpack_request_list_approval = ask_manager
             so.save(ignore_permissions=True)
         else:
             so = _build_sales_order_doc(customer, items, sales_and_tax_charges, cart_meta, order_discount_amount)
+            so.flags.powerpack_request_list_approval = ask_manager
             so.insert(ignore_permissions=True)
 
         # Sales Order.tax_id is fetched from Customer.tax_id on every save, which wipes the

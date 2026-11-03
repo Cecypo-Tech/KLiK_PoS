@@ -2168,7 +2168,13 @@ def validate_checkout_invoice(data):
 	This catches batch/serial and item-account issues early before payment submission.
 	"""
 	try:
+		if isinstance(data, str):
+			data = json.loads(data)
 		preview_doc, los_adjustments = _build_preview_doc(data)
+		# A resumed held order: its manager's price approval covers the preview, as at checkout.
+		held_order_id = data.get("held_order_id") if isinstance(data, dict) else None
+		if held_order_id and preview_doc.meta.has_field("powerpack_source_order"):
+			preview_doc.powerpack_source_order = held_order_id
 
 		validate_required_salesperson(preview_doc)
 

@@ -14,6 +14,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, nowdate
 
 from klik_pos.api.sales_invoice import process_queued_sales_invoice, queue_sales_invoice, validate_checkout_invoice
+from klik_pos.api.sales_order import checkout_held_order, create_held_order
 from klik_pos.tests.test_opening_conflict import _profile, _shift
 from klik_pos.tests.test_price_list_recording import CASHIER, CUSTOMER, ELITE, ITEM, RETAIL, _ensure_fixtures
 
@@ -155,3 +156,43 @@ class TestPriceFloorCheckout(FrappeTestCase):
 		result = queue_sales_invoice(payload)
 		self.assertFalse(result["success"])
 		self.assertIn("price should be at least", result["message"])
+
+	def test_ask_manager_holds_for_approval_and_the_approval_covers_checkout(self):
+		from unittest.mock import patch
+
+		from frappe.model.workflow import apply_workflow
+
+		if not frappe.get_meta("Sales Order").has_field("powerpack_price_breach"):
+			self.skipTest("cecypo_powerpack price-approval fields are not installed")
+		emails = patch(
+			"frappe.workflow.doctype.workflow_action.workflow_action.send_workflow_action_email",
+			new=lambda doc, transitions: None,
+		)
+		emails.start()
+		self.addCleanup(emails.stop)
+		frappe.set_user("Administrator")
+		settings = frappe.get_single("PowerPack Settings")
+		settings.msp_approval_sales_order = 1
+		settings.save()  # rolled back in tearDown, workflow and all
+		frappe.set_user(CASHIER)
+
+		parked = create_held_order({**self._payload(), "status": "held"})
+		self.assertTrue(parked["success"], parked.get("message"))
+		self.assertFalse(parked["approval_requested"])  # plain Hold: judged at checkout, by PIN
+
+		asked = create_held_order({**self._payload(), "status": "held", "request_price_approval": True})
+		self.assertTrue(asked["success"], asked.get("message"))
+		self.assertTrue(asked["approval_requested"])
+		order_id = asked["order_name"]
+		self.assertEqual(frappe.db.get_value("Sales Order", order_id, "workflow_state"), "Price Approval Pending")
+
+		frappe.set_user("Administrator")  # holds the override role
+		apply_workflow(frappe.get_doc("Sales Order", order_id), "Approve")
+		frappe.set_user(CASHIER)
+
+		preview = validate_checkout_invoice({**self._payload(), "held_order_id": order_id})
+		self.assertEqual(preview["tax_preview"]["price_floor"]["rows"], [])  # the till lets it through
+
+		result = checkout_held_order(order_id, {**self._payload(), "enable_background_invoice_submission": 0})
+		self.assertTrue(result["success"], result.get("message"))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", result["invoice_name"], "powerpack_source_order"), order_id)
