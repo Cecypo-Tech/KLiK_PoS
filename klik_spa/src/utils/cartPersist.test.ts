@@ -14,4 +14,16 @@ describe("persistedCartState", () => {
     });
     expect(saved).toEqual({ cartItems: [], selectedCustomer: null });
   });
+
+  it("saves no order once its sale is complete, so a reload starts a new sale", () => {
+    const saved = persistedCartState({
+      cartItems: [{ id: "L1" }],
+      selectedCustomer: { id: "C1" },
+      selectedPriceList: "Elite",
+      checkoutExtras: { deliveryCharge: 50 },
+      saleCompleted: true,
+      viewMode: "list",
+    });
+    expect(saved).toEqual({ viewMode: "list" });
+  });
 });

@@ -433,10 +433,15 @@ def get_full_pricing_and_batch_details(
             batch_map[key]["qty"] += flt(row.qty)
             batch_map[key]["val"] += flt(row.val)
 
-    batches_raw = frappe.get_list(
-        "Batch",
-        filters={"item": item_code},
-        fields=["name", "expiry_date", "manufacturing_date"],
+    # Only a batch-tracked item has batches to list - and Batch read is not every cashier's.
+    batches_raw = (
+        frappe.get_list(
+            "Batch",
+            filters={"item": item_code},
+            fields=["name", "expiry_date", "manufacturing_date"],
+        )
+        if item_info.has_batch_no
+        else []
     )
 
     for b in batches_raw:

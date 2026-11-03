@@ -150,6 +150,10 @@ interface CartState {
   updateUOM: (id: string, uom: string, price: number, conversionFactor?: number) => Promise<void>
   removeItem: (id: string) => void
   clearCart: () => void
+  /** The order was rung up: the Order Complete screen still shows it, but it is no
+   * longer saved, so a reload starts a new sale. Cleared with the cart. */
+  saleCompleted: boolean
+  markSaleCompleted: () => void
   applyCoupon: (coupon: GiftCoupon) => void
   removeCoupon: (couponCode: string) => void
   setSelectedCustomer: (customer: Customer | null) => Promise<void>
@@ -231,6 +235,7 @@ export const useCartStore = create<CartState>()(
       pendingRateOverrides: [],
       rateOverrideNonce: 0,
       additionalInfoOpen: false,
+      saleCompleted: false,
       setAdditionalInfoOpen: (open) => set({ additionalInfoOpen: open }),
       requestCustomRate: (itemId, rate, includesTax = false, priceList) => set((s) => {
         const next = enqueueRateOverride(s.pendingRateOverrides, s.rateOverrideNonce, { itemId, rate, includesTax, priceList });
@@ -654,8 +659,11 @@ export const useCartStore = create<CartState>()(
           shippingRule: null,
           checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS },
           expandedCartItemId: null,
+          saleCompleted: false,
         }));
       },
+
+      markSaleCompleted: () => set({ saleCompleted: true }),
 
       applyCoupon: (coupon) => set((state) => {
         if (!state.appliedCoupons.some((c) => c.code === coupon.code)) {

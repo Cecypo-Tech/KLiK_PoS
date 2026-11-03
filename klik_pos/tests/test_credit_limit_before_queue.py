@@ -57,6 +57,15 @@ class TestRefuseCrossingCreditLimit(FrappeTestCase):
 		self.assertEqual(len(messages), 1, messages)
 		self.assertIn("Hold the order", messages[0])
 
+	def test_the_till_gets_erpnexts_message_with_its_line_breaks(self):
+		"""Frappe strips HTML from the exception text when the server's stdin is a terminal,
+		so the user list ran together; the message log keeps ERPNext's HTML."""
+		tty = type("Tty", (), {"isatty": lambda self: True})()
+		with patch("frappe.utils.messages.sys.stdin", tty), self.assertRaises(frappe.ValidationError):
+			self._check(_sale(55000), owing=110600)
+		(message,) = [m.get("message") for m in frappe.local.message_log]
+		self.assertRegex(message, r"\)<br><br>.*<br>Hold the order")
+
 	def test_these_pass(self):
 		cases = {
 			"under the limit": (_sale(5000), 110600),
