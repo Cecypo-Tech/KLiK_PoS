@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Save, Building, User } from "lucide-react";
 import type { AddCustomerModalProps } from "../../types/customerForm";
 import type { Customer } from "../../types/customer";
@@ -9,6 +9,7 @@ import { ContactInformationForm } from "./ContactInformationForm";
 import { ZatcaDetailsForm } from "./ZatcaDetailsForm";
 import { AddressForm } from "./AddressForm";
 import { toast } from "react-toastify";
+import { lookupTaxPin, pinToLookUp } from "../../utils/taxPin";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useCustomerForm, useMissingFieldsIntegration, useRequiredCustomerFields } from "../../hooks/useCustomers";
 
@@ -35,6 +36,23 @@ export default function AddCustomerModal({
     handleSubmit,
     canSaveCustomer,
   } = useCustomerForm(propCustomer, prefilledName, prefilledData);
+
+  // A new customer with no name yet: a complete KRA PIN fills the name in, when cecypo_pin_checker is set up.
+  const pinCheckerOn = Number((posDetails as { pin_checker_available?: number } | null)?.pin_checker_available || 0) === 1;
+  const lastLookedUpPin = useRef("");
+  useEffect(() => {
+    const pin = pinToLookUp(formData.taxId || "", lastLookedUpPin.current);
+    if (!pin || isEditing || !pinCheckerOn || formData.name?.trim()) return;
+    lastLookedUpPin.current = pin;
+    lookupTaxPin(pin)
+      .then((r) => {
+        if (!r.success || !r.name) return void toast.error(r.message || "PIN lookup failed.");
+        setFormData((prev: typeof formData) => (prev.name?.trim() ? prev : { ...prev, name: r.name }));
+        toast.success(`Name set from KRA: ${r.name}`);
+      })
+      .catch(() => toast.error("PIN lookup failed."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the PIN only, not on name edits
+  }, [formData.taxId, isEditing, pinCheckerOn]);
 
   const [missingDynamicData, setMissingDynamicData] = useState<Record<string, any>>({});
   const [isMissingFieldsValid, setIsMissingFieldsValid] = useState(true);
