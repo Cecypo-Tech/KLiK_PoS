@@ -4,6 +4,7 @@ import { useCartStore, type WalkinDetails } from "../../stores/cartStore";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import { AutoComplete } from "../ui/AutoComplete";
+import { lookupTaxPin, pinToLookUp } from "../../utils/taxPin";
 import { fetchRecalledWalkin, recallablePhone, withRecalled } from "../../utils/walkinRecall";
 
 interface Props {
@@ -52,22 +53,17 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
   const lastLookedUpPin = useRef("");
   const pinLooksValid = /^[A-Z]\d{9}[A-Z]$/.test(taxId.trim());
 
-  const lookUpPin = async () => {
-    const pin = taxId.trim().toUpperCase();
-    if (!pinLookupAvailable || !/^[A-Z]\d{9}[A-Z]$/.test(pin)) return;
+  const lookUpPin = async (pin: string) => {
+    if (!pinLookupAvailable) return;
     lastLookedUpPin.current = pin;
     setPinLookup({ state: "loading", message: "Looking up PIN..." });
     try {
-      const res = await fetch(
-        `/api/method/klik_pos.api.tax_pin.lookup_tax_pin?pin=${encodeURIComponent(pin)}`,
-        { credentials: "include" },
-      );
-      const result = (await res.json())?.message;
-      if (result?.success && result.name) {
+      const result = await lookupTaxPin(pin);
+      if (result.success && result.name) {
         setName(result.name);
         setPinLookup({ state: "found", message: `Name set from KRA: ${result.name}` });
       } else {
-        setPinLookup({ state: "error", message: result?.message || "PIN lookup failed." });
+        setPinLookup({ state: "error", message: result.message || "PIN lookup failed." });
       }
     } catch {
       setPinLookup({ state: "error", message: "PIN lookup failed." });
@@ -155,7 +151,7 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
                 {pinLookupAvailable && (
                   <button
                     type="button"
-                    onClick={() => void lookUpPin()}
+                    onClick={() => void lookUpPin(taxId.trim().toUpperCase())}
                     disabled={!pinLooksValid || pinLookup.state === "loading"}
                     title="Look up the registered name for this KRA PIN"
                     aria-label="Look up name from KRA PIN"
@@ -166,8 +162,13 @@ export default function WalkinInfoModal({ isWalkin, initial, masterDisplay, extr
                 )}
               </div>
               <input className={`${base} uppercase tracking-widest ${isWalkin ? "" : ro}`} value={taxId} readOnly={!isWalkin}
-                onChange={(e) => { setTaxId(e.target.value.toUpperCase()); if (pinLookup.state !== "loading") setPinLookup({ state: "idle", message: "" }); }}
-                onBlur={() => { if (pinLooksValid && taxId.trim().toUpperCase() !== lastLookedUpPin.current) void lookUpPin(); }}
+                onChange={(e) => {
+                  const value = e.target.value.toUpperCase();
+                  setTaxId(value);
+                  const pin = pinToLookUp(value, lastLookedUpPin.current);
+                  if (pin) void lookUpPin(pin);
+                  else if (pinLookup.state !== "loading") setPinLookup({ state: "idle", message: "" });
+                }}
                 placeholder="A123456789P" />
               {pinLookupAvailable && pinLookup.message && (
                 <p className={`mt-1 text-xs ${pinLookup.state === "error" ? "text-red-600 dark:text-red-400" : pinLookup.state === "found" ? "text-green-600 dark:text-green-400" : "text-gray-500 dark:text-gray-400"}`}>
