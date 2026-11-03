@@ -376,6 +376,17 @@ def get_full_pricing_and_batch_details(
 
             bundle_map[bundle_id]["qty"] += abs(qty_diff)
 
+    if not sle_entries and not frappe.has_permission("Stock Ledger Entry", "read"):
+        # A till role may read Bin but not the ledger: stock as it stands now, so the cart
+        # panel does not say 'No stock available' for an item on the shelf.
+        for b in bins:
+            if not warehouse or b.warehouse == warehouse:
+                warehouse_map[b.warehouse] = {
+                    "bal_qty": flt(b.actual_qty),
+                    "bal_val": flt(b.stock_value),
+                    "val_rate": flt(b.valuation_rate),
+                }
+
     total_bal_qty = sum(v["bal_qty"] for v in warehouse_map.values())
     total_bal_val = sum(v["bal_val"] for v in warehouse_map.values())
 
