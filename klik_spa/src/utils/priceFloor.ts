@@ -57,3 +57,18 @@ export function floorBlockMessage(floor: PriceFloor | null | undefined, auth: Fl
   if (authorisationStillValid(auth, floor.rows)) return null;
   return "Prices below the minimum - fix them or ask a supervisor to authorise";
 }
+
+/**
+ * The lowest rate the cashier may type in a line's rate box, or null when there is none: the
+ * till must enforce the list floor and not allow discounts. `listRate` is the line's list price,
+ * in the box's own tax terms. The server still judges every sale at checkout.
+ * ponytail: ignores Pricing Rule promos the server would also accept; they apply without typing.
+ */
+export function rateBoxMinimum(
+  posDetails: { powerpack_enforce_list_floor?: unknown; allow_discount_change?: unknown; powerpack_list_floor_discount_allowance?: unknown } | null | undefined,
+  listRate: number,
+): number | null {
+  if (!Number(posDetails?.powerpack_enforce_list_floor) || Number(posDetails?.allow_discount_change) || !(listRate > 0)) return null;
+  const allowance = Math.min(Math.max(Number(posDetails?.powerpack_list_floor_discount_allowance) || 0, 0), 100);
+  return Math.round(listRate * (1 - allowance / 100) * 100) / 100;
+}
