@@ -70,6 +70,7 @@ import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 import { walkinSubline } from "../utils/walkinLabel";
 import { matchesPaymentFilter } from "../utils/paymentFilter";
+import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, sortFailedFirst } from "../utils/invoiceHistoryTabs";
 // import InvoiceViewPage from "./InvoiceViewPage";
 
 interface HeldOrderExtras {
@@ -136,7 +137,7 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
       fromDate: storedDate(parsed.fromDate),
       toDate: storedDate(parsed.toDate),
       // The Held tab used to be called Draft; a tab remembered from then should still open it.
-      activeTab: parsed.activeTab === "Draft" ? "Held" : (parsed.activeTab || DEFAULT_INVOICE_HISTORY_FILTERS.activeTab),
+      activeTab: parsed.activeTab === "Draft" ? "Held" : normalizeInvoiceTab(parsed.activeTab || DEFAULT_INVOICE_HISTORY_FILTERS.activeTab),
       customerFilter: parsed.customerFilter === "all" ? "" : (parsed.customerFilter || ""),
     };
   } catch {
@@ -153,7 +154,7 @@ const getInitialInvoiceHistoryFilters = (): InvoiceHistoryFiltersState => {
  * about where Invoice History should open next time.
  */
 const URL_TAB_ALIASES: Record<string, string> = {
-  queue_failed: "queue_failed",
+  queue_failed: "queued",
   queued: "queued",
   draft: "Held",
   held: "Held",
@@ -464,7 +465,6 @@ export default function InvoiceHistoryPage() {
 
   const tabs = [
     { id: "all", name: "All Invoices", icon: FileText, color: "text-gray-600" },
-    { id: "queue_failed", name: "Failed Queue", icon: AlertTriangle, color: "text-rose-600" },
     { id: "queued", name: "Queued", icon: Clock, color: "text-amber-600" },
     { id: "Held", name: "Held", icon: FilePlus, color: "text-gray-500" },
     { id: "Unpaid", name: "Unpaid", icon: Clock, color: "text-yellow-600" },
@@ -524,6 +524,19 @@ const APPROVAL_BADGE_TONE_CLASSES: Record<string, string> = {
   red: "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
 };
 
+const QUEUE_STATUS_BADGE: Record<string, string> = {
+  failed: "bg-rose-100 text-rose-800 dark:bg-rose-900/20 dark:text-rose-400",
+  processing: "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400",
+  queued: "bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-400",
+};
+
+const renderQueueStatusBadge = (invoice: SalesInvoice & { queueStatus?: string }) => {
+  const label = (invoice.queueStatus || "").trim();
+  const tone = QUEUE_STATUS_BADGE[label.toLowerCase()];
+  if (!tone) return null;
+  return <span className={`px-2 py-1 rounded-full text-xs font-medium ${tone}`}>{label}</span>;
+};
+
 const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
   if (!invoice.isHeldOrder) return null;
   const badge = approvalBadge(invoice.approvalState, invoice.priceBreach);
@@ -561,19 +574,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
     const filtered = source.filter((invoice) => {
       // Server-side search is handled by the API, so we only apply client-side filters
       // Normalize status comparison to handle case and whitespace differences
-      const invoiceStatus = (invoice.status || "").trim();
-      const queueStatus = ((invoice as SalesInvoice & { queueStatus?: string }).queueStatus || "").trim();
-      const tabStatus = (activeTab || "").trim();
-      const matchesStatus =
-        activeTab === "all"
-          ? true
-          : activeTab === "queue_failed"
-            ? queueStatus.toLowerCase() === "failed"
-            : activeTab === "queued"
-              // Queued and Processing are one thing to the reader: a sale the server has
-              // not finished with.
-              ? ["queued", "processing"].includes(queueStatus.toLowerCase())
-              : invoiceStatus === tabStatus;
+      const matchesStatus = matchesInvoiceTab(invoice, activeTab);
       const matchesPayment = matchesPaymentFilter(invoice, paymentFilter);
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
@@ -584,7 +585,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       return matchesPayment && matchesCustomer && matchesCashier && matchesStatus && matchesDate;
     });
 
-    return filtered;
+    return activeTab === "queued" ? sortFailedFirst(filtered) : filtered;
   }, [invoices, heldOrders, activeTab, fromDate, toDate, customerFilter, paymentFilter, cashierFilter, isLoading, error, filterInvoiceByDate]);
 
   const { sortedData: sortedInvoices, sortKey: invoiceSortKey, sortDirection: invoiceSortDirection, toggleSort: toggleInvoiceSort } = useTableSort(
@@ -642,21 +643,24 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       return matchesPayment && matchesCustomer && matchesCashier && matchesDate;
     });
 
-    // Then count by status - normalize comparison
-    if (status === "all") {
-      return invoicesFilteredByOtherFilters.length;
-    }
-    if (status === "queue_failed") {
-      return invoicesFilteredByOtherFilters.filter(invoice => {
-        const queueStatus = ((invoice as SalesInvoice & { queueStatus?: string }).queueStatus || "").trim();
-        return queueStatus.toLowerCase() === "failed";
-      }).length;
-    }
-    const normalizedStatus = (status || "").trim();
-    return invoicesFilteredByOtherFilters.filter(invoice => {
-      const invoiceStatus = (invoice.status || "").trim();
-      return invoiceStatus === normalizedStatus;
-    }).length;
+    return invoicesFilteredByOtherFilters.filter((invoice) => matchesInvoiceTab(invoice, status));
+  };
+
+  // Queued's count also says how many of them failed, so a failure still stands out now
+  // that Failed Queue is part of Queued.
+  const renderTabCount = (tabId: string, badgeClass: string) => {
+    const rows = getStatusCount(tabId);
+    const failed = tabId === "queued" ? countFailed(rows) : 0;
+    return (
+      <>
+        <span className={badgeClass}>{rows.length}</span>
+        {failed > 0 && (
+          <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+            {failed} failed
+          </span>
+        )}
+      </>
+    );
   };
 
   // Loading state - only block if nothing loaded yet
@@ -836,6 +840,11 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   <SortableHeaderButton label="Invoice" sortKey="id" activeKey={invoiceSortKey} direction={invoiceSortDirection} onSort={toggleInvoiceSort} />
                 </th>
                 {/* Up front: the table scrolls under the pinned Actions, so a badge by Status went unseen. */}
+                {activeTab === "queued" && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                    Queue Status
+                  </th>
+                )}
                 {activeTab === "Held" && (
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Approval
@@ -875,6 +884,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">{invoice.id}</div>
                   </td>
+                  {activeTab === "queued" && (
+                    <td className="px-6 py-4 whitespace-nowrap">{renderQueueStatusBadge(invoice)}</td>
+                  )}
                   {activeTab === "Held" && (
                     <td className="px-6 py-4 whitespace-nowrap [&>span:first-child]:ml-0">{renderApprovalBadge(invoice)}</td>
                   )}
@@ -1010,6 +1022,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 <div className="flex items-center gap-1">
                   <span className={getStatusBadge(invoice.status)}>{invoice.status}</span>
                   {renderApprovalBadge(invoice)}
+                  {activeTab === "queued" && renderQueueStatusBadge(invoice)}
                 </div>
               </div>
               <div className="space-y-2">
@@ -1474,9 +1487,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                       >
                         <tab.icon className="w-4 h-4" />
                         <span>{tab.name}</span>
-                        <span className="ml-1 px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 rounded-full">
-                          {getStatusCount(tab.id)}
-                        </span>
+                        {renderTabCount(tab.id, "ml-1 px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 rounded-full")}
                       </button>
                     ))}
                   </nav>
@@ -1640,9 +1651,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                       >
                         <tab.icon className="w-5 h-5" />
                         <span>{tab.name}</span>
-                        <span className="ml-2 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 rounded-full">
-                          {getStatusCount(tab.id)}
-                        </span>
+                        {renderTabCount(tab.id, "ml-2 px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 rounded-full")}
                       </button>
                     ))}
                   </nav>

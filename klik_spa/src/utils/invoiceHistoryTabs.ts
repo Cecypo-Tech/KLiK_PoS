@@ -1,0 +1,27 @@
+/**
+ * Which Invoice History tab a row belongs to. The list and the tab counts both use this, so
+ * they can't disagree again (the count once had no rule for Queued and always showed 0).
+ */
+type TabRow = { status?: string; queueStatus?: string };
+
+// Queued, Processing and Failed are one thing to the reader: a sale the server has not
+// finished with. The Queue Status column tells them apart.
+const UNFINISHED = ["queued", "processing", "failed"];
+
+const queueStatusOf = (row: TabRow) => (row.queueStatus || "").trim().toLowerCase();
+
+export const isQueueFailed = (row: TabRow) => queueStatusOf(row) === "failed";
+
+export function matchesInvoiceTab(row: TabRow, tab: string): boolean {
+  if (tab === "all") return true;
+  if (tab === "queued") return UNFINISHED.includes(queueStatusOf(row));
+  return (row.status || "").trim() === tab.trim();
+}
+
+/** Failed Queue was merged into Queued; links to it (dashboard alerts) land there. */
+export const normalizeInvoiceTab = (tab: string) => (tab === "queue_failed" ? "queued" : tab);
+
+export const sortFailedFirst = <T extends TabRow>(rows: T[]): T[] =>
+  [...rows].sort((a, b) => Number(isQueueFailed(b)) - Number(isQueueFailed(a)));
+
+export const countFailed = (rows: TabRow[]) => rows.filter(isQueueFailed).length;
