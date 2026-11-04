@@ -104,14 +104,15 @@ def _current_list_rate(item_code, uom, price_list):
     """The price list's rate today for this item and uom; the stock-uom rate scaled by the
     uom's conversion if it has none of its own; else 0."""
     def rate(u):
-        return frappe.get_all(
-            "Item Price",
-            filters={"item_code": item_code, "price_list": price_list, "uom": u, "customer": ["is", "not set"]},
-            fields=["price_list_rate"],
-            order_by="valid_from desc",
-            limit=1,
-            pluck="price_list_rate",
+        # Valid today, newest valid_from first; a customer-specific price is not a list price.
+        rows = frappe.db.sql(
+            """select price_list_rate from `tabItem Price`
+            where item_code=%s and price_list=%s and uom=%s and ifnull(customer,'')=''
+              and (valid_from is null or valid_from <= %s) and (valid_upto is null or valid_upto >= %s)
+            order by valid_from desc limit 1""",
+            (item_code, price_list, u, nowdate(), nowdate()),
         )
+        return [r[0] for r in rows]
 
     found = rate(uom)
     if found:
@@ -186,25 +187,31 @@ def get_quotes(limit=50, start=0, search=""):
     """Open quotes of the active till's company, newest first, for any till of that company."""
     try:
         company = _get_active_pos_profile().company
-        fields = [
-            "name", "party_name as customer", "customer_name", "custom_walkin_customer_name as walkin_name",
-            "transaction_date", "valid_till", "grand_total", "currency",
-        ]
-        filters = {"docstatus": 1, "status": ["not in", ["Lost", "Cancelled"]], "company": company}
-        or_filters = None
+        from frappe.query_builder import Order
+        from pypika.terms import ExistsCriterion
+
+        q, si = frappe.qb.DocType("Quotation"), frappe.qb.DocType("Sales Invoice")
+        invoiced = frappe.qb.from_(si).select(1).where((si.custom_klik_quotation == q.name) & si.docstatus.isin([0, 1]))
+        query = (
+            frappe.qb.from_(q)
+            .select(
+                q.name, q.party_name.as_("customer"), q.customer_name,
+                q.custom_walkin_customer_name.as_("walkin_name"), q.transaction_date, q.valid_till,
+                q.grand_total, q.currency,
+            )
+            .where((q.docstatus == 1) & q.status.notin(["Lost", "Cancelled"]) & (q.company == company))
+            .where(ExistsCriterion(invoiced).negate())
+            .orderby(q.transaction_date, order=Order.desc)
+            .orderby(q.creation, order=Order.desc)
+            .offset(cint(start))
+            .limit(cint(limit))
+        )
         if search:
             like = f"%{search}%"
-            or_filters = {"name": ["like", like], "customer_name": ["like", like],
-                          "custom_walkin_customer_name": ["like", like]}
-        rows = frappe.get_all(
-            "Quotation", filters=filters, or_filters=or_filters, fields=fields,
-            order_by="transaction_date desc, creation desc", limit_start=cint(start), limit=cint(limit),
-        )
-        # ponytail: invoiced quotes are dropped after the page is cut, so a page may run short.
+            query = query.where(q.name.like(like) | q.customer_name.like(like) | q.custom_walkin_customer_name.like(like))
+        rows = query.run(as_dict=True)
         data = []
         for r in rows:
-            if _quote_in_use(r.name):
-                continue
             r["expired"] = _is_expired(r.valid_till)
             data.append(r)
         return {"success": True, "data": data}
@@ -220,7 +227,7 @@ def get_quote_details(quote_id):
     try:
         q = frappe.get_doc("Quotation", quote_id)
         if q.docstatus != 1 or q.status in ("Lost", "Cancelled") or q.company != _get_active_pos_profile().company:
-            frappe.throw(frappe._("Quote {0} is not available.").format(quote_id))
+            return {"success": False, "message": frappe._("Quote {0} is not available.").format(quote_id)}
         invoice = _quote_in_use(quote_id)
         if invoice:
             return {"success": False, "message": frappe._("Quote {0} has already been invoiced ({1}).").format(quote_id, invoice)}

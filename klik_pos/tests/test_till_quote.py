@@ -124,3 +124,33 @@ class TestListAndLoadQuotes(FrappeTestCase):
 		self.assertIsNone(item["customRate"])
 		self.assertEqual(item["discountAmount"], 0)
 		self.assertEqual(item["discountPercentage"], 0)
+
+	def test_expired_quote_ignores_a_future_dated_price(self):
+		name = self._quote(rate=100)
+		q = frappe.get_doc("Quotation", name)
+		uom = q.items[0].uom
+		for rate, valid_from in ((137, None), (999, add_days(nowdate(), 1))):
+			frappe.get_doc({
+				"doctype": "Item Price", "item_code": ITEM, "uom": uom, "price_list": q.selling_price_list,
+				"price_list_rate": rate, "valid_from": valid_from,
+			}).insert(ignore_permissions=True)
+		q.db_set("valid_till", add_days(nowdate(), -1))
+		self.assertEqual(quotation.get_quote_details(name)["items"][0]["price"], 137)
+
+	def test_expired_quote_scales_the_stock_uom_price_by_conversion(self):
+		name = self._quote(rate=100)
+		q = frappe.get_doc("Quotation", name)
+		stock_uom = frappe.db.get_value("Item", ITEM, "stock_uom")
+		box = frappe.get_doc({"doctype": "UOM", "uom_name": "_Test Quote Box"}).insert(ignore_permissions=True)
+		item = frappe.get_doc("Item", ITEM)
+		item.append("uoms", {"uom": box.name, "conversion_factor": 12})
+		item.flags.ignore_validate = True
+		item.save(ignore_permissions=True)
+		frappe.db.set_value("Quotation Item", q.items[0].name, "uom", box.name)
+		frappe.db.delete("Item Price", {"item_code": ITEM, "price_list": q.selling_price_list})
+		frappe.get_doc({
+			"doctype": "Item Price", "item_code": ITEM, "uom": stock_uom,
+			"price_list": q.selling_price_list, "price_list_rate": 10,
+		}).insert(ignore_permissions=True)
+		q.db_set("valid_till", add_days(nowdate(), -1))
+		self.assertEqual(quotation.get_quote_details(name)["items"][0]["price"], 120)
