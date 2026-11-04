@@ -2499,6 +2499,7 @@ def _queue_sales_invoice(data, source_order=None):
 
 		if source_order and doc.meta.has_field("powerpack_source_order"):
 			doc.powerpack_source_order = source_order
+		_apply_quote_link(doc, data)
 		_apply_price_authorisation(doc, data)
 		_apply_remarks(doc, data)
 
@@ -2998,6 +2999,7 @@ def _create_draft_invoice(data):
 					)
 				)
 
+			_apply_quote_link(doc, data)  # saved by the update below
 			_update_existing_draft_invoice(
 				doc,
 				customer,
@@ -3050,6 +3052,7 @@ def _create_draft_invoice(data):
 				selling_price_list=data.get("selling_price_list") or None,
 			)
 
+			_apply_quote_link(doc, data)
 			validate_required_salesperson(doc)
 			# M-Pesa's draft, made before the money moves: a payment in progress, not a hold.
 			# Held orders are Sales Orders.
@@ -3535,6 +3538,12 @@ def _set_site_sale_type(doc, is_credit_sale):
 	if not {"Cash", "Credit"} <= _site_sale_types():
 		return
 	doc.set(SITE_SALE_TYPE_FIELD, "Credit" if is_credit_sale else "Cash")
+
+
+def _apply_quote_link(doc, data):
+	"""Stamp the quote this sale was loaded from; the draft keeps it through every rebuild."""
+	if data.get("quotation_id") and doc.meta.has_field("custom_klik_quotation"):
+		doc.custom_klik_quotation = data["quotation_id"]
 
 
 def _update_existing_draft_invoice(
@@ -6221,6 +6230,7 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				selling_price_list=data.get("selling_price_list") or None,
 			)
 
+			_apply_quote_link(invoice_doc, data)
 			_set_customer(invoice_doc, rebuilt_doc.customer)
 			_apply_remarks(invoice_doc, data)
 			invoice_doc.due_date = rebuilt_doc.due_date

@@ -9,6 +9,7 @@ from frappe.tests.utils import FrappeTestCase
 from klik_pos.api import quotation
 from klik_pos.setup.quote_fields import ensure_quote_fields
 from klik_pos.tests.test_held_order_visibility import CUSTOMER, ITEM
+from klik_pos.tests.pos_fixtures import open_own_shift
 from klik_pos.tests.test_opening_conflict import _profile, _shift
 
 
@@ -154,3 +155,91 @@ class TestListAndLoadQuotes(FrappeTestCase):
 		}).insert(ignore_permissions=True)
 		q.db_set("valid_till", add_days(nowdate(), -1))
 		self.assertEqual(quotation.get_quote_details(name)["items"][0]["price"], 120)
+
+
+class TestQuoteLink(FrappeTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		ensure_quote_fields()
+		self.addCleanup(frappe.db.rollback)
+		_shift(_profile(), "Administrator")
+
+	def _quote(self):
+		res = quotation.create_quote(_payload(ITEM, qty=2, rate=100))
+		self.assertTrue(res["success"], res)
+		return res["quote_name"]
+
+	def _invoice(self, quote, submit=False):
+		si = frappe.new_doc("Sales Invoice")
+		si.customer = CUSTOMER
+		si.company = frappe.db.get_value("Quotation", quote, "company")
+		si.append("items", {"item_code": ITEM, "qty": 1, "rate": 1})
+		si.custom_klik_quotation = quote
+		si.insert(ignore_permissions=True, ignore_mandatory=True)
+		if submit:
+			si.flags.ignore_permissions = True
+			si.submit()
+		return si
+
+	def test_second_invoice_for_same_quote_is_refused(self):
+		q = self._quote()
+		self._invoice(q)
+		with self.assertRaises(frappe.ValidationError):
+			self._invoice(q)
+
+	def test_submit_marks_ordered_cancel_reopens(self):
+		q = self._quote()
+		si = self._invoice(q, submit=True)
+		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Ordered")
+		si.cancel()
+		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Open")
+		self._invoice(q)  # a cancelled invoice frees the quote
+
+	def test_used_quote_stays_used_after_expiry_job(self):
+		from erpnext.selling.doctype.quotation.quotation import set_expired_status
+
+		q = self._quote()
+		si = self._invoice(q, submit=True)
+		frappe.db.set_value("Quotation", q, "valid_till", add_days(nowdate(), -1))
+		set_expired_status()
+		self.assertEqual(quotation._quote_in_use(q), si.name)
+		self.assertNotIn(q, [r["name"] for r in quotation.get_quotes(limit=500)["data"]])
+
+
+class TestQuoteIdOnCheckout(FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.ready = bool(open_own_shift(cls, "TEST-QUOTE-LINK-TILL"))
+
+	def setUp(self):
+		if not self.ready:
+			self.skipTest("no till to copy on this site")
+		frappe.set_user("Administrator")
+		ensure_quote_fields()
+		self.addCleanup(frappe.db.rollback)
+
+	def _quote(self):
+		res = quotation.create_quote(_payload(ITEM, qty=2, rate=100))
+		self.assertTrue(res["success"], res)
+		return res["quote_name"]
+
+	def test_checkout_payload_quotation_id_lands_on_invoice(self):
+		from klik_pos.api.sales_invoice import create_draft_invoice, submit_draft_invoice
+
+		q = self._quote()
+		data = {**_payload(ITEM, qty=1, rate=100), "quotation_id": q, "amountPaid": 100, "paymentMethods": [{"method": "Cash", "amount": 100}], "businessType": "B2C"}
+		data.pop("status")
+		draft = create_draft_invoice(data)
+		self.assertTrue(draft["success"], draft)
+		name = draft["invoice_name"]
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "custom_klik_quotation"), q)
+		# Re-saved from the cart, then finished from it: the link survives each rebuild.
+		again = create_draft_invoice({**data, "draft_invoice_id": name})
+		self.assertTrue(again["success"], again)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "custom_klik_quotation"), q)
+		done = submit_draft_invoice(name, data=data)
+		self.assertTrue(done["success"], done)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "custom_klik_quotation"), q)
+		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Ordered")
