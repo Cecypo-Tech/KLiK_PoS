@@ -50,6 +50,16 @@ class TestCreateQuote(FrappeTestCase):
 		self.assertEqual(frappe.db.get_value("Quotation Item", {"parent": res["quote_name"]}, "qty"), 15)
 		self.assertEqual(frappe.db.get_value("Quotation", res["quote_name"], "grand_total"), 1500)
 
+	def test_till_with_quotes_switched_off_is_refused(self):
+		before = frappe.db.count("Quotation")
+		till = frappe.get_doc("POS Profile", _profile())
+		till.custom_allow_quotes = 0
+		with patch.object(quotation, "_get_active_pos_profile", return_value=till):
+			res = quotation.create_quote(_payload(ITEM, qty=1, rate=100))
+		self.assertFalse(res["success"])
+		self.assertIn("not allowed", res["message"])
+		self.assertEqual(frappe.db.count("Quotation"), before)
+
 	def test_breach_is_refused_and_nothing_is_saved(self):
 		before = frappe.db.count("Quotation")
 		with patch(

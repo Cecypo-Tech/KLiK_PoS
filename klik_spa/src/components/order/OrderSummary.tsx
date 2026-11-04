@@ -32,6 +32,7 @@ import { CartItemRow } from "./CartItemRow";
 import { OrderSummaryFooter } from "./OrderSummaryFooter";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
+import { quotesAllowed } from "../../utils/quotesAllowed";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
 import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
@@ -126,6 +127,11 @@ export default function OrderSummary({
 
   const currency_symbol = posDetails?.currency_symbol;
   const autoFetchBatch = posDetails?.custom_autofetch_batchserial_ === 1;
+  const canQuote = quotesAllowed(posDetails);
+  // A till switched off for quotes drops a quote mode left over from before (it is persisted).
+  useEffect(() => {
+    if (!canQuote && quoteMode) exitQuoteMode();
+  }, [canQuote, quoteMode, exitQuoteMode]);
   const isTaxIncludedInBasicRate =
     posDetails?.is_tax_included_in_basic_rate === 1
     || posDetails?.is_tax_included_in_basic_rate === "1"
@@ -696,7 +702,7 @@ export default function OrderSummary({
               <p className="text-gray-500 dark:text-gray-400">
                 Add some items to get started!
               </p>
-              {!quoteMode && (
+              {!quoteMode && canQuote && (
                 <button
                   id="pos-quote-btn"
                   onClick={enterQuoteMode}
@@ -760,7 +766,7 @@ export default function OrderSummary({
           taxExclusive={!isTaxIncludedInBasicRate}
           netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
           quoteMode={quoteMode}
-          onQuote={enterQuoteMode}
+          onQuote={canQuote ? enterQuoteMode : undefined}
         />
       )}
 

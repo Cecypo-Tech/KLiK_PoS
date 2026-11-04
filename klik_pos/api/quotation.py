@@ -136,6 +136,9 @@ def create_quote(data):
         if isinstance(data, str):
             data = json.loads(data)
 
+        if not cint(_get_active_pos_profile().get("custom_allow_quotes", 1)):
+            frappe.throw(frappe._("Quotes are not allowed at this till."))
+
         from klik_pos.api.pos_profile import validate_required_extra_fields
 
         validate_required_extra_fields(_parse_extra_fields(data))

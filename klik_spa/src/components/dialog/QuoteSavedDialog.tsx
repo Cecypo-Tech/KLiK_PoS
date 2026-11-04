@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "react-toastify";
-import { Loader2, MessageCirclePlus, Printer } from "lucide-react";
-import { handlePrintInvoice } from "../../utils/printHandler";
+import { Loader2, MessageCirclePlus } from "lucide-react";
+import DocShareButtons from "../DocShareButtons";
 import { sendWhatsAppMessage } from "../../services/useSharing";
 
 interface QuoteSavedDialogProps {
@@ -58,13 +58,9 @@ export default function QuoteSavedDialog({ title = "Quote saved", quoteName, cus
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => handlePrintInvoice({ name: quoteName, pos_profile: "" }, { doctype: "Quotation", posDetails })}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-        >
-          <Printer className="h-4 w-4" /> Print
-        </button>
+        <div className="flex items-center justify-center gap-1 rounded-xl border border-gray-200 py-1 dark:border-gray-700">
+          <DocShareButtons doctype="Quotation" name={quoteName} size="md" posDetails={posDetails} />
+        </div>
 
         <div className="flex gap-2">
           <input

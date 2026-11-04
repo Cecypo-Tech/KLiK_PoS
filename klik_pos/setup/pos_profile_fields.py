@@ -148,6 +148,18 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "0",
         "module": "KLiK PoS",
     },
+    {
+        "fieldname": "custom_allow_quotes",
+        "label": "Allow Quotes",
+        "fieldtype": "Check",
+        "insert_after": "custom_enable_loss_of_sale",
+        "description": (
+            "Show the Quote button and the Quotes tab at this till. Untick to stop the till "
+            "saving quotes; quotes it already saved can still be invoiced at other tills."
+        ),
+        "default": "1",
+        "module": "KLiK PoS",
+    },
 ]
 
 

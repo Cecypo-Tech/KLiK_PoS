@@ -18,9 +18,6 @@ import {
   RotateCcw,
   Check,
   FileMinus,
-  Printer,
-  Copy,
-  Image as ImageIcon,
   X,
   MessageCirclePlus,
   ShoppingCart,
@@ -40,6 +37,7 @@ import { useSalesInvoices } from "../hooks/useSalesInvoices";
 import { useCustomers } from "../hooks/useCustomers";
 import { useUserInfo } from "../hooks/useUserInfo";
 import { usePOSProfileStore } from "../stores/posProfileStore";
+import { quotesAllowed } from "../utils/quotesAllowed";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import { toast } from "react-toastify";
 import { extractErrorFromException } from "../utils/errorExtraction";
@@ -51,18 +49,11 @@ import { addHeldOrderToCart } from "../utils/heldOrderToCart";
 import { addQuoteToCart } from "../utils/quoteToCart";
 import { getQuotes } from "../services/quotation";
 import QuoteSavedDialog from "../components/dialog/QuoteSavedDialog";
-import HeldOrderQzButton from "../components/HeldOrderQzButton";
+import DocShareButtons from "../components/DocShareButtons";
 import {
   applyHeldOrderAction,
-  callMethod,
   getHeldOrders,
-  getHeldOrderShareDoc,
-  getHeldOrderShareTools,
-  type HeldOrderShareTools,
 } from "../services/salesOrder";
-import { deferredClipboardText, formatSystemDate, runCopyAsMessage } from "../utils/copyAsMessage";
-import { copyPrintImage } from "../utils/copyAsImage";
-import { getCSRFToken } from "../utils/csrf";
 import { loadCachedItemsToCart } from "../utils/draftInvoiceCache";
 import { approvalBadge, PRICE_APPROVED, WITHDRAW_APPROVAL } from "../utils/priceApproval";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
@@ -333,10 +324,7 @@ export default function InvoiceHistoryPage() {
     const quoteId = invoice.id || invoice.name;
     return (
       <>
-        <button type="button" title="Print" aria-label="Print" className={button}
-          onClick={() => handlePrintInvoice({ name: quoteId, pos_profile: "" }, { doctype: "Quotation", posDetails })}>
-          <Printer className={icon} />
-        </button>
+        <DocShareButtons doctype="Quotation" name={quoteId} size={size} posDetails={posDetails} />
         <button type="button" title="WhatsApp" aria-label="WhatsApp" className={button}
           onClick={() => setQuoteToShare({ name: quoteId, customer: invoice.customer })}>
           <MessageCirclePlus className={icon} />
@@ -350,93 +338,14 @@ export default function InvoiceHistoryPage() {
     );
   };
 
-  // Copy and Image on a held order's row: each only when the site has it (see
-  // get_held_order_share_tools).
-  const [shareTools, setShareTools] = useState<HeldOrderShareTools>({
-    copy_message_script: null,
-    copy_image: false,
-    date_format: null,
-  });
-  const copyingMessage = useRef(false);
-  useEffect(() => {
-    let cancelled = false;
-    getHeldOrderShareTools()
-      .then((tools) => !cancelled && setShareTools(tools))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleCopyHeldOrderMessage = async (orderId: string) => {
-    if (!shareTools.copy_message_script || copyingMessage.current) return;
-    copyingMessage.current = true;
-    // Taken during the click: Safari refuses a clipboard write that comes after the fetches.
-    const clipboard = deferredClipboardText();
-    try {
-      const { doc, currency_symbol } = await getHeldOrderShareDoc(orderId);
-      await runCopyAsMessage(shareTools.copy_message_script, doc, {
-        call: callMethod,
-        alert: (message, ok) => (ok ? toast.success(message) : toast.error(message)),
-        formatCurrency: (value) => formatCurrencyWithSymbol(value, currency_symbol),
-        formatDate: (date) => formatSystemDate(date, shareTools.date_format),
-        writeText: clipboard.writeText,
-        user: userInfo?.user,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not copy the message");
-    } finally {
-      clipboard.done();
-      copyingMessage.current = false;
-    }
-  };
-
-  const handleCopyHeldOrderImage = (orderId: string) => {
-    void copyPrintImage("Sales Order", orderId, {
-      csrfToken: getCSRFToken(),
-      notify: (message, level) => toast[level](message, level === "info" ? { autoClose: 3000 } : undefined),
-    });
-  };
-
-  // POS Profile "Block Printing Held Orders": copy as image renders the print format too.
+  // POS Profile "Block Printing Held Orders": the server refuses these anyway (Sales Order
+  // has_permission); shown, but disabled.
   const heldOrderPrintBlocked = () =>
     [1, "1", true].includes(posDetails?.custom_block_held_order_print as 1 | "1" | true);
-
-  const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => {
-    const qzEnabled = [1, "1", true].includes(posDetails?.custom_enable_qz_print as 1 | "1" | true);
-    // The server refuses these anyway (Sales Order has_permission); shown, but disabled.
-    const printBlocked = heldOrderPrintBlocked();
-    const blockedTitle = "Printing held orders is blocked on this till";
-    const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
-    // Icons only, so on a touch screen each needs a finger-sized target.
-    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent";
-    return (
-      <>
-        <button type="button" title={printBlocked ? blockedTitle : "Print"} aria-label="Print" className={button}
-          disabled={printBlocked}
-          onClick={() => handlePrintInvoice({ name: orderId, pos_profile: "" }, { doctype: "Sales Order", posDetails })}>
-          <Printer className={icon} />
-        </button>
-        {qzEnabled && (
-          <HeldOrderQzButton orderId={orderId} className={button} iconSize={size === "sm" ? 16 : 20}
-            blockedTitle={printBlocked ? blockedTitle : undefined} />
-        )}
-        {shareTools.copy_message_script && (
-          <button type="button" title="Copy as message" aria-label="Copy as message" className={button}
-            onClick={() => void handleCopyHeldOrderMessage(orderId)}>
-            <Copy className={icon} />
-          </button>
-        )}
-        {shareTools.copy_image && (
-          <button type="button" title={printBlocked ? blockedTitle : "Copy as image"} aria-label="Copy as image" className={button}
-            disabled={printBlocked}
-            onClick={() => handleCopyHeldOrderImage(orderId)}>
-            <ImageIcon className={icon} />
-          </button>
-        )}
-      </>
-    );
-  };
+  const renderHeldOrderShareButtons = (orderId: string, size: "sm" | "md") => (
+    <DocShareButtons doctype="Sales Order" name={orderId} size={size} posDetails={posDetails}
+      blockedTitle={heldOrderPrintBlocked() ? "Printing held orders is blocked on this till" : undefined} />
+  );
 
 
   const { modes } = useAllPaymentModes();
@@ -535,6 +444,12 @@ export default function InvoiceHistoryPage() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [showCustomerSelection, showMultiReturn]);
 
+  const canQuote = quotesAllowed(posDetails);
+  // The Quotes tab goes with the till's Allow Quotes box; a remembered Quotes tab falls back to All.
+  useEffect(() => {
+    if (!canQuote && activeTab === "Quotes") setActiveTab("all");
+  }, [canQuote, activeTab]);
+
   const tabs = [
     { id: "all", name: "All Invoices", icon: FileText, color: "text-gray-600" },
     { id: "queued", name: "Queued", icon: Clock, color: "text-amber-600" },
@@ -546,7 +461,7 @@ export default function InvoiceHistoryPage() {
     { id: "Overdue", name: "Overdue", icon: XCircle, color: "text-red-600" },
     { id: "Return", name: "Returns", icon: RefreshCw, color: "text-purple-600" },
     { id: "Cancelled", name: "Cancelled", icon: XCircle, color: "text-red-500" },
-  ];
+  ].filter((tab) => canQuote || tab.id !== "Quotes");
 
   // Invoices are already bounded by the server; this also bounds the Held tab's orders.
   const filterInvoiceByDate = (invoiceDateStr: string) => inDateRange(invoiceDateStr, fromDate, toDate);
