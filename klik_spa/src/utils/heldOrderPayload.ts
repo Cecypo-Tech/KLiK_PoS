@@ -122,3 +122,100 @@ export function heldItemToCartItem(item: any): CartItem {
     selected_price_list: item.selectedPriceList || undefined,
   } as unknown as CartItem;
 }
+
+/** A cart line as checkout passes it: the cart item plus its computed prices. */
+interface OrderLine {
+  id: string;
+  item_code?: string;
+  quantity: number;
+  price?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
+  original_price?: number;
+  /** Set by the cart for checkout; absent, effectiveRate prices the line. */
+  discountedPriceExcl?: number;
+  originalPrice?: number;
+}
+
+/**
+ * The whole held-order payload, built once for checkout's Hold and the cart's Save Quote
+ * (create_quote takes the same payload). The caller adds what only it knows - Hold adds
+ * held_order_id and request_price_approval.
+ */
+export function buildOrderPayload<T extends OrderLine>({
+  cartItems,
+  itemDiscounts,
+  effectiveRate,
+  customer,
+  totals,
+  appliedCoupons,
+  businessType,
+  salesperson,
+  sellingPriceList,
+  extras,
+  loyalty,
+}: {
+  cartItems: T[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  itemDiscounts: Record<string, any>;
+  /** The line's rate when the cart did not pass discountedPriceExcl. */
+  effectiveRate: (item: T) => number;
+  customer: { id: string };
+  totals: { subtotal: number; grandTotal: number; taxAmount: number; isInclusive: boolean; couponDiscount: number };
+  appliedCoupons: unknown[];
+  businessType: unknown;
+  salesperson: string | null;
+  sellingPriceList: string | null;
+  extras: Parameters<typeof heldOrderPayloadExtras>[0];
+  loyalty: { loyalty_program: string; loyalty_points: number } | null;
+}) {
+  const items = cartItems.map((item) => {
+    const code = item.item_code || item.id;
+    const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
+    const discountPercentage = Number(discountData.discountPercentage) || Number(item.discount_percentage) || 0;
+    const discountAmount = Number(discountData.discountAmount) || Number(item.discount_amount) || 0;
+
+    let heldPrice = Number(item.discountedPriceExcl);
+    if (!Number.isFinite(heldPrice)) {
+      heldPrice = effectiveRate(item);
+    }
+
+    return {
+      ...item,
+      price: heldPrice,
+      item_code: code,
+      discountPercentage,
+      discountAmount,
+      selectedPriceList: discountData.selectedPriceList || "",
+    };
+  });
+
+  const totalItemDiscount = items.reduce((sum, item) => {
+    const basePrice = Number(item.originalPrice) || Number(item.original_price) || Number(item.price) || 0;
+    const currentPrice = Number(item.price) || 0;
+    return sum + Math.max(0, (basePrice - currentPrice) * item.quantity);
+  }, 0);
+
+  return {
+    items,
+    customer: { id: customer.id },
+    customerData: customer,
+    subtotal: totals.subtotal,
+    total: totals.grandTotal,
+    taxAmount: totals.taxAmount,
+    taxType: totals.isInclusive ? "inclusive" : "exclusive",
+    couponDiscount: totals.couponDiscount,
+    grandTotal: totals.grandTotal,
+    appliedCoupons,
+    itemDiscounts,
+    totalItemDiscount,
+    totalSavings: totalItemDiscount + totals.couponDiscount,
+    status: "held",
+    businessType,
+    salesperson,
+    selling_price_list: sellingPriceList,
+    // Buyer, extra fields, shipping rule, delivery, discount and tax template.
+    ...heldOrderPayloadExtras(extras),
+    loyalty: loyalty ? { loyalty_program: loyalty.loyalty_program, loyalty_points: loyalty.loyalty_points } : null,
+  };
+}

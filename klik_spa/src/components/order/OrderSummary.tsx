@@ -12,6 +12,10 @@ import { isExplicitlyNotTracked } from "../../utils/trackingFlags";
 import type { CartItem } from "../../../types";
 import type { Customer } from "../../types/customer";
 import PaymentDialog from "../dialog/PaymentDialog";
+import QuoteSavedDialog from "../dialog/QuoteSavedDialog";
+import { createQuote } from "../../services/quotation";
+import { buildOrderPayload, tillFlags } from "../../utils/heldOrderPayload";
+import { checkoutPriceList } from "../../utils/priceFloor";
 import SalespersonAuthModal from "../dialog/SalespersonAuthModal";
 import {
   getCheckoutRequestStatus,
@@ -61,13 +65,23 @@ export default function OrderSummary({
     toggleItemExpansion,
     pendingRateOverrides,
     consumeRateOverrides,
+    quoteMode,
+    enterQuoteMode,
+    exitQuoteMode,
+    walkinDetails,
+    extraFields,
+    shippingRule,
+    checkoutExtras,
+    selectedPriceList,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showSalespersonAuthModal, setShowSalespersonAuthModal] = useState(false);
   const [isValidatingCheckout, setIsValidatingCheckout] = useState(false);
   const [isRecoveringCheckout, setIsRecoveringCheckout] = useState(false);
-  const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | null>(null);
+  const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | "quote" | null>(null);
+  const [isSavingQuote, setIsSavingQuote] = useState(false);
+  const [savedQuote, setSavedQuote] = useState<{ name: string; customerName: string; phone: string } | null>(null);
 
   const { posDetails } = usePOSProfileStore();
   const refreshStockOnly = useProductStore((s) => s.refreshStockOnly);
@@ -454,6 +468,64 @@ export default function OrderSummary({
     return true;
   };
 
+  // The cart lines as checkout gets them, with their computed prices.
+  const checkoutLines = () => cartItems.map((item) => ({
+    ...item,
+    discountedPriceExcl: getDiscountedPrice(item),
+    discountedPriceIncl: getDisplayPriceInclusive(item),
+    discountedPrice: getDisplayPriceInclusive(item),
+    itemDiscount: itemDiscounts[item.id] || {},
+    originalPrice: roundCurrency(item.price),
+    finalAmount: getLineTotalInclusive(item),
+  }));
+
+  // Straight to create_quote: checkout's server stock check would refuse a quote over stock.
+  const saveQuote = async () => {
+    if (!validateCustomer() || !selectedCustomer || isSavingQuote) return;
+    setIsSavingQuote(true);
+    try {
+      const payload = buildOrderPayload({
+        cartItems: checkoutLines(),
+        itemDiscounts,
+        effectiveRate: getDiscountedPrice,
+        customer: selectedCustomer,
+        totals: {
+          subtotal,
+          grandTotal: total,
+          taxAmount: roundCurrency(Math.max(0, total - subtotal)),
+          isInclusive: isTaxIncludedInBasicRate,
+          couponDiscount,
+        },
+        appliedCoupons: [],
+        businessType: posDetails?.business_type,
+        salesperson: activeSalesperson?.name || null,
+        sellingPriceList: checkoutPriceList(posDetails, selectedPriceList),
+        // Delivery, order discount, tax template and remarks as checkout last left them.
+        extras: {
+          walkin: walkinDetails,
+          extraFields,
+          shippingRule,
+          extras: checkoutExtras,
+          flags: tillFlags(posDetails as Record<string, unknown>),
+        },
+        loyalty: null,
+      });
+      const result = await createQuote(payload);
+      if (!result.success || !result.quote_name) {
+        toast.error(result.message || "Failed to save the quote");
+        return;
+      }
+      const customerName = walkinDetails.name?.trim() || selectedCustomer.name;
+      const phone = walkinDetails.phone?.trim() || selectedCustomer.phone || "";
+      clearCart();
+      setItemDiscounts({});
+      exitQuoteMode();
+      setSavedQuote({ name: result.quote_name, customerName, phone });
+    } finally {
+      setIsSavingQuote(false);
+    }
+  };
+
   const startCheckoutFlow = async () => {
     if (!validateCustomer() || isValidatingCheckout) return;
     setIsValidatingCheckout(true);
@@ -481,10 +553,10 @@ export default function OrderSummary({
     }
   };
 
-  const requireSalespersonAndRun = async (action: "checkout") => {
+  const requireSalespersonAndRun = async (action: "checkout" | "quote") => {
     const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
     if (!requiresSalespersonPin || activeSalesperson) {
-      await startCheckoutFlow();
+      await (action === "quote" ? saveQuote() : startCheckoutFlow());
       return;
     }
 
@@ -497,7 +569,7 @@ export default function OrderSummary({
       toast.info("Checking whether the previous checkout already created an invoice.");
       return;
     }
-    await requireSalespersonAndRun("checkout");
+    await requireSalespersonAndRun(quoteMode ? "quote" : "checkout");
   };
 
   const handleClearCart = () => {
@@ -514,14 +586,17 @@ export default function OrderSummary({
 
     if (nextAction === "checkout") {
       void startCheckoutFlow();
+    } else if (nextAction === "quote") {
+      void saveQuote();
     }
   };
 
-  // F10 and Shift+F10 both open checkout from the cart; Hold lives in checkout, whose own
-  // layer then takes Shift+F10 (hold) and F10 (submit). Off while this summary's payment
-  // dialog is open: a cart refilled behind it would otherwise push this layer on top.
+  // F10 and Shift+F10 both open checkout from the cart (save the quote, when quoting); Hold
+  // lives in checkout, whose own layer then takes Shift+F10 (hold) and F10 (submit). Off while
+  // this summary's payment dialog is open: a cart refilled behind it would otherwise push this
+  // layer on top.
   const openCheckoutFromShortcut = () => {
-    if (isValidatingCheckout) return;
+    if (isValidatingCheckout || isSavingQuote) return;
     void handleCheckoutClick();
   };
   usePosShortcutLayer(
@@ -529,7 +604,7 @@ export default function OrderSummary({
       f10: openCheckoutFromShortcut,
       shiftF10: openCheckoutFromShortcut,
     },
-    cartItems.length > 0 && !showPaymentDialog,
+    cartItems.length > 0 && !showPaymentDialog && !savedQuote,
   );
 
   const handleCompletePayment = async (paymentData: any) => {
@@ -574,6 +649,22 @@ export default function OrderSummary({
           currencySymbol={currency_symbol}
         />
       </div>
+
+      {quoteMode && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm"
+        >
+          <span className="font-semibold">QUOTE MODE — not a sale; stock is not limited</span>
+          <button
+            id="pos-cancel-quote-btn"
+            onClick={exitQuoteMode}
+            className="shrink-0 rounded-lg border border-amber-500 px-2 py-1 text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-800/40"
+          >
+            Cancel quote
+          </button>
+        </div>
+      )}
 
       <div
         className={`${
@@ -652,11 +743,13 @@ export default function OrderSummary({
           couponDiscount={couponDiscount}
           onCheckout={handleCheckoutClick}
           onClearCart={handleClearCart}
-          isValidating={isValidatingCheckout || isRecoveringCheckout}
+          isValidating={isValidatingCheckout || isRecoveringCheckout || isSavingQuote}
           isMobile={isMobile}
           currency_symbol={currency_symbol}
           taxExclusive={!isTaxIncludedInBasicRate}
           netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
+          quoteMode={quoteMode}
+          onQuote={enterQuoteMode}
         />
       )}
 
@@ -666,15 +759,7 @@ export default function OrderSummary({
           backLabel="Back to cart"
           showAdditionalInfo
           onClose={handleClosePaymentDialog}
-          cartItems={cartItems.map((item) => ({
-            ...item,
-            discountedPriceExcl: getDiscountedPrice(item),
-            discountedPriceIncl: getDisplayPriceInclusive(item),
-            discountedPrice: getDisplayPriceInclusive(item),
-            itemDiscount: itemDiscounts[item.id] || {},
-            originalPrice: roundCurrency(item.price),
-            finalAmount: getLineTotalInclusive(item),
-          }))}
+          cartItems={checkoutLines()}
           appliedCoupons={[]}
           selectedCustomer={selectedCustomer}
           onCompletePayment={handleCompletePayment}
@@ -682,6 +767,16 @@ export default function OrderSummary({
           isMobile={isMobile}
           itemDiscounts={itemDiscounts}
           totalItemDiscount={totalItemDiscount}
+        />
+      )}
+
+      {savedQuote && (
+        <QuoteSavedDialog
+          quoteName={savedQuote.name}
+          customerName={savedQuote.customerName}
+          phone={savedQuote.phone}
+          posDetails={posDetails}
+          onDone={() => setSavedQuote(null)}
         />
       )}
 

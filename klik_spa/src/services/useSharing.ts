@@ -66,6 +66,8 @@ interface WhatsAppData {
   invoice_data?: string;
   template_name?: string;
   template_parameters?: string[];
+  /** The document to attach: "Sales Invoice" (the server's default) or "Quotation". */
+  doctype?: "Sales Invoice" | "Quotation";
 }
 
 export async function getWhatsAppSetup() {

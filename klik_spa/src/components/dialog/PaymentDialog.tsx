@@ -23,7 +23,7 @@ import {
   validateCheckoutInvoice,
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
-import { heldOrderPayloadExtras, tillFlags } from "../../utils/heldOrderPayload";
+import { buildOrderPayload, tillFlags } from "../../utils/heldOrderPayload";
 import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalHeldOrderMpesa, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
 import { priceApprovalMessage } from "../../utils/priceApproval";
 import { checkoutPriceList, floorBlockMessage, authorisationStillValid, type FloorAuthorisation } from "../../utils/priceFloor";
@@ -2041,82 +2041,38 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     setIsHoldingOrder(true);
 
     try {
-      const orderItems = cartItems.map((item) => {
-        const code = item.item_code || item.id;
-        const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
-        const discountPercentage =
-          Number(discountData.discountPercentage)
-          || Number((item as { discount_percentage?: number }).discount_percentage)
-          || 0;
-        const discountAmount =
-          Number(discountData.discountAmount)
-          || Number((item as { discount_amount?: number }).discount_amount)
-          || 0;
-
-        let heldPrice = Number((item as { discountedPriceExcl?: number }).discountedPriceExcl);
-        if (!Number.isFinite(heldPrice)) {
-          heldPrice = getEffectiveItemRate(item);
-        }
-
-        return {
-          ...item,
-          price: heldPrice,
-          item_code: code,
-          discountPercentage,
-          discountAmount,
-          selectedPriceList: discountData.selectedPriceList || "",
-        };
-      });
-
-      const totalItemDiscount = orderItems.reduce((sum, item) => {
-        const basePrice =
-          Number((item as { originalPrice?: number }).originalPrice)
-          || Number((item as { original_price?: number }).original_price)
-          || Number(item.price)
-          || 0;
-        const currentPrice = Number(item.price) || 0;
-        return sum + Math.max(0, (basePrice - currentPrice) * item.quantity);
-      }, 0);
-
       const orderData = {
-        items: orderItems,
-        customer: { id: selectedCustomer.id },
-        customerData: selectedCustomer,
-        subtotal: calculations.subtotal,
-        total: checkoutGrandTotal,
-        taxAmount: calculations.taxAmount,
-        taxType: calculations.isInclusive ? "inclusive" : "exclusive",
-        couponDiscount: calculations.couponDiscount,
-        grandTotal: checkoutGrandTotal,
-        appliedCoupons,
-        itemDiscounts,
-        totalItemDiscount,
-        totalSavings: totalItemDiscount + calculations.couponDiscount,
-        status: "held",
-        businessType: posDetails?.business_type,
-        salesperson: currentSalesperson?.name || null,
-        selling_price_list: cartPriceList,
-        // Buyer, extra fields, shipping rule, delivery, discount and tax template - built the
-        // same way as the cart's Hold, from what checkout shows now.
-        ...heldOrderPayloadExtras({
-          walkin: walkinDetails,
-          extraFields,
-          shippingRule: activeShippingRule,
-          extras: {
-            deliveryCharge,
-            deliveryPersonnel: selectedDeliveryPersonnel,
-            orderDiscountAmount: Number(orderDiscountAmount || 0),
-            salesTaxCharges: selectedSalesTaxCharges,
-            remarks,
+        ...buildOrderPayload({
+          cartItems,
+          itemDiscounts,
+          effectiveRate: getEffectiveItemRate,
+          customer: selectedCustomer,
+          totals: {
+            subtotal: calculations.subtotal,
+            grandTotal: checkoutGrandTotal,
+            taxAmount: calculations.taxAmount,
+            isInclusive: calculations.isInclusive,
+            couponDiscount: calculations.couponDiscount,
           },
-          flags: tillFlags(posDetails as Record<string, unknown>),
+          appliedCoupons,
+          businessType: posDetails?.business_type,
+          salesperson: currentSalesperson?.name || null,
+          sellingPriceList: cartPriceList,
+          extras: {
+            walkin: walkinDetails,
+            extraFields,
+            shippingRule: activeShippingRule,
+            extras: {
+              deliveryCharge,
+              deliveryPersonnel: selectedDeliveryPersonnel,
+              orderDiscountAmount: Number(orderDiscountAmount || 0),
+              salesTaxCharges: selectedSalesTaxCharges,
+              remarks,
+            },
+            flags: tillFlags(posDetails as Record<string, unknown>),
+          },
+          loyalty: appliedLoyalty,
         }),
-        loyalty: appliedLoyalty
-          ? {
-              loyalty_program: appliedLoyalty.loyalty_program,
-              loyalty_points: appliedLoyalty.loyalty_points,
-            }
-          : null,
         // The M-Pesa order (its push failed) becomes the held order, rather than a copy.
         held_order_id: getOriginalHeldOrderId() || mpesaOrderName,
         request_price_approval: askingManager,
