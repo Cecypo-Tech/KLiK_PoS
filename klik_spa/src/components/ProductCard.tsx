@@ -5,6 +5,7 @@ import type { MenuItem } from "../../types";
 import ProductTooltip from "./ProductTooltip";
 import ProductDetailsModal from "./ProductDetailsModal";
 import { formatCurrencyWithSymbol } from "../utils/currency";
+import { useCartStore } from "../stores/cartStore";
 import { isItemOutOfStock } from "../utils/stock";
 import { formatAvailability } from "../utils/availability";
 import { getItemDisplayName } from "../utils/itemDisplayName";
@@ -43,6 +44,7 @@ function ProductCard({
   const [showTooltip, setShowTooltip] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const isServiceItem = item.is_stock_item === false;
+  useCartStore((s) => s.quoteMode); // redraw when quote mode flips
   const isOutOfStock = isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled);
   const isDisabled = isOutOfStock || scannerOnly;
   const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0;

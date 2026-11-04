@@ -22,6 +22,9 @@ import {
   Copy,
   Image as ImageIcon,
   X,
+  MessageCirclePlus,
+  ShoppingCart,
+  FileSignature,
 } from "lucide-react";
 
 import InvoiceViewModal from "../components/InvoiceViewModal";
@@ -45,6 +48,9 @@ import { useAllPaymentModes } from "../hooks/usePaymentModes";
 import PaymentDialog from "../components/dialog/PaymentDialog";
 import { addDraftInvoiceToCart } from "../utils/draftInvoiceToCart";
 import { addHeldOrderToCart } from "../utils/heldOrderToCart";
+import { addQuoteToCart } from "../utils/quoteToCart";
+import { getQuotes } from "../services/quotation";
+import QuoteSavedDialog from "../components/dialog/QuoteSavedDialog";
 import HeldOrderQzButton from "../components/HeldOrderQzButton";
 import {
   applyHeldOrderAction,
@@ -70,7 +76,7 @@ import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 import { walkinSubline } from "../utils/walkinLabel";
 import { matchesPaymentFilter } from "../utils/paymentFilter";
-import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, sortFailedFirst } from "../utils/invoiceHistoryTabs";
+import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst } from "../utils/invoiceHistoryTabs";
 // import InvoiceViewPage from "./InvoiceViewPage";
 
 interface HeldOrderExtras {
@@ -84,6 +90,8 @@ interface HeldOrderExtras {
   /** What the order would come to if checked out now, on a till that records Loss of Sale:
    * the order holds what was asked for, out-of-stock lines included. */
   inStockTotal?: number;
+  /** A saved Quotation (Quotes tab): print, WhatsApp, load to cart - nothing of an invoice's. */
+  isQuote?: boolean;
 }
 
 /** "Sh 450 in stock" under a held order's total, when not all of it is. */
@@ -278,6 +286,70 @@ export default function InvoiceHistoryPage() {
     void refetchHeldOrders();
   }, [refetchHeldOrders, activeTab]);
 
+  // Open quotes of this company, from any till; mapped to the row shape like held orders.
+  const [quotes, setQuotes] = useState<(SalesInvoice & HeldOrderExtras)[]>([]);
+  const [quoteToShare, setQuoteToShare] = useState<{ name: string; customer: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void getQuotes({ search: searchTerm, limit: 200 }).then((res) => {
+      if (!live) return;
+      // Refused (no Quotation read, say): say so, rather than show an empty tab.
+      if (!res.success && activeTab === "Quotes") toast.error(res.message || "Failed to load quotes");
+      setQuotes(res.success ? (res.data || []).map((q) => ({
+        id: q.name,
+        name: q.name,
+        date: q.transaction_date,
+        time: "",
+        cashier: "",
+        customer: q.customer_name || q.customer,
+        customerId: q.customer,
+        walkinName: q.walkin_name || "",
+        items: [],
+        subtotal: Number(q.grand_total) || 0,
+        totalAmount: Number(q.grand_total) || 0,
+        giftCardDiscount: 0,
+        paymentMethod: "-",
+        status: q.expired ? "Expired" : "Quote",
+        currency: q.currency,
+        canReturn: false,
+        isQuote: true,
+      })) as unknown as (SalesInvoice & HeldOrderExtras)[] : []);
+    });
+    return () => { live = false; };
+  }, [searchTerm, activeTab]);
+
+  const handleLoadQuote = async (quoteId: string) => {
+    try {
+      if (await addQuoteToCart(quoteId)) navigate("/pos");
+    } catch (error) {
+      console.error("Error loading quote:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to load the quote");
+    }
+  };
+
+  const renderQuoteButtons = (invoice: SalesInvoice, size: "sm" | "md") => {
+    const icon = size === "sm" ? "w-4 h-4" : "w-5 h-5";
+    const button = (size === "sm" ? "p-1" : "p-2.5") + " rounded text-gray-600 hover:text-beveren-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700";
+    const quoteId = invoice.id || invoice.name;
+    return (
+      <>
+        <button type="button" title="Print" aria-label="Print" className={button}
+          onClick={() => handlePrintInvoice({ name: quoteId, pos_profile: "" }, { doctype: "Quotation", posDetails })}>
+          <Printer className={icon} />
+        </button>
+        <button type="button" title="WhatsApp" aria-label="WhatsApp" className={button}
+          onClick={() => setQuoteToShare({ name: quoteId, customer: invoice.customer })}>
+          <MessageCirclePlus className={icon} />
+        </button>
+        <button type="button" onClick={() => void handleLoadQuote(quoteId)}
+          className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 flex items-center space-x-1">
+          <ShoppingCart className={icon} />
+          <span>Load to cart</span>
+        </button>
+      </>
+    );
+  };
+
   // Copy and Image on a held order's row: each only when the site has it (see
   // get_held_order_share_tools).
   const [shareTools, setShareTools] = useState<HeldOrderShareTools>({
@@ -467,6 +539,7 @@ export default function InvoiceHistoryPage() {
     { id: "all", name: "All Invoices", icon: FileText, color: "text-gray-600" },
     { id: "queued", name: "Queued", icon: Clock, color: "text-amber-600" },
     { id: "Held", name: "Held", icon: FilePlus, color: "text-gray-500" },
+    { id: "Quotes", name: "Quotes", icon: FileSignature, color: "text-sky-600" },
     { id: "Unpaid", name: "Unpaid", icon: Clock, color: "text-yellow-600" },
     { id: "Partly Paid", name: "Partly Paid", icon: AlertTriangle, color: "text-orange-600" },
     { id: "Paid", name: "Paid", icon: CheckCircle, color: "text-green-600" },
@@ -492,9 +565,11 @@ const getStatusBadge = (status: string) => {
     case "partly paid":
       return `${baseClasses} bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400`;
     case "overdue":
+    case "expired":
       return `${baseClasses} bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400`;
     case "draft":
     case "held":
+    case "quote":
       return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400`;
     case "return":
       return `${baseClasses} bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400`;
@@ -568,8 +643,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
     if (isLoading) return [];
     if (error) return [];
 
-    // The Held tab is sourced from held Sales Orders, not draft Sales Invoices.
-    const source = activeTab === "Held" ? heldOrders : invoices;
+    const source = rowsForTab(activeTab, { invoices, heldOrders, quotes });
 
     const filtered = source.filter((invoice) => {
       // Server-side search is handled by the API, so we only apply client-side filters
@@ -579,14 +653,14 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
         || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
-      const matchesCashier = cashierFilter === "all" || invoice.cashier === cashierFilter;
+      const matchesCashier = cashierFilter === "all" || !!(invoice as SalesInvoice & HeldOrderExtras).isQuote || invoice.cashier === cashierFilter;
       const matchesDate = filterInvoiceByDate(invoice.date);
 
       return matchesPayment && matchesCustomer && matchesCashier && matchesStatus && matchesDate;
     });
 
     return activeTab === "queued" ? sortFailedFirst(filtered) : filtered;
-  }, [invoices, heldOrders, activeTab, fromDate, toDate, customerFilter, paymentFilter, cashierFilter, isLoading, error, filterInvoiceByDate]);
+  }, [invoices, heldOrders, quotes, activeTab, fromDate, toDate, customerFilter, paymentFilter, cashierFilter, isLoading, error, filterInvoiceByDate]);
 
   const { sortedData: sortedInvoices, sortKey: invoiceSortKey, sortDirection: invoiceSortDirection, toggleSort: toggleInvoiceSort } = useTableSort(
     filteredInvoices,
@@ -629,8 +703,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
   // Get count for each status - filtered by cashier, date, and payment (but not status)
   // This ensures tab counts reflect the current filter selections
   const getStatusCount = (status: string) => {
-    // The Held tab counts held Sales Orders, not draft Sales Invoices.
-    const countSource = status === "Held" ? heldOrders : invoices;
+    const countSource = rowsForTab(status, { invoices, heldOrders, quotes });
 
     // First apply all filters except status
     const invoicesFilteredByOtherFilters = countSource.filter((invoice) => {
@@ -638,7 +711,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       const matchesCustomer = !customerFilter.trim()
         || invoice.customer?.toLowerCase().includes(customerFilter.toLowerCase())
         || invoice.walkinName?.toLowerCase().includes(customerFilter.toLowerCase());
-      const matchesCashier = cashierFilter === "all" || invoice.cashier === cashierFilter;
+      const matchesCashier = cashierFilter === "all" || !!(invoice as SalesInvoice & HeldOrderExtras).isQuote || invoice.cashier === cashierFilter;
       const matchesDate = filterInvoiceByDate(invoice.date);
       return matchesPayment && matchesCustomer && matchesCashier && matchesDate;
     });
@@ -764,8 +837,8 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
         {!canViewOtherCashiers && (
           <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Showing only your transactions</p>
         )}
-        {/* Held orders have no payment yet, and the filter never applies to them. */}
-        {activeTab !== "Held" && (
+        {/* Held orders and quotes have no payment yet, and the filter never applies to them. */}
+        {activeTab !== "Held" && activeTab !== "Quotes" && (
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
@@ -931,7 +1004,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                     <div className="flex space-x-2">
                       {/* A row the till will not open (rung by another cashier) gets no View or
                           Return, as on the Closing Shift page: the detail read behind both is refused. */}
-                      {(invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
+                      {(invoice as SalesInvoice & HeldOrderExtras).isQuote ? (
+                        renderQuoteButtons(invoice, "sm")
+                      ) : (invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
                         renderHeldOrderShareButtons(invoice.id || invoice.name, "sm")
                       ) : invoice.canOpen !== false ? (
                         <button
@@ -1058,7 +1133,9 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {(invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
+                {(invoice as SalesInvoice & HeldOrderExtras).isQuote ? (
+                  <div className="flex items-center gap-1">{renderQuoteButtons(invoice, "md")}</div>
+                ) : (invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
                   <div className="flex items-center gap-1">{renderHeldOrderShareButtons(invoice.id || invoice.name, "md")}</div>
                 ) : invoice.canOpen !== false ? (
                   <button
@@ -1128,6 +1205,17 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
             </div>
           ))}
         </div>
+      )}
+
+      {quoteToShare && (
+        <QuoteSavedDialog
+          title="Send quote"
+          quoteName={quoteToShare.name}
+          customerName={quoteToShare.customer}
+          phone=""
+          posDetails={posDetails as Record<string, unknown> | null}
+          onDone={() => setQuoteToShare(null)}
+        />
       )}
 
       {/* Load More Button */}

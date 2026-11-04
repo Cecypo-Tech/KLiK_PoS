@@ -46,7 +46,12 @@ doc_events = {
 	},
 	"Sales Invoice": {
 		"before_insert": "klik_pos.overrides.sales_invoice.set_sale_type",
-		"validate": "klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id",
+		"validate": [
+			"klik_pos.overrides.walkin_tax_id.sync_walkin_tax_id",
+			"klik_pos.overrides.quotation_link.validate_quote_link",
+		],
+		"on_submit": "klik_pos.overrides.quotation_link.on_submit_quote_link",
+		"on_cancel": "klik_pos.overrides.quotation_link.on_cancel_quote_link",
 		"before_validate": "klik_pos.overrides.loss_of_sale.before_validate",
 		# Cash sales' full-payment check is the opt-in Server Script
 		# "Sales Invoice - Cash Requires Payment" (patches/v16_0/cash_sale_payment_server_script).
@@ -175,12 +180,14 @@ before_install = "klik_pos.setup.install.before_install"
 after_install = [
 	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
+	"klik_pos.setup.quote_fields.ensure_quote_fields",
 	"klik_pos.patches.v16_0.add_item_listing_indexes.execute",
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
 ]
 after_migrate = [
 	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
+	"klik_pos.setup.quote_fields.ensure_quote_fields",
 	# Idempotent; the stamped column may arrive with frappe_mpsa_payments after klik.
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
 ]

@@ -15,6 +15,9 @@ interface OrderSummaryFooterProps {
   taxExclusive?: boolean;
   /** Formatted total net weight, e.g. "12.5 Kg"; empty hides the row. */
   netWeightLabel?: string;
+  /** Quoting: the main button saves a quote instead of checking out, and Quote hides. */
+  quoteMode?: boolean;
+  onQuote?: () => void;
 }
 
 export const OrderSummaryFooter = ({
@@ -29,6 +32,8 @@ export const OrderSummaryFooter = ({
   currency_symbol,
   taxExclusive = false,
   netWeightLabel = "",
+  quoteMode = false,
+  onQuote,
 }: OrderSummaryFooterProps) => {
   const discount = totalItemDiscount + couponDiscount;
 
@@ -73,15 +78,30 @@ export const OrderSummaryFooter = ({
         >
           Clear Cart
         </button>
+        {!quoteMode && onQuote && (
+          <button
+            id="pos-quote-btn"
+            onClick={onQuote}
+            className={`shrink-0 px-3 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm ${
+              isMobile ? "py-3" : "py-2"
+            }`}
+          >
+            Quote
+          </button>
+        )}
         <button
           id="pos-checkout-btn"
           onClick={onCheckout}
           disabled={isValidating}
-          className={`flex-1 min-w-0 bg-beveren-600 text-white rounded-xl font-semibold hover:bg-beveren-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+          className={`flex-1 min-w-0 ${
+            quoteMode ? "bg-amber-600 hover:bg-amber-700" : "bg-beveren-600 hover:bg-beveren-700"
+          } text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
             isMobile ? "py-3 text-base" : "py-2 text-sm"
           }`}
         >
-          {isValidating
+          {quoteMode
+            ? isValidating ? "Saving quote..." : `Save Quote ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`
+            : isValidating
             ? "Checking cart..."
             : `Checkout ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`}
         </button>

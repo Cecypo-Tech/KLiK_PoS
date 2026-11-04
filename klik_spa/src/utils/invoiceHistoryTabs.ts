@@ -2,7 +2,7 @@
  * Which Invoice History tab a row belongs to. The list and the tab counts both use this, so
  * they can't disagree again (the count once had no rule for Queued and always showed 0).
  */
-type TabRow = { status?: string; queueStatus?: string };
+type TabRow = { status?: string; queueStatus?: string; isQuote?: boolean };
 
 // Queued, Processing and Failed are one thing to the reader: a sale the server has not
 // finished with. The Queue Status column tells them apart.
@@ -13,9 +13,18 @@ const queueStatusOf = (row: TabRow) => (row.queueStatus || "").trim().toLowerCas
 export const isQueueFailed = (row: TabRow) => queueStatusOf(row) === "failed";
 
 export function matchesInvoiceTab(row: TabRow, tab: string): boolean {
+  if (tab === "Quotes") return Boolean(row.isQuote);
   if (tab === "all") return true;
   if (tab === "queued") return UNFINISHED.includes(queueStatusOf(row));
   return (row.status || "").trim() === tab.trim();
+}
+
+/** Held and Quotes come from their own lists (held Sales Orders, Quotations); every other tab
+ * from the invoices. */
+export function rowsForTab<T>(tab: string, sources: { invoices: T[]; heldOrders: T[]; quotes: T[] }): T[] {
+  if (tab === "Held") return sources.heldOrders;
+  if (tab === "Quotes") return sources.quotes;
+  return sources.invoices;
 }
 
 /** Failed Queue was merged into Queued; links to it (dashboard alerts) land there. */

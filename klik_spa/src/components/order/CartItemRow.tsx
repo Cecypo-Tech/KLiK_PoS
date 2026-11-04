@@ -125,6 +125,7 @@ export const CartItemRow = ({
 }: CartItemRowProps) => {
   const { updateItemBundleEntries, adjustQuantity } = useCartStore();
   const cartPriceList = useCartStore((s) => s.selectedPriceList);
+  const quoteMode = useCartStore((s) => s.quoteMode);
   const highlightItemId = useCartStore((s) => s.highlightItemId);
   const highlightNonce = useCartStore((s) => s.highlightNonce);
   const [glowing, setGlowing] = useState(false);
@@ -713,7 +714,7 @@ export const CartItemRow = ({
                     return;
                   }
                   const available = item.available;
-                  if (!(posDetails?.custom_enable_loss_of_sale && !item.has_serial_no && !item.has_batch_no) && available > 0 && typed > available && !item.allow_negative_stock) {
+                  if (!quoteMode && !(posDetails?.custom_enable_loss_of_sale && !item.has_serial_no && !item.has_batch_no) && available > 0 && typed > available && !item.allow_negative_stock) {
                     setLocalQty(available);
                     onUpdateQuantity(item.id, available);
                     toast.warning(`Only ${available} units available. Quantity set to ${available}.`);

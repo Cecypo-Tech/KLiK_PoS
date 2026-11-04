@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_CHECKOUT_EXTRAS, checkoutExtrasFromHeldOrder, heldItemToCartItem, heldOrderPayloadExtras, tillFlags,
+  EMPTY_CHECKOUT_EXTRAS, buildOrderPayload, checkoutExtrasFromHeldOrder, heldItemToCartItem, heldOrderPayloadExtras,
+  tillFlags,
 } from "./heldOrderPayload";
 
 const allOn = { deliveryCharge: true, shippingRule: true, discountChange: true };
@@ -133,5 +134,88 @@ describe("heldItemToCartItem", () => {
 
   it("an order from before the split opens with no Loss of Sale", () => {
     expect(heldItemToCartItem({ item_code: "F049", quantity: 100, price: 450 }).los_qty).toBe(0);
+  });
+});
+
+describe("buildOrderPayload", () => {
+  // The payload checkout's Hold sent before it was moved here; Save Quote sends the same.
+  it("builds Hold's payload for a sample cart", () => {
+    const customer = { id: "CUST-1", name: "Acme" };
+    const itemDiscounts = { A: { discountPercentage: 10, selectedPriceList: "Wholesale" } };
+    const payload = buildOrderPayload({
+      cartItems: [
+        { id: "A", item_code: "A", quantity: 2, price: 100, originalPrice: 100, discountedPriceExcl: 90 },
+        { id: "B", quantity: 1, price: 50, discount_amount: 5 },
+      ],
+      itemDiscounts,
+      effectiveRate: () => 45,
+      customer,
+      totals: { subtotal: 225, grandTotal: 261, taxAmount: 36, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: "SP-1",
+      sellingPriceList: "Standard Selling",
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+
+    expect(payload).toEqual({
+      items: [
+        {
+          id: "A", item_code: "A", quantity: 2, price: 90, originalPrice: 100, discountedPriceExcl: 90,
+          discountPercentage: 10, discountAmount: 0, selectedPriceList: "Wholesale",
+        },
+        {
+          id: "B", item_code: "B", quantity: 1, price: 45, discount_amount: 5,
+          discountPercentage: 0, discountAmount: 5, selectedPriceList: "",
+        },
+      ],
+      customer: { id: "CUST-1" },
+      customerData: customer,
+      subtotal: 225,
+      total: 261,
+      taxAmount: 36,
+      taxType: "exclusive",
+      couponDiscount: 0,
+      grandTotal: 261,
+      appliedCoupons: [],
+      itemDiscounts,
+      totalItemDiscount: 20,
+      totalSavings: 20,
+      status: "held",
+      businessType: "B2C",
+      salesperson: "SP-1",
+      selling_price_list: "Standard Selling",
+      tax_id: null,
+      walkin_name: null,
+      walkin_phone: null,
+      extra_fields: {},
+      shipping_rule: null,
+      deliveryCharge: 0,
+      deliveryPersonnel: null,
+      orderDiscountAmount: 0,
+      SalesTaxCharges: "",
+      remarks: "",
+      loyalty: null,
+    });
+  });
+
+  it("sends a redeemed loyalty program and points only", () => {
+    const loyalty = { loyalty_program: "LP", loyalty_points: 10, amount: 100 };
+    const payload = buildOrderPayload({
+      cartItems: [],
+      itemDiscounts: {},
+      effectiveRate: () => 0,
+      customer: { id: "C" },
+      totals: { subtotal: 0, grandTotal: 0, taxAmount: 0, isInclusive: true, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: undefined,
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty,
+    });
+    expect(payload.loyalty).toEqual({ loyalty_program: "LP", loyalty_points: 10 });
+    expect(payload.taxType).toBe("inclusive");
   });
 });

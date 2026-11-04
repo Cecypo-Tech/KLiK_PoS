@@ -1,4 +1,5 @@
 import type { MenuItem } from "../../types";
+import { useCartStore } from "../stores/cartStore";
 
 /**
  * Single source of truth for the POS "out of stock" gate.
@@ -13,6 +14,10 @@ export const isItemOutOfStock = (
   stockUnavailable = false,
   losEnabled = false,
 ): boolean => {
+  // Quote mode: a quote promises nothing from stock, so nothing is out of stock. Components
+  // that call this during render subscribe to quoteMode so they redraw when it flips.
+  if (useCartStore.getState().quoteMode) return false;
+
   // Loss of Sale: the cart sells what is there and records the shortfall (mirrors
   // losEnabledFor in cartStore), so an empty shelf does not block the add.
   if (losEnabled && !item.has_serial_no && !item.has_batch_no && !item.is_product_bundle) {

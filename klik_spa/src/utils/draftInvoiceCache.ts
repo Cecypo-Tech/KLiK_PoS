@@ -10,6 +10,7 @@ interface DraftInvoiceCache {
   customer: Customer | null;
   originalDraftInvoiceId: string; // draft SI (M-Pesa / legacy held)
   originalHeldOrderId?: string;   // SO-based held order
+  originalQuotationId?: string;   // the quote this sale was loaded from
   originalHeldOrderApprovalState?: string | null; // price approval workflow_state as loaded
   originalHeldOrderPriceBreach?: number;          // price breach flag as loaded
   originalHeldOrderIsMpesa?: boolean;             // an M-Pesa order kept for its push
@@ -65,6 +66,25 @@ export function cacheHeldOrder(
     originalHeldOrderPriceBreach: approval?.priceBreach ?? 0,
     originalHeldOrderIsMpesa: Boolean(mpesa?.isMpesaOrder),
     originalHeldOrderMpesaRequest: mpesa?.request ?? null,
+    orderDiscountAmount,
+  };
+  localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+}
+
+/** A quote loaded for sale: no held order or draft behind it, just the link checkout sends. */
+export function cacheQuote(
+  quoteId: string,
+  items: CartItem[],
+  customer: Customer | null,
+  orderDiscountAmount = 0,
+): void {
+  const cache: DraftInvoiceCache = {
+    items,
+    timestamp: Date.now(),
+    invoiceId: quoteId,
+    customer,
+    originalDraftInvoiceId: '',
+    originalQuotationId: quoteId,
     orderDiscountAmount,
   };
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
@@ -206,6 +226,10 @@ export function getOriginalDraftInvoiceId(): string | null {
 
 export function getOriginalHeldOrderId(): string | null {
   return readCacheIgnoringAge()?.originalHeldOrderId || null;
+}
+
+export function getOriginalQuotationId(): string | null {
+  return readCacheIgnoringAge()?.originalQuotationId || null;
 }
 
 /** The held order's approval state / price breach as loaded into the cart, for the checkout gate. */

@@ -48,6 +48,8 @@ const roundToCurrencyPrecision = (value: number): number => {
 };
 
 const hasFiniteAvailableStock = (item: { available?: number; is_stock_item?: boolean; allow_negative_stock?: boolean }) => {
+  // A quote promises nothing from stock, so no line is limited by it.
+  if (useCartStore.getState().quoteMode) return false;
   if (item.is_stock_item === false || item.allow_negative_stock) {
     return false;
   }
@@ -134,6 +136,10 @@ interface CartState {
   highlightItemId: string | null
   highlightNonce: number
   selectedPriceList: string | null
+  /** Quote mode: the cart builds a quotation, so stock never limits a line. Persisted. */
+  quoteMode: boolean
+  enterQuoteMode: () => void
+  exitQuoteMode: () => void
   isPricingLoading: boolean
   pricingError: string | null
 
@@ -225,6 +231,9 @@ export const useCartStore = create<CartState>()(
       highlightItemId: null,
       highlightNonce: 0,
       selectedPriceList: null,
+      quoteMode: false,
+      enterQuoteMode: () => set({ quoteMode: true }),
+      exitQuoteMode: () => set({ quoteMode: false }),
       isPricingLoading: false,
       pricingError: null,
       shippingRule: null,

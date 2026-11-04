@@ -5,6 +5,7 @@ import type { MenuItem } from "../../types"
 import ProductTooltip from "./ProductTooltip"
 import { getDisplayCost, getInclusiveTaxRate } from "../utils/costMargin"
 import { formatCurrencyWithSymbol } from "../utils/currency"
+import { useCartStore } from "../stores/cartStore"
 import { isItemOutOfStock } from "../utils/stock"
 import { formatAvailability } from "../utils/availability"
 import { getItemDisplayName } from "../utils/itemDisplayName"
@@ -55,6 +56,7 @@ function ProductLineRow({
   const [showZoom, setShowZoom] = useState(false)
 
   const isServiceItem = item.is_stock_item === false
+  useCartStore((s) => s.quoteMode) // redraw when quote mode flips
   const isOutOfStock = isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled)
   const isDisabled = isOutOfStock || scannerOnly
   const expectedPrice = Number(item.price_with_vat ?? item.price)

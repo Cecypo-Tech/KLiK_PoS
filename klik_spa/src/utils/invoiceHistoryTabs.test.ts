@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, sortFailedFirst } from "./invoiceHistoryTabs";
+import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst } from "./invoiceHistoryTabs";
 
 const row = (status: string, queueStatus?: string) => ({ status, queueStatus });
 
@@ -27,5 +27,16 @@ describe("Invoice History tabs", () => {
     const rows = [row("Draft", "Queued"), row("Draft", "Failed"), row("Draft", "Processing"), row("Draft", "failed")];
     expect(sortFailedFirst(rows).map((r) => r.queueStatus)).toEqual(["Failed", "failed", "Queued", "Processing"]);
     expect(countFailed(rows)).toBe(2);
+  });
+
+  it("Quotes holds quote rows only, and only quote rows reach it", () => {
+    const quote = { status: "Expired", isQuote: true };
+    expect(matchesInvoiceTab(quote, "Quotes")).toBe(true);
+    expect(matchesInvoiceTab(row("Paid"), "Quotes")).toBe(false);
+    const sources: Record<"invoices" | "heldOrders" | "quotes", { status: string; isQuote?: boolean }[]> =
+      { invoices: [row("Paid")], heldOrders: [row("Held")], quotes: [quote] };
+    expect(rowsForTab("Quotes", sources)).toEqual([quote]);
+    expect(rowsForTab("Held", sources)).toEqual(sources.heldOrders);
+    expect(rowsForTab("all", sources)).toEqual(sources.invoices);
   });
 });
