@@ -11,7 +11,8 @@ describe("matchesPaymentFilter", () => {
     expect(matchesPaymentFilter({ paymentMethod: "M-Pesa" }, "Cash")).toBe(false);
   });
 
-  it("never hides a held order, which has no payment yet", () => {
+  it("never hides a held order or a quote, which have no payment yet", () => {
     expect(matchesPaymentFilter({ paymentMethod: "-", isHeldOrder: true }, "Cash")).toBe(true);
+    expect(matchesPaymentFilter({ paymentMethod: "-", isQuote: true }, "Cash")).toBe(true);
   });
 });

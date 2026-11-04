@@ -5,6 +5,8 @@ import { handlePrintInvoice } from "../../utils/printHandler";
 import { sendWhatsAppMessage } from "../../services/useSharing";
 
 interface QuoteSavedDialogProps {
+  /** "Quote saved" after saving; Invoice History reuses it to send a quote from the list. */
+  title?: string;
   quoteName: string;
   customerName: string;
   /** Prefills the WhatsApp number: the walk-in's or the customer's phone. */
@@ -15,7 +17,7 @@ interface QuoteSavedDialogProps {
 
 // ponytail: plain number + send, not the checkout's SharingInterface (needs ~30 checkout-only
 // props); the server writes the message. Reuse SharingInterface if templates are wanted here.
-export default function QuoteSavedDialog({ quoteName, customerName, phone, posDetails, onDone }: QuoteSavedDialogProps) {
+export default function QuoteSavedDialog({ title = "Quote saved", quoteName, customerName, phone, posDetails, onDone }: QuoteSavedDialogProps) {
   const [mobile, setMobile] = useState(phone);
   const [sending, setSending] = useState(false);
 
@@ -49,7 +51,7 @@ export default function QuoteSavedDialog({ quoteName, customerName, phone, posDe
       >
         <div>
           <h2 id="quote-saved-title" className="text-xl font-semibold text-gray-900 dark:text-white">
-            Quote saved
+            {title}
           </h2>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
             {quoteName}{customerName ? ` for ${customerName}` : ""}

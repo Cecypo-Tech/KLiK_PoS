@@ -17,7 +17,25 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
   if (!orderData?.success) {
     throw new Error(orderData?.message || 'Failed to load held order');
   }
+  return fillCartFromOrder(orderData, (items, customer) => cacheHeldOrder(
+    orderId,
+    items,
+    customer,
+    Number(orderData.discount_amount) || 0,
+    {
+      state: orderData.approval_state ?? null,
+      priceBreach: Number(orderData.price_breach) || 0,
+    },
+    { isMpesaOrder: Boolean(orderData.mpesa_order), request: orderData.mpesa_request ?? null },
+  ));
+}
 
+/**
+ * Fill the cart from a held order's or a quote's details (get_held_order_details shape).
+ * `cache` records which document the cart now stands for.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fillCartFromOrder(orderData: any, cache: (items: CartItem[], customer: CacheCustomer | null) => void): Promise<boolean> {
   const items = orderData.items.map(heldItemToCartItem);
   // The server split each line's full ask against the stock at this till now.
   for (const item of items) {
@@ -52,17 +70,7 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
     }
   }
 
-  cacheHeldOrder(
-    orderId,
-    items,
-    customer,
-    Number(orderData.discount_amount) || 0,
-    {
-      state: orderData.approval_state ?? null,
-      priceBreach: Number(orderData.price_breach) || 0,
-    },
-    { isMpesaOrder: Boolean(orderData.mpesa_order), request: orderData.mpesa_request ?? null },
-  );
+  cache(items, customer);
 
   // Restore per-transaction walk-in details (name/tax_id/phone) into the cart store.
   // Also recovers tax_id, which was previously dropped from the UI on resume.

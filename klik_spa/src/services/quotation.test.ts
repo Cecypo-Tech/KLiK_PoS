@@ -74,4 +74,15 @@ describe("quote lookups", () => {
       { credentials: "include" },
     );
   });
+
+  it("a refused lookup is a failure with the server's reason, not undefined", async () => {
+    const msg = JSON.stringify({ message: "No permission for Quotation" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ _server_messages: JSON.stringify([msg]) }) }),
+    );
+
+    expect(await getQuoteDetails("SAL-QTN-0001")).toEqual({ success: false, message: "No permission for Quotation" });
+    expect(await getQuotes()).toEqual({ success: false, message: "No permission for Quotation" });
+  });
 });

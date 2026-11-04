@@ -47,19 +47,31 @@ export async function getQuotes(params: { limit?: number; start?: number; search
     start: String(params.start ?? 0),
     search: params.search ?? "",
   }).toString();
-  const response = await fetch(`/api/method/klik_pos.api.quotation.get_quotes?${qs}`, { credentials: "include" });
-  const result = await response.json();
-  return result.message as { success: boolean; data?: QuoteListRow[]; message?: string };
+  return getMessage(`/api/method/klik_pos.api.quotation.get_quotes?${qs}`, "Failed to load quotes") as Promise<{
+    success: boolean;
+    data?: QuoteListRow[];
+    message?: string;
+  }>;
+}
+
+/** A GET's `message`, or {success: false, message} for a refusal or an unreachable server. Never throws. */
+async function getMessage(url: string, fallback: string) {
+  try {
+    const response = await fetch(url, { credentials: "include" });
+    const result = await response.json().catch(() => null);
+    if (response.ok && result?.message) return result.message;
+    return { success: false, message: result?.message?.message || serverMessage(result) || fallback };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : fallback };
+  }
 }
 
 /** Same shape as getHeldOrderDetails, plus whether the quote is past its valid-till date. */
 export async function getQuoteDetails(quoteId: string) {
-  const response = await fetch(
+  return getMessage(
     `/api/method/klik_pos.api.quotation.get_quote_details?quote_id=${encodeURIComponent(quoteId)}`,
-    { credentials: "include" },
-  );
-  const result = await response.json();
-  return result.message as {
+    "Failed to load the quote",
+  ) as Promise<{
     success: boolean;
     name: string;
     customer: string;
@@ -73,5 +85,5 @@ export async function getQuoteDetails(quoteId: string) {
     currency: string;
     expired: boolean;
     message?: string;
-  };
+  }>;
 }

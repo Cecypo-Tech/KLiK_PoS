@@ -24,7 +24,7 @@ import {
 } from "../../services/salesInvoice";
 import { checkoutHeldOrder, createHeldOrder, HeldOrderGoneError } from "../../services/salesOrder";
 import { buildOrderPayload, tillFlags } from "../../utils/heldOrderPayload";
-import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalHeldOrderMpesa, getOriginalOrderDiscountAmount } from "../../utils/draftInvoiceCache";
+import { clearDraftInvoiceCache, forgetOriginalDraftInvoice, forgetOriginalHeldOrder, getOriginalDraftInvoiceId, getOriginalHeldOrderApproval, getOriginalHeldOrderId, getOriginalHeldOrderMpesa, getOriginalOrderDiscountAmount, getOriginalQuotationId } from "../../utils/draftInvoiceCache";
 import { priceApprovalMessage } from "../../utils/priceApproval";
 import { checkoutPriceList, floorBlockMessage, authorisationStillValid, type FloorAuthorisation } from "../../utils/priceFloor";
 import PriceFloorPanel from "./PriceFloorPanel";
@@ -1096,6 +1096,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       walkin_phone: walkinDetails.phone || null,
       extra_fields: extraFields,
       selling_price_list: cartPriceList,
+      // A loaded quote: every checkout path builds from this, and the server links the invoice.
+      quotation_id: getOriginalQuotationId() || undefined,
       price_authorisation:
         floorAuth && authorisationStillValid(floorAuth, backendTaxPreview?.price_floor?.rows ?? [])
           ? floorAuth.token
