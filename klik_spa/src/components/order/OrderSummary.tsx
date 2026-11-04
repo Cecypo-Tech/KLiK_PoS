@@ -521,6 +521,8 @@ export default function OrderSummary({
       setItemDiscounts({});
       exitQuoteMode();
       setSavedQuote({ name: result.quote_name, customerName, phone });
+    } catch (e) {
+      toast.error(extractErrorFromException(e, "Failed to save the quote"));
     } finally {
       setIsSavingQuote(false);
     }
@@ -694,6 +696,15 @@ export default function OrderSummary({
               <p className="text-gray-500 dark:text-gray-400">
                 Add some items to get started!
               </p>
+              {!quoteMode && (
+                <button
+                  id="pos-quote-btn"
+                  onClick={enterQuoteMode}
+                  className="mt-4 px-3 py-2 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm"
+                >
+                  Quote
+                </button>
+              )}
             </div>
           ) : (
             cartItems.map((item) => {

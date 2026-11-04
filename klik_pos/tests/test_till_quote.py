@@ -202,6 +202,28 @@ class TestQuoteLink(FrappeTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._invoice(q)
 
+	def test_two_drafts_cannot_share_a_quote_but_first_still_saves_and_submits(self):
+		q = self._quote()
+		first = self._invoice(q)
+		with self.assertRaises(frappe.ValidationError):
+			self._invoice(q)
+		first.save()
+		first.submit()
+		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Ordered")
+
+	def test_cancel_does_not_resurrect_a_lost_quote(self):
+		q = self._quote()
+		si = self._invoice(q, submit=True)
+		frappe.db.set_value("Quotation", q, "status", "Lost")
+		si.cancel()
+		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Lost")
+
+	def test_ordered_quote_without_invoice_is_not_listed_or_loaded(self):
+		q = self._quote()
+		frappe.db.set_value("Quotation", q, "status", "Ordered")
+		self.assertNotIn(q, [r["name"] for r in quotation.get_quotes(limit=500)["data"]])
+		self.assertFalse(quotation.get_quote_details(q)["success"])
+
 	def test_submit_marks_ordered_cancel_reopens(self):
 		q = self._quote()
 		si = self._invoice(q, submit=True)

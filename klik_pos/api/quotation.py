@@ -200,7 +200,7 @@ def get_quotes(limit=50, start=0, search=""):
                 q.custom_walkin_customer_name.as_("walkin_name"), q.transaction_date, q.valid_till,
                 q.grand_total, q.currency,
             )
-            .where((q.docstatus == 1) & q.status.notin(["Lost", "Cancelled"]) & (q.company == company))
+            .where((q.docstatus == 1) & q.status.notin(["Lost", "Cancelled", "Ordered", "Partially Ordered"]) & (q.company == company))
             .where(ExistsCriterion(invoiced).negate())
             .orderby(q.transaction_date, order=Order.desc)
             .orderby(q.creation, order=Order.desc)
@@ -227,7 +227,7 @@ def get_quote_details(quote_id):
     sales_order.get_held_order_details. An expired quote loads at today's list prices."""
     try:
         q = frappe.get_doc("Quotation", quote_id)
-        if q.docstatus != 1 or q.status in ("Lost", "Cancelled") or q.company != _get_active_pos_profile().company:
+        if q.docstatus != 1 or q.status in ("Lost", "Cancelled", "Ordered", "Partially Ordered") or q.company != _get_active_pos_profile().company:
             return {"success": False, "message": frappe._("Quote {0} is not available.").format(quote_id)}
         invoice = _quote_in_use(quote_id)
         if invoice:
