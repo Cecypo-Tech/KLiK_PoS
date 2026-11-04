@@ -175,12 +175,14 @@ before_install = "klik_pos.setup.install.before_install"
 after_install = [
 	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
+	"klik_pos.setup.quote_fields.ensure_quote_fields",
 	"klik_pos.patches.v16_0.add_item_listing_indexes.execute",
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
 ]
 after_migrate = [
 	"klik_pos.utils.ensure_pos_only_role",
 	"klik_pos.setup.pos_profile_fields.ensure_pos_profile_feature_fields",
+	"klik_pos.setup.quote_fields.ensure_quote_fields",
 	# Idempotent; the stamped column may arrive with frappe_mpsa_payments after klik.
 	"klik_pos.patches.v16_0.add_receipt_number_indexes.execute",
 ]
