@@ -1,7 +1,7 @@
 import json
 
 import frappe
-from frappe.utils import flt, nowdate
+from frappe.utils import add_days, add_months, cint, flt, nowdate
 
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
@@ -54,6 +54,9 @@ def _build_quotation_doc(customer, items, sales_and_tax_charges, cart_meta, orde
     q.customer = customer
     q.order_type = "Sales"
     q.transaction_date = nowdate()
+    # ERPNext only defaults valid_till in quotation.js on the desk form; mirror it here.
+    days = cint(frappe.db.get_single_value("CRM Settings", "default_valid_till"))
+    q.valid_till = add_days(q.transaction_date, days) if days else add_months(q.transaction_date, 1)
     q.company = pos_profile.company
     q.currency = pos_profile.currency
     q.selling_price_list = resolve_selling_price_list(cart_meta.get("selling_price_list"), None, pos_profile)

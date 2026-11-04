@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import frappe
+from frappe.utils import add_days, add_months, cint, nowdate
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import quotation
@@ -37,11 +38,15 @@ class TestCreateQuote(FrappeTestCase):
 		self.assertEqual(q.grand_total, 1500)
 		self.assertTrue(q.custom_klik_cart_meta)
 		self.assertTrue(q.custom_pos_profile)
+		days = cint(frappe.db.get_single_value("CRM Settings", "default_valid_till"))
+		expected = add_days(nowdate(), days) if days else add_months(nowdate(), 1)
+		self.assertEqual(str(q.valid_till), str(expected))
 
 	def test_los_qty_in_payload_is_folded_back(self):
 		res = quotation.create_quote(_payload(ITEM, qty=10, los_qty=5, rate=100))
 		self.assertTrue(res["success"], res)
 		self.assertEqual(frappe.db.get_value("Quotation Item", {"parent": res["quote_name"]}, "qty"), 15)
+		self.assertEqual(frappe.db.get_value("Quotation", res["quote_name"], "grand_total"), 1500)
 
 	def test_breach_is_refused_and_nothing_is_saved(self):
 		before = frappe.db.count("Quotation")
