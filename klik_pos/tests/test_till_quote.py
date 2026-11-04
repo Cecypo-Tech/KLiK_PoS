@@ -7,6 +7,7 @@ from frappe.utils import add_days, add_months, cint, nowdate
 from frappe.tests.utils import FrappeTestCase
 
 from klik_pos.api import quotation
+from klik_pos.overrides import loss_of_sale
 from klik_pos.setup.quote_fields import ensure_quote_fields
 from klik_pos.tests.test_held_order_visibility import CUSTOMER, ITEM
 from klik_pos.tests.pos_fixtures import open_own_shift
@@ -96,6 +97,20 @@ class TestListAndLoadQuotes(FrappeTestCase):
 		res = quotation.get_quote_details(name)
 		self.assertFalse(res["success"])
 		self.assertIn("already been invoiced", res["message"])
+
+	def test_loading_splits_against_the_till_stock(self):
+		"""Loaded for sale, a quote meets the stock rules again: 15 asked, 10 in stock at a Loss
+		of Sale till opens as 10 + 5 LoS, as a reopened held order does."""
+		name = self._quote(qty=15, rate=100)
+		till = frappe._dict({"name": "_Test Till", "warehouse": "Stores - DC", "custom_enable_loss_of_sale": 1})
+		with (
+			patch.object(quotation, "_active_till", return_value=till),
+			patch.object(loss_of_sale, "_eligible_item_codes", side_effect=lambda codes: set(codes)),
+			patch.object(loss_of_sale, "_available", return_value={(ITEM, "Stores - DC"): 10}),
+		):
+			res = quotation.get_quote_details(name)
+		self.assertTrue(res["success"], res)
+		self.assertEqual((res["items"][0]["quantity"], res["items"][0]["los_qty"]), (10, 5))
 
 	def test_details_keep_quoted_price_until_valid_till(self):
 		name = self._quote(qty=3, rate=100)

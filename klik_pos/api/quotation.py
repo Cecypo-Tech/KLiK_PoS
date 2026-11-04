@@ -15,7 +15,8 @@ from klik_pos.api.sales_invoice import (
     resolve_selling_price_list,
     set_line_price_list,
 )
-from klik_pos.api.sales_order import _apply_order_discount, _build_cart_meta
+from klik_pos.api.sales_order import _active_till, _apply_order_discount, _build_cart_meta
+from klik_pos.overrides.loss_of_sale import split_held_items
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -245,15 +246,28 @@ def get_quote_details(quote_id):
             r.name: r.item_name
             for r in frappe.get_all("Item", filters={"name": ["in", [r.item_code for r in q.items]]}, fields=["name", "item_name"])
         }
+        # Loaded for sale: split against the stock at this till now, as a reopened held order is.
+        lines = [
+            {
+                "id": row.item_code,
+                "quantity": flt(row.qty),
+                "los_qty": 0,
+                "uom": row.uom,
+                "bundle_entries": (item_discounts.get(row.item_code) or {}).get("bundle_entries") or [],
+            }
+            for row in q.items
+        ]
+        split_held_items(lines, _active_till())
+
         items = []
-        for row in q.items:
+        for row, line in zip(q.items, lines):
             d = item_discounts.get(row.item_code) or {}
             fresh = expired
             items.append({
                 "item_code": row.item_code,
                 "item_name": names.get(row.item_code) or row.item_code,
-                "quantity": flt(row.qty),
-                "los_qty": 0,
+                "quantity": line["quantity"],
+                "los_qty": line["los_qty"],
                 "price": _current_list_rate(row.item_code, row.uom, q.selling_price_list) if fresh else flt(row.rate),
                 "uom": row.uom or "",
                 "discountAmount": 0 if fresh else flt(d.get("discountAmount") or 0),

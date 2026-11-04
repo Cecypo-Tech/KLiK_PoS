@@ -293,6 +293,8 @@ export default function InvoiceHistoryPage() {
     let live = true;
     void getQuotes({ search: searchTerm, limit: 200 }).then((res) => {
       if (!live) return;
+      // Refused (no Quotation read, say): say so, rather than show an empty tab.
+      if (!res.success && activeTab === "Quotes") toast.error(res.message || "Failed to load quotes");
       setQuotes(res.success ? (res.data || []).map((q) => ({
         id: q.name,
         name: q.name,
@@ -317,7 +319,12 @@ export default function InvoiceHistoryPage() {
   }, [searchTerm, activeTab]);
 
   const handleLoadQuote = async (quoteId: string) => {
-    if (await addQuoteToCart(quoteId)) navigate("/pos");
+    try {
+      if (await addQuoteToCart(quoteId)) navigate("/pos");
+    } catch (error) {
+      console.error("Error loading quote:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to load the quote");
+    }
   };
 
   const renderQuoteButtons = (invoice: SalesInvoice, size: "sm" | "md") => {

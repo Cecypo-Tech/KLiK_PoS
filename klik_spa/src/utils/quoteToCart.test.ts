@@ -79,6 +79,17 @@ describe("addQuoteToCart", () => {
     expect(cart.state.refreshCartPricing).not.toHaveBeenCalled();
   });
 
+  it("a line split against the till's stock warns of the Loss of Sale", async () => {
+    getQuoteDetails.mockResolvedValue(details({
+      items: [{ item_code: "NAIL", item_name: "Nails", quantity: 10, los_qty: 5, price: 120, uom: "Kg" }],
+    }));
+
+    await addQuoteToCart("SAL-QTN-0001");
+
+    expect(toast.warning).toHaveBeenCalledWith("Only 10 Kg of Nails in stock: 5 recorded as Loss of Sale");
+    expect(cart.state.cartItems).toEqual([expect.objectContaining({ quantity: 10, los_qty: 5 })]);
+  });
+
   it("expired quote re-prices and toasts", async () => {
     getQuoteDetails.mockResolvedValue(details({ expired: true }));
 
