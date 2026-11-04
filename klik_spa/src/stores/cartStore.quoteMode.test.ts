@@ -5,8 +5,8 @@ import { persistedCartState } from "../utils/cartPersist";
 
 vi.mock("react-toastify", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
 
-const item = { id: "PEN", item_code: "PEN", name: "Pen", price: 10, available: 10, is_stock_item: true, uom: "Nos" } as never;
-const line = () => useCartStore.getState().cartItems[0];
+const item = { id: "PEN", item_code: "PEN", name: "Pen", price: 10, available: 10, is_stock_item: true, uom: "Nos" } as never as Record<string, unknown>;
+const line = () => useCartStore.getState().cartItems[0]!;
 
 describe("quote mode lifts the stock limit", () => {
   beforeEach(() => {
@@ -17,7 +17,7 @@ describe("quote mode lifts the stock limit", () => {
 
   it("adds 15 of a 10-in-stock item", async () => {
     useCartStore.getState().enterQuoteMode();
-    await useCartStore.getState().addToCartWithQuantity(item, 15);
+    await useCartStore.getState().addToCartWithQuantity(item as never, 15);
     expect(line().quantity).toBe(15);
     expect(line().los_qty ?? 0).toBe(0);
   });
@@ -25,20 +25,20 @@ describe("quote mode lifts the stock limit", () => {
   it("does not split into loss of sale when LoS is on", async () => {
     usePOSProfileStore.setState({ posDetails: { custom_enable_loss_of_sale: 1 } as never });
     useCartStore.getState().enterQuoteMode();
-    await useCartStore.getState().addToCartWithQuantity(item, 15);
+    await useCartStore.getState().addToCartWithQuantity(item as never, 15);
     expect(line().quantity).toBe(15);
     expect(line().los_qty ?? 0).toBe(0);
   });
 
   it("sale mode still clamps", async () => {
-    await useCartStore.getState().addToCartWithQuantity(item, 15);
+    await useCartStore.getState().addToCartWithQuantity(item as never, 15);
     expect((line()?.quantity ?? 0) + (line()?.los_qty ?? 0)).toBeLessThanOrEqual(10);
     expect(line()?.quantity ?? 0).toBeLessThanOrEqual(10);
   });
 
   it("after exitQuoteMode the line follows normal stock rules again", async () => {
     useCartStore.getState().enterQuoteMode();
-    await useCartStore.getState().addToCartWithQuantity(item, 15);
+    await useCartStore.getState().addToCartWithQuantity(item as never, 15);
     useCartStore.getState().exitQuoteMode();
     await useCartStore.getState().adjustQuantity("PEN", 1);
     const afterExit = { q: line()?.quantity, los: line()?.los_qty ?? 0 };
