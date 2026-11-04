@@ -1,7 +1,7 @@
 import json
 
 import frappe
-from frappe.utils import add_days, add_months, cint, flt, nowdate
+from frappe.utils import add_days, add_months, cint, flt, getdate, nowdate
 
 from klik_pos.api.sales_invoice import (
     _apply_extra_fields,
@@ -87,6 +87,41 @@ def _build_quotation_doc(customer, items, sales_and_tax_charges, cart_meta, orde
     return q
 
 
+def _quote_in_use(quote_name):
+    """Name of the non-cancelled Sales Invoice made from this quote, else None."""
+    return frappe.db.get_value(
+        "Sales Invoice",
+        {"custom_klik_quotation": quote_name, "docstatus": ["in", [0, 1]]},
+        "name",
+    )
+
+
+def _is_expired(valid_till):
+    return bool(valid_till) and getdate(nowdate()) > getdate(valid_till)
+
+
+def _current_list_rate(item_code, uom, price_list):
+    """The price list's rate today for this item and uom; the stock-uom rate scaled by the
+    uom's conversion if it has none of its own; else 0."""
+    def rate(u):
+        return frappe.get_all(
+            "Item Price",
+            filters={"item_code": item_code, "price_list": price_list, "uom": u, "customer": ["is", "not set"]},
+            fields=["price_list_rate"],
+            order_by="valid_from desc",
+            limit=1,
+            pluck="price_list_rate",
+        )
+
+    found = rate(uom)
+    if found:
+        return flt(found[0])
+    stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+    factor = frappe.db.get_value("UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor")
+    base = rate(stock_uom) if stock_uom else None
+    return flt(base[0]) * flt(factor or 1) if base else 0.0
+
+
 # ---------------------------------------------------------------------------
 # Whitelisted API endpoints
 # ---------------------------------------------------------------------------
@@ -143,4 +178,107 @@ def create_quote(data):
         # naming counter taken by insert() is not committed for a quote that does not exist.
         frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), "Create Quote Error")
+        return {"success": False, "message": str(e)}
+
+
+@frappe.whitelist()
+def get_quotes(limit=50, start=0, search=""):
+    """Open quotes of the active till's company, newest first, for any till of that company."""
+    try:
+        company = _get_active_pos_profile().company
+        fields = [
+            "name", "party_name as customer", "customer_name", "custom_walkin_customer_name as walkin_name",
+            "transaction_date", "valid_till", "grand_total", "currency",
+        ]
+        filters = {"docstatus": 1, "status": ["not in", ["Lost", "Cancelled"]], "company": company}
+        or_filters = None
+        if search:
+            like = f"%{search}%"
+            or_filters = {"name": ["like", like], "customer_name": ["like", like],
+                          "custom_walkin_customer_name": ["like", like]}
+        rows = frappe.get_all(
+            "Quotation", filters=filters, or_filters=or_filters, fields=fields,
+            order_by="transaction_date desc, creation desc", limit_start=cint(start), limit=cint(limit),
+        )
+        # ponytail: invoiced quotes are dropped after the page is cut, so a page may run short.
+        data = []
+        for r in rows:
+            if _quote_in_use(r.name):
+                continue
+            r["expired"] = _is_expired(r.valid_till)
+            data.append(r)
+        return {"success": True, "data": data}
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Get Quotes Error")
+        return {"success": False, "message": str(e)}
+
+
+@frappe.whitelist()
+def get_quote_details(quote_id):
+    """Items, customer and cart metadata to load a quote into the cart; same shape as
+    sales_order.get_held_order_details. An expired quote loads at today's list prices."""
+    try:
+        q = frappe.get_doc("Quotation", quote_id)
+        if q.docstatus != 1 or q.status in ("Lost", "Cancelled") or q.company != _get_active_pos_profile().company:
+            frappe.throw(frappe._("Quote {0} is not available.").format(quote_id))
+        invoice = _quote_in_use(quote_id)
+        if invoice:
+            return {"success": False, "message": frappe._("Quote {0} has already been invoiced ({1}).").format(quote_id, invoice)}
+
+        cart_meta = {}
+        if q.custom_klik_cart_meta:
+            try:
+                cart_meta = json.loads(q.custom_klik_cart_meta)
+            except Exception:
+                pass
+        item_discounts = cart_meta.get("itemDiscounts", {})
+        expired = _is_expired(q.valid_till)
+
+        names = {
+            r.name: r.item_name
+            for r in frappe.get_all("Item", filters={"name": ["in", [r.item_code for r in q.items]]}, fields=["name", "item_name"])
+        }
+        items = []
+        for row in q.items:
+            d = item_discounts.get(row.item_code) or {}
+            fresh = expired
+            items.append({
+                "item_code": row.item_code,
+                "item_name": names.get(row.item_code) or row.item_code,
+                "quantity": flt(row.qty),
+                "los_qty": 0,
+                "price": _current_list_rate(row.item_code, row.uom, q.selling_price_list) if fresh else flt(row.rate),
+                "uom": row.uom or "",
+                "discountAmount": 0 if fresh else flt(d.get("discountAmount") or 0),
+                "discountPercentage": 0 if fresh else flt(d.get("discountPercentage") or 0),
+                "customRate": None if fresh else d.get("customRate"),
+                "customRateIncludesTax": False if fresh else bool(d.get("customRateIncludesTax")),
+                "bundle_entries": d.get("bundle_entries") or [],
+                "item_tax_template": d.get("item_tax_template") or "",
+                "item_tax_rate": d.get("item_tax_rate") or {},
+                "description": d.get("description") or "",
+                "selectedPriceList": d.get("selectedPriceList") or "",
+            })
+
+        return {
+            "success": True,
+            "name": q.name,
+            "customer": q.party_name,
+            "customer_data": cart_meta.get("customer"),
+            "walkin_name": cart_meta.get("walkin_name"),
+            "walkin_phone": cart_meta.get("walkin_phone"),
+            "extra_fields": cart_meta.get("extra_fields") or {},
+            "shipping_rule": cart_meta.get("shipping_rule"),
+            "selling_price_list": q.selling_price_list,
+            "items": items,
+            "cart_meta": cart_meta,
+            "remarks": q.get("remarks") or "",
+            "grand_total": flt(q.grand_total),
+            "currency": q.currency,
+            "discount_amount": flt(q.discount_amount or 0),
+            "apply_discount_on": q.apply_discount_on or "",
+            "expired": expired,
+        }
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Get Quote Details Error")
         return {"success": False, "message": str(e)}

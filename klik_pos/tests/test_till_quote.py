@@ -58,3 +58,69 @@ class TestCreateQuote(FrappeTestCase):
 		self.assertFalse(res["success"])
 		self.assertIn("Price approval needed", res["message"])
 		self.assertEqual(frappe.db.count("Quotation"), before)
+
+
+class TestListAndLoadQuotes(FrappeTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		ensure_quote_fields()
+		self.addCleanup(frappe.db.rollback)
+		_shift(_profile(), "Administrator")
+
+	def _quote(self, qty=2, rate=100):
+		res = quotation.create_quote(_payload(ITEM, qty=qty, rate=rate))
+		self.assertTrue(res["success"], res)
+		return res["quote_name"]
+
+	def test_listed_for_any_till_of_the_company(self):
+		name = self._quote()
+		till_b = frappe.get_doc("POS Profile", _profile())
+		with patch.object(quotation, "_get_active_pos_profile", return_value=till_b):
+			res = quotation.get_quotes(limit=500)
+		self.assertTrue(res["success"], res)
+		row = next((r for r in res["data"] if r["name"] == name), None)
+		self.assertIsNotNone(row)
+		self.assertFalse(row["expired"])
+		self.assertEqual(row["grand_total"], 200)
+
+	def test_invoiced_quote_is_not_listed_and_wont_load(self):
+		name = self._quote()
+		si = frappe.new_doc("Sales Invoice")
+		si.customer = CUSTOMER
+		si.company = frappe.db.get_value("Quotation", name, "company")
+		si.append("items", {"item_code": ITEM, "qty": 1, "rate": 1})
+		si.custom_klik_quotation = name
+		si.insert(ignore_permissions=True, ignore_mandatory=True)
+		self.assertNotIn(name, [r["name"] for r in quotation.get_quotes(limit=500)["data"]])
+		res = quotation.get_quote_details(name)
+		self.assertFalse(res["success"])
+		self.assertIn("already been invoiced", res["message"])
+
+	def test_details_keep_quoted_price_until_valid_till(self):
+		name = self._quote(qty=3, rate=100)
+		res = quotation.get_quote_details(name)
+		self.assertTrue(res["success"], res)
+		self.assertFalse(res["expired"])
+		item = res["items"][0]
+		self.assertEqual(item["price"], 100)
+		self.assertEqual(item["quantity"], 3)
+		self.assertEqual(item["los_qty"], 0)
+		self.assertEqual(res["customer"], CUSTOMER)
+
+	def test_expired_quote_loads_without_its_prices(self):
+		name = self._quote(rate=100)
+		q = frappe.get_doc("Quotation", name)
+		row = q.items[0]
+		frappe.get_doc({
+			"doctype": "Item Price", "item_code": ITEM, "uom": row.uom,
+			"price_list": q.selling_price_list, "price_list_rate": 137,
+		}).insert(ignore_permissions=True)
+		q.db_set("valid_till", add_days(nowdate(), -1))
+		res = quotation.get_quote_details(name)
+		self.assertTrue(res["success"], res)
+		self.assertTrue(res["expired"])
+		item = res["items"][0]
+		self.assertEqual(item["price"], 137)
+		self.assertIsNone(item["customRate"])
+		self.assertEqual(item["discountAmount"], 0)
+		self.assertEqual(item["discountPercentage"], 0)
