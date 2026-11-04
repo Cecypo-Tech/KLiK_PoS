@@ -127,3 +127,36 @@ class TestHeldOrderShareTools(FrappeTestCase):
 			result["currency_symbol"],
 			frappe.db.get_value("Currency", order[0].currency, "symbol") or order[0].currency,
 		)
+
+
+class TestQuoteShareTools(FrappeTestCase):
+	"""A quote offers the same Copy and Image as a held order, from Quotation's own script."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_quotation_uses_its_own_copy_as_message_script(self):
+		for name in frappe.get_all("Client Script", filters={"dt": "Quotation", "enabled": 1}, pluck="name"):
+			frappe.db.set_value("Client Script", name, "enabled", 0)
+		source = SOURCE.replace("Sales Order", "Quotation")
+		frappe.get_doc(
+			{"doctype": "Client Script", "name": "_Test KLiK Copy (Quotation)", "dt": "Quotation",
+			 "view": "Form", "enabled": 1, "script": source}
+		).insert(ignore_permissions=True, set_name="_Test KLiK Copy (Quotation)")
+		self.assertEqual(get_held_order_share_tools("Quotation")["copy_message_script"], source)
+
+	def test_other_doctypes_are_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			get_held_order_share_tools("User")
+		with self.assertRaises(frappe.ValidationError):
+			get_held_order_share_doc("Administrator", doctype="User")
+
+	def test_a_quote_comes_with_its_currency_symbol(self):
+		quote = frappe.get_all("Quotation", fields=["name", "currency"], limit=1)
+		if not quote:
+			self.skipTest("no Quotation on this site")
+		result = get_held_order_share_doc(quote[0].name, doctype="Quotation")
+		self.assertEqual(result["doc"]["doctype"], "Quotation")

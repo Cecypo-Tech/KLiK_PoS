@@ -102,8 +102,8 @@ export interface HeldOrderShareTools {
   date_format: string | null;
 }
 
-export async function getHeldOrderShareTools(): Promise<HeldOrderShareTools> {
-  const response = await fetch('/api/method/klik_pos.api.sales_order.get_held_order_share_tools', {
+export async function getHeldOrderShareTools(doctype = 'Sales Order'): Promise<HeldOrderShareTools> {
+  const response = await fetch(`/api/method/klik_pos.api.sales_order.get_held_order_share_tools?doctype=${encodeURIComponent(doctype)}`, {
     credentials: 'include',
   });
   const none = { copy_message_script: null, copy_image: false, date_format: null };
@@ -117,12 +117,12 @@ export async function getHeldOrderShareTools(): Promise<HeldOrderShareTools> {
 }
 
 /** The held order's Sales Order document, as the desk form has it, and its currency symbol. */
-export async function getHeldOrderShareDoc(orderId: string): Promise<{
+export async function getHeldOrderShareDoc(orderId: string, doctype = 'Sales Order'): Promise<{
   doc: Record<string, unknown> & { doctype: string };
   currency_symbol: string;
 }> {
   const response = await fetch(
-    `/api/method/klik_pos.api.sales_order.get_held_order_share_doc?order_id=${encodeURIComponent(orderId)}`,
+    `/api/method/klik_pos.api.sales_order.get_held_order_share_doc?order_id=${encodeURIComponent(orderId)}&doctype=${encodeURIComponent(doctype)}`,
     { credentials: 'include' },
   );
   const result = await response.json();
