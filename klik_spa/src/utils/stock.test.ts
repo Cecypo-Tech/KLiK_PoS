@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useCartStore } from "../stores/cartStore";
+vi.mock("react-toastify", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
 import { isItemOutOfStock } from "./stock";
 
 const stockItem = (available: number, allowNegative = false) => ({
@@ -55,5 +57,15 @@ describe("isItemOutOfStock", () => {
     it("changes nothing when off", () => {
       expect(isItemOutOfStock(stockItem(0), false, false)).toBe(true);
     });
+  });
+});
+
+describe("isItemOutOfStock in quote mode", () => {
+  afterEach(() => useCartStore.setState({ quoteMode: false }));
+
+  it("is out of stock in sale mode but not while quoting", () => {
+    expect(isItemOutOfStock(stockItem(0))).toBe(true);
+    useCartStore.setState({ quoteMode: true });
+    expect(isItemOutOfStock(stockItem(0))).toBe(false);
   });
 });

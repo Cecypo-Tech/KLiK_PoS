@@ -51,6 +51,7 @@ export default function ProductGrid({
   const { filteredItems, hideUnavailableItems, selectedCustomer, degraded, degradedReason, stockUnavailable, searchQuery, lossOfSaleEnabled } = useProduct();
   // Actions only: subscribing to the whole cart redrew the grid on every cart change.
   // Cart contents are read at keypress time (handleItemKeyDown) instead.
+  const quoteMode = useCartStore((s) => s.quoteMode);
   const addToCartWithQuantity = useCartStore((s) => s.addToCartWithQuantity);
   const adjustQuantity = useCartStore((s) => s.adjustQuantity);
   const toggleItemExpansion = useCartStore((s) => s.toggleItemExpansion);
@@ -118,7 +119,7 @@ export default function ProductGrid({
         ? filteredItems.filter((item) => !isItemOutOfStock(item, stockUnavailable, lossOfSaleEnabled))
         : filteredItems
     ),
-    [filteredItems, hideUnavailableItems, stockUnavailable, lossOfSaleEnabled],
+    [filteredItems, hideUnavailableItems, stockUnavailable, lossOfSaleEnabled, quoteMode],
   );
   const selectedCategory = useProductStore((s) => s.selectedCategory);
   const gridHeaders = useMemo(

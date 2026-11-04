@@ -31,9 +31,9 @@ describe("quote mode lifts the stock limit", () => {
   });
 
   it("sale mode still clamps", async () => {
-    await useCartStore.getState().addToCartWithQuantity(item as never, 15);
-    expect((line()?.quantity ?? 0) + (line()?.los_qty ?? 0)).toBeLessThanOrEqual(10);
-    expect(line()?.quantity ?? 0).toBeLessThanOrEqual(10);
+    // Sale mode refuses an over-stock add outright (cart stays empty).
+    expect(await useCartStore.getState().addToCartWithQuantity(item as never, 15)).toBeNull();
+    expect(useCartStore.getState().cartItems).toHaveLength(0);
   });
 
   it("after exitQuoteMode the line follows normal stock rules again", async () => {
