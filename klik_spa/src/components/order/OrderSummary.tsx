@@ -472,7 +472,7 @@ export default function OrderSummary({
         businessType: posDetails?.business_type,
       };
       const result = await validateCheckoutInvoice(payload);
-      await useCartStore.getState().applyCheckoutLosAdjustments(result?.los_adjustments ?? []);
+      if (!useCartStore.getState().quoteMode) await useCartStore.getState().applyCheckoutLosAdjustments(result?.los_adjustments ?? []);
       setShowPaymentDialog(true);
     } catch (error) {
       toast.error(extractErrorFromException(error, "Checkout validation failed"));
