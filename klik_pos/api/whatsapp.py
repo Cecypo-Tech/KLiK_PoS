@@ -7,16 +7,24 @@ from klik_pos.api.whatsap.utils import send_whatsapp_message
 from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile
 
 
-def _send_invoice_whatsapp(invoice_name=None, mobile_no=None, message=None, customer_name=None):
+def _send_invoice_whatsapp(invoice_name=None, mobile_no=None, message=None, customer_name=None, doctype="Sales Invoice"):
 	"""
 	Internal reusable function to send WhatsApp message with/without invoice.
 	"""
 
+	if doctype not in ("Sales Invoice", "Quotation"):
+		frappe.throw(f"Cannot send a {doctype} over WhatsApp.")
+
 	if not mobile_no:
 		frappe.throw("Mobile number is required.")
 
+	if invoice_name:
+		frappe.has_permission(doctype, "read", invoice_name, throw=True)
+
 	if not message:
-		if invoice_name and customer_name:
+		if invoice_name and customer_name and doctype == "Quotation":
+			message = f"Hello {customer_name}, here is your quotation {invoice_name}."
+		elif invoice_name and customer_name:
 			message = f"Hello {customer_name}, your invoice {invoice_name} is ready! Thank you for shopping with us."
 		else:
 			message = "Your invoice is ready! Thank you for shopping with us."
@@ -27,7 +35,7 @@ def _send_invoice_whatsapp(invoice_name=None, mobile_no=None, message=None, cust
 				to_number=mobile_no,
 				message_type="text",
 				message_content=message,
-				reference_doctype="Sales Invoice",
+				reference_doctype=doctype,
 				reference_name=invoice_name,
 				attach_document=True,
 			)
@@ -67,6 +75,7 @@ def deliver_invoice_via_whatsapp(**kwargs):
 		mobile_no=data.get("mobile_no"),
 		message=data.get("message"),
 		customer_name=data.get("customer_name"),
+		doctype=data.get("doctype") or "Sales Invoice",
 	)
 
 

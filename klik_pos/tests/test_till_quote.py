@@ -243,3 +243,33 @@ class TestQuoteIdOnCheckout(FrappeTestCase):
 		self.assertTrue(done["success"], done)
 		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "custom_klik_quotation"), q)
 		self.assertEqual(frappe.db.get_value("Quotation", q, "status"), "Ordered")
+
+
+class TestQuoteWhatsapp(FrappeTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		ensure_quote_fields()
+		self.addCleanup(frappe.db.rollback)
+		_shift(_profile(), "Administrator")
+
+	def _send(self, **kw):
+		from klik_pos.api import whatsapp
+
+		with patch("klik_pos.api.whatsapp.send_whatsapp_message", return_value={"success": True}) as m:
+			whatsapp.deliver_invoice_via_whatsapp(mobile_no="254700000000", **kw)
+		return m
+
+	def test_quotation_is_attached_as_quotation(self):
+		q = quotation.create_quote(_payload(ITEM, qty=2, rate=100))["quote_name"]
+		m = self._send(invoice_data=q, doctype="Quotation", customer_name="Bob")
+		kw = m.call_args.kwargs
+		self.assertEqual(kw["reference_doctype"], "Quotation")
+		self.assertEqual(kw["message_content"], f"Hello Bob, here is your quotation {q}.")
+
+	def test_invoice_is_still_default(self):
+		m = self._send(invoice_data="SINV-X")
+		self.assertEqual(m.call_args.kwargs["reference_doctype"], "Sales Invoice")
+
+	def test_other_doctypes_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			self._send(invoice_data="Administrator", doctype="User")
