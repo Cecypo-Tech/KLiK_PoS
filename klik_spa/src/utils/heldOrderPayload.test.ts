@@ -253,7 +253,7 @@ describe("custom-rate line", () => {
       extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
       loyalty: null,
     });
-    expect(payload.items[0].discountAmount).toBe(0);
+    expect(payload.items[0]!.discountAmount).toBe(0);
   });
 });
 
