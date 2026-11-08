@@ -29,6 +29,7 @@ import {
   type PricePopupPosition,
 } from "../../utils/priceOptions";
 import { rateBoxMinimum } from "../../utils/priceFloor";
+import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -391,7 +392,7 @@ export const CartItemRow = ({
 
   const handleDiscountPercentageChange = (value: number) => {
     const pct = Math.min(100, Math.max(0, value || 0));
-    const amt = parseFloat(((item.price * pct) / 100).toFixed(2));
+    const amt = discountAmountFromPct(item.price, pct);
     setLocalDiscountPct(pct);
     onDiscountChange(item.id, "discountAmount", amt);
   };
@@ -399,7 +400,7 @@ export const CartItemRow = ({
   const handleDiscountAmountChange = (value: number) => {
     const amt = Math.max(0, value || 0);
     onDiscountChange(item.id, "discountAmount", amt);
-    setLocalDiscountPct(item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0);
+    setLocalDiscountPct(discountPctFromAmount(item.price, amt));
   };
 
   // `entry` pins the exact row picked: one price list can have several Item Prices (per UOM,
@@ -820,7 +821,7 @@ export const CartItemRow = ({
                         posDetails,
                         itemDiscount.selectedPriceList && shownLinePriceList ? Number(shownLinePriceList.rate || 0) : listRate,
                       );
-                      if (minimum !== null && editableRate < minimum) {
+                      if (minimum !== null && clampRateToFloor(editableRate, minimum) !== editableRate) {
                         handleRateChange(minimum);
                         toast.warning(`${item.name}: can't sell below ${formatCurrencyWithSymbol(minimum, currency_symbol)}. Rate reset to the minimum.`);
                       }
@@ -834,8 +835,7 @@ export const CartItemRow = ({
                         return;
                       }
 
-                      const parsedValue = parseFloat(value);
-                      handleRateChange(Number.isNaN(parsedValue) ? undefined : parsedValue);
+                      handleRateChange(parseDecimalInput(value));
                     }}
                     readOnly={!posDetails?.allow_rate_change}
                     placeholder="0"
