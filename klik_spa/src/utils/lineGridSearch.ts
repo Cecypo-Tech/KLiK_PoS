@@ -1,5 +1,5 @@
 import { toast } from "react-toastify";
-import { mergesSameItem, useCartStore } from "../stores/cartStore";
+import { useCartStore } from "../stores/cartStore";
 import { useProductStore } from "../stores/productStore";
 import type { MenuItem } from "../../types";
 
@@ -50,12 +50,13 @@ async function run(code: string, quiet: boolean): Promise<ScanResult> {
     return { notFound: true };
   }
   if (item.has_variants || item.is_variant_template) return { pick: item };
-  const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never, { merge: mergesSameItem() });
+  // A scan always merges: allow_multiple_items is for typed picks only.
+  const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never, { merge: true });
   return lineId ? { lineId } : { refused: true };
 }
 
 /** Resolve a scanned code and add it. Scans are serialised (lookup included) so lines land in scan order.
- * Ignores auto_add_item_to_cart and custom_use_scanner_fully. `quiet`: no "not found" toast, for a
+ * Always merges into an existing line of the item. Ignores auto_add_item_to_cart and custom_use_scanner_fully. `quiet`: no "not found" toast, for a
  * caller with a typed-search pick to fall back on. */
 export function scanAdd(code: string, { quiet = false } = {}): Promise<ScanResult> {
   const result = scanTail.then(() => run(code, quiet));

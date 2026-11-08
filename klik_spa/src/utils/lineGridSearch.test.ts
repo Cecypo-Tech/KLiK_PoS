@@ -78,10 +78,11 @@ describe("scanAdd", () => {
     expect(await scanAdd("PEN")).toEqual({ lineId: lines()[0]!.id });
   });
 
-  it("two scans make two lines when allow_multiple_items is 1", async () => {
+  it("two scans merge into one line even when allow_multiple_items is 1 (the setting is for typed picks)", async () => {
     profile({ allow_multiple_items: 1 });
     await Promise.all([scanAdd("PEN"), scanAdd("PEN")]);
-    expect(lines()).toHaveLength(2);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]!.quantity).toBe(2);
   });
 
   it("returns notFound and toasts for an unknown code", async () => {

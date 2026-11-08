@@ -144,7 +144,7 @@ interface CartState {
   pricingError: string | null
 
   /** The line id the item went to (added or bumped), or null when the cart refused it.
-   * `merge` defaults to true; false always starts a new line. The grid passes mergesSameItem(). */
+   * `merge` defaults to true; false always starts a new line. Grid typed picks pass mergesSameItem(); grid scans merge. */
   addToCart: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
   addToCartQueued: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
   /** The cart line the quantity went to, or null when the cart refused it (stock). */
@@ -218,7 +218,7 @@ const shouldInsertNewItemsAtTop = (): boolean => {
 
 export type AddOpts = { merge?: boolean }
 
-/** Selling Settings "allow multiple items": when on, the grid makes a new line for an item added again.
+/** Selling Settings "allow multiple items": when on, a typed grid pick makes a new line for an item added again (scans merge).
  * Only the grid passes it; every other add merges (the till without the grid behaves as before). */
 export const mergesSameItem = (): boolean =>
   !usePOSProfileStore.getState().posDetails?.allow_multiple_items;

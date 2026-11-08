@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useCartStore } from "./cartStore";
+import { mergesSameItem, useCartStore } from "./cartStore";
 import { usePOSProfileStore } from "./posProfileStore";
 
 vi.mock("react-toastify", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
@@ -34,6 +34,13 @@ describe("same item: merge or new line", () => {
     await useCartStore.getState().addToCartWithQuantity(pen(), 2);
     expect(lines()).toHaveLength(1);
     expect(lines()[0]!.quantity).toBe(4);
+  });
+
+  it("a typed grid pick (merge: mergesSameItem()) makes a second line when allow_multiple_items is 1", async () => {
+    profile({ allow_multiple_items: 1 });
+    await useCartStore.getState().addToCartQueued(pen(), { merge: mergesSameItem() });
+    await useCartStore.getState().addToCartQueued(pen(), { merge: mergesSameItem() });
+    expect(lines()).toHaveLength(2);
   });
 
   it("merge:false adds a second line", async () => {
