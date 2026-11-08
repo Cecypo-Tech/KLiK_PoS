@@ -69,11 +69,18 @@ describe("gridKeyAction", () => {
   });
   it("Shift+Delete deletes non-entry row; next row or entry row", () => {
     expect(act({ key: "Delete", shift: true })).toEqual({ type: "deleteRow", row: 1, then: { row: 1, col: "qty" } });
-    expect(act({ key: "Delete", shift: true, row: 2, col: "rate" })).toEqual({ type: "deleteRow", row: 2, then: { row: 2, col: "rate" } });
+    expect(act({ key: "Delete", shift: true, row: 1, col: "rate" })).toEqual({ type: "deleteRow", row: 1, then: { row: 1, col: "rate" } });
+    // last line, entry at Bottom: entry row's post-deletion index is row
+    expect(act({ key: "Delete", shift: true, row: 2, col: "rate" })).toEqual({ type: "deleteRow", row: 2, then: { row: 2, col: "item" } });
     expect(act({ key: "Delete", shift: true, row: 3, col: "item" })).toEqual({ type: "none" });
   });
   it("Shift+Delete on last line with entry at top lands on the entry row", () => {
     expect(act({ key: "Delete", shift: true, row: 3, entryRow: 0 })).toEqual({ type: "deleteRow", row: 3, then: { row: 0, col: "item" } });
+  });
+  it("delete edge cases: single line at Bottom, middle line with entry at Top", () => {
+    expect(act({ key: "Delete", shift: true, row: 0, rowCount: 2, entryRow: 1 })).toEqual({ type: "deleteRow", row: 0, then: { row: 0, col: "item" } });
+    expect(act({ key: "Escape", rowEmpty: true, row: 0, rowCount: 2, entryRow: 1, col: "qty" })).toEqual({ type: "deleteRow", row: 0, then: { row: 0, col: "item" } });
+    expect(act({ key: "Delete", shift: true, row: 2, rowCount: 4, entryRow: 0, col: "disc" })).toEqual({ type: "deleteRow", row: 2, then: { row: 2, col: "disc" } });
   });
   it("Alt+D opens description on non-entry rows only", () => {
     expect(act({ key: "d", alt: true })).toEqual({ type: "openDescription", row: 1 });

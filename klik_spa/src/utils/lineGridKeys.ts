@@ -11,7 +11,7 @@ export type GridAction =
   | { type: "focus"; row: number; col: GridCol }
   | { type: "commit"; then: { row: number; col: GridCol } }   // commit edit, then focus
   | { type: "pickHighlighted" } | { type: "moveHighlight"; delta: 1 | -1 }
-  | { type: "closeDropdown" } | { type: "deleteRow"; row: number; then: { row: number; col: GridCol } }
+  | { type: "closeDropdown" } | { type: "deleteRow"; row: number; then: { row: number; col: GridCol } }   // `then` is a POST-deletion display index
   | { type: "submitEntry" }          // Enter in the entry row's Item cell: exact lookup, else pick highlighted
   | { type: "openDescription"; row: number }
   | { type: "none" };                // let the browser handle it
@@ -31,9 +31,11 @@ export function gridKeyAction(c: GridKeyCtx): GridAction {
     if (key === "Escape") return { type: "closeDropdown" };
   }
 
-  // after deleting row, the following line shifts into `row`; the last display row hands over to the entry row
+  // `then` is a post-deletion index: the following line shifts into `row`; after the last line, the entry row
+  // (whose index drops by one if it sat below the deleted row) takes focus
+  const lastLine = row === (entryRow === c.rowCount - 1 ? c.rowCount - 2 : c.rowCount - 1);
   const afterDelete = (): { row: number; col: GridCol } =>
-    row === c.rowCount - 1 ? { row: entryRow, col: "item" } : { row, col };
+    lastLine ? { row: entryRow > row ? entryRow - 1 : entryRow, col: "item" } : { row, col };
 
   if (c.alt && key.toLowerCase() === "d") return isEntry ? NONE : { type: "openDescription", row };
   if (key === "Delete" && c.shift) return isEntry ? NONE : { type: "deleteRow", row, then: afterDelete() };
