@@ -140,6 +140,13 @@ export default function RetailPOSLayout() {
 
   return (
     <>
+      {posDetails?.custom_line_entry_grid ? (
+        <div className="flex h-screen bg-gray-50 dark:bg-gray-900 pb-2">
+          <div className="flex-1 overflow-hidden ml-20">
+            <OrderSummary layout="grid" onClearCart={clearCart} />
+          </div>
+        </div>
+      ) : (
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900 pb-2">
         <div className="flex-1 overflow-hidden ml-20">
           <MenuGrid
@@ -147,11 +154,12 @@ export default function RetailPOSLayout() {
             onScanBarcode={() => setShowScanner(true)}
           />
         </div>
-        
+
         <div className="w-[35%] min-w-[420px] max-w-[600px] bg-white shadow-lg overflow-y-auto">
           <OrderSummary onClearCart={clearCart} />
         </div>
       </div>
+      )}
 
       <BarcodeScannerModal
         isOpen={showScanner}

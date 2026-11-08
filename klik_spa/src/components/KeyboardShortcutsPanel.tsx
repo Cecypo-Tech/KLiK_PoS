@@ -6,12 +6,26 @@ import { X } from "lucide-react";
 interface KeyboardShortcutsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  /** "grid": the line-entry till, whose keys replace the search box and product list. */
+  mode?: "cart" | "grid";
 }
 
 interface ShortcutGroup {
   label: string;
   shortcuts: { keys: string[]; description: string; separator?: string }[];
 }
+
+const LINE_GRID: ShortcutGroup = {
+  label: "Line grid",
+  shortcuts: [
+    { keys: ["F3"], description: "Go to the entry row (from anywhere)" },
+    { keys: ["↑", "↓"], description: "Pick from the dropdown / previous / next line", separator: "/" },
+    { keys: ["Enter"], description: "Add the item / next cell" },
+    { keys: ["Shift", "Delete"], description: "Delete the focused line" },
+    { keys: ["Alt", "D"], description: "Edit the line's description" },
+    { keys: ["F8"], description: "Jump to the line's side panel (Esc to return)" },
+  ],
+};
 
 const GROUPS: ShortcutGroup[] = [
   {
@@ -84,7 +98,11 @@ function ShortcutRow({ keys, description, separator = "+" }: { keys: string[]; d
   );
 }
 
-export default function KeyboardShortcutsPanel({ isOpen, onClose }: KeyboardShortcutsPanelProps) {
+export default function KeyboardShortcutsPanel({ isOpen, onClose, mode = "cart" }: KeyboardShortcutsPanelProps) {
+  const groups = mode === "grid"
+    ? [LINE_GRID, ...GROUPS.filter((g) => g.label !== "Search" && g.label !== "Product List")]
+    : GROUPS;
+
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
@@ -133,7 +151,7 @@ export default function KeyboardShortcutsPanel({ isOpen, onClose }: KeyboardShor
             doesn't need its column assignment hand-picked. break-inside-avoid keeps
             one group's rows from splitting across the column break. */}
         <div className="px-5 py-4 columns-2 gap-x-8">
-          {GROUPS.map((group) => (
+          {groups.map((group) => (
             <div key={group.label} className="break-inside-avoid mb-5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-2">
                 {group.label}

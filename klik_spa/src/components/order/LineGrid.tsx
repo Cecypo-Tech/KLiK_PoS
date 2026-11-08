@@ -169,6 +169,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
           autoComplete="off"
           onChange={(e) => {
             setQuery(e.target.value);
+            void latest.current(Promise.resolve([])); // an in-flight search for the old text is now stale
             setResults([]); // only results for the current text may be picked
             setOpen(false);
           }}
