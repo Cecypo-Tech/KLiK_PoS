@@ -1,5 +1,5 @@
 import { toast } from "react-toastify";
-import { useCartStore } from "../stores/cartStore";
+import { mergesSameItem, useCartStore } from "../stores/cartStore";
 import { useProductStore } from "../stores/productStore";
 import type { MenuItem } from "../../types";
 
@@ -32,7 +32,7 @@ async function run(code: string, quiet: boolean): Promise<ScanResult> {
     if (!quiet) toast.error(`No item found for ${code}`);
     return { notFound: true };
   }
-  const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never);
+  const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never, { merge: mergesSameItem() });
   return lineId ? { lineId } : { refused: true };
 }
 

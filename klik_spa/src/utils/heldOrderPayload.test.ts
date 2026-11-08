@@ -238,6 +238,25 @@ describe("buildOrderPayload", () => {
   });
 });
 
+describe("custom-rate line", () => {
+  it("sends only the cashier's discount, never the item's rule discount (it would come off the custom rate on recall)", () => {
+    const payload = buildOrderPayload({
+      cartItems: [{ id: "PEN", item_code: "PEN", quantity: 1, price: 10, discount_amount: 2 }],
+      itemDiscounts: { PEN: { customRate: 8, discountAmount: 0 } },
+      effectiveRate: () => 8,
+      customer: { id: "C" },
+      totals: { subtotal: 8, grandTotal: 8, taxAmount: 0, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+    expect(payload.items[0].discountAmount).toBe(0);
+  });
+});
+
 describe("two lines of one item", () => {
   it("payload keeps each line's own discount, keyed by its line id", () => {
     const payload = buildOrderPayload({

@@ -186,7 +186,10 @@ export function buildOrderPayload<T extends OrderLine>({
     const code = item.item_code || item.id;
     const discountData = itemDiscounts[item.id] || itemDiscounts[code] || {};
     const discountPercentage = Number(discountData.discountPercentage) || Number(item.discount_percentage) || 0;
-    const discountAmount = Number(discountData.discountAmount) || Number(item.discount_amount) || 0;
+    // A custom-rate line's discount comes off the custom rate: only the cashier's own counts, not
+    // a rule discount left on the item (already spent inside its price).
+    const hasCustomRate = discountData.customRate !== undefined && discountData.customRate !== null;
+    const discountAmount = Number(discountData.discountAmount) || (hasCustomRate ? 0 : Number(item.discount_amount)) || 0;
 
     let heldPrice = Number(item.discountedPriceExcl);
     if (!Number.isFinite(heldPrice)) {

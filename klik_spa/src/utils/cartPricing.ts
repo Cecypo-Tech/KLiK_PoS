@@ -116,12 +116,14 @@ export function getEffectiveItemRate(item: PricingItemLike, options: RateOptions
   const customRate = discountData.customRate;
 
   if (customRate !== undefined && customRate !== null) {
-    const enteredRate = Math.max(0, Number(customRate) || 0);
+    let rate = Math.max(0, Number(customRate) || 0);
     const exclusiveTaxRate = getExclusiveTaxRateForItem(item, options);
     if (exclusiveTaxRate > 0 && discountData.customRateIncludesTax !== false) {
-      return roundCurrency(enteredRate / (1 + exclusiveTaxRate / 100));
+      rate = rate / (1 + exclusiveTaxRate / 100);
     }
-    return roundCurrency(enteredRate);
+    // A line discount on top of the cashier's rate, in the same (tax-exclusive) basis as below.
+    if (discountAmount > 0) rate = Math.max(0, roundCurrency(rate) - discountAmount);
+    return roundCurrency(rate);
   }
 
   let rate = Number(item?.price || 0);

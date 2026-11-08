@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useCartStore } from "../../stores/cartStore";
+import { mergesSameItem, useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
 import { ShoppingCart } from "lucide-react";
@@ -673,7 +673,7 @@ export default function OrderSummary({
       setVariantItem(item);
       return null;
     }
-    return useCartStore.getState().addToCartQueued({ ...item, item_code: item.id });
+    return useCartStore.getState().addToCartQueued({ ...item, item_code: item.id }, { merge: mergesSameItem() });
   };
 
   const customerHeader = (

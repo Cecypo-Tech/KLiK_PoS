@@ -61,10 +61,13 @@ export default function LineGridRow({
   const isTaxIncludedInBasicRate = tip === 1 || tip === "1" || tip === true;
   const opts = { itemDiscounts: { [item.id]: itemDiscount }, isTaxIncludedInBasicRate };
   const discountedPrice = getEffectiveItemRate(item, opts);
+  // The Rate cell and the % are of the line's rate before its discount (a custom rate, else the price).
+  const preOpts = { ...opts, itemDiscounts: { [item.id]: { ...itemDiscount, discountAmount: 0 } } };
+  const preDiscountPrice = getEffectiveItemRate(item, preOpts);
   const hasExclusiveTax = getExclusiveTaxRateForItem(item, { isTaxIncludedInBasicRate }) > 0;
-  const editableRate = hasExclusiveTax ? discountedPrice : getEffectiveDisplayRate(item, opts);
+  const editableRate = hasExclusiveTax ? preDiscountPrice : getEffectiveDisplayRate(item, preOpts);
   const total = roundCurrency(discountedPrice * item.quantity);
-  const discPct = discountPctFromAmount(item.price, Number(itemDiscount.discountAmount || 0));
+  const discPct = discountPctFromAmount(preDiscountPrice, Number(itemDiscount.discountAmount || 0));
   const listRate = Number(item.original_price || 0) || item.price;
 
   const commitQty = (n: number | undefined) => {
@@ -87,7 +90,7 @@ export default function LineGridRow({
     onDiscountChange(item.id, "discountAmount", 0);
   };
   const commitDisc = (n: number | undefined) => {
-    if (n !== undefined) onDiscountChange(item.id, "discountAmount", discountAmountFromPct(item.price, n));
+    if (n !== undefined) onDiscountChange(item.id, "discountAmount", discountAmountFromPct(preDiscountPrice, n));
   };
 
   return (

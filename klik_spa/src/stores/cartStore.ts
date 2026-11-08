@@ -144,7 +144,7 @@ interface CartState {
   pricingError: string | null
 
   /** The line id the item went to (added or bumped), or null when the cart refused it.
-   * `merge` defaults to mergesSameItem(); false always starts a new line. */
+   * `merge` defaults to true; false always starts a new line. The grid passes mergesSameItem(). */
   addToCart: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
   addToCartQueued: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
   /** The cart line the quantity went to, or null when the cart refused it (stock). */
@@ -218,7 +218,8 @@ const shouldInsertNewItemsAtTop = (): boolean => {
 
 export type AddOpts = { merge?: boolean }
 
-/** Selling Settings "allow multiple items": when on, adding an item again makes a new line. */
+/** Selling Settings "allow multiple items": when on, the grid makes a new line for an item added again.
+ * Only the grid passes it; every other add merges (the till without the grid behaves as before). */
 export const mergesSameItem = (): boolean =>
   !usePOSProfileStore.getState().posDetails?.allow_multiple_items;
 
@@ -312,11 +313,16 @@ export const useCartStore = create<CartState>()(
           const pricingData = result.message;
 
           if (pricingData?.items) {
+            // One priced row per line, in cart order: match by position within each item code
+            // (a second line of the same item may be in another UOM, at another price).
+            const queues = new Map<string, PricedItemPayload[]>();
+            for (const p of pricingData.items as PricedItemPayload[]) {
+              const code = p.item_code || p.id || "";
+              queues.set(code, [...(queues.get(code) || []), p]);
+            }
             set((state) => ({
               cartItems: state.cartItems.map(item => {
-                const pricedItem = (pricingData.items as PricedItemPayload[]).find((p) => 
-                  (p.id === item.id) || (p.item_code === (item.item_code || item.id))
-                );
+                const pricedItem = queues.get(item.item_code || item.id)?.shift();
                 if (pricedItem) {
                   const basePrice = Number(pricedItem.price || 0);
 
@@ -350,7 +356,7 @@ export const useCartStore = create<CartState>()(
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
-        const existingItem = (opts?.merge ?? mergesSameItem())
+        const existingItem = (opts?.merge ?? true)
           ? state.cartItems.find((cartItem) =>
               cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
             )
@@ -470,7 +476,7 @@ export const useCartStore = create<CartState>()(
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
-        const existingItem = (opts?.merge ?? mergesSameItem())
+        const existingItem = (opts?.merge ?? true)
           ? state.cartItems.find((cartItem) =>
               cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
             )

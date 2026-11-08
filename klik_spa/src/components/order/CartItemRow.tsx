@@ -29,7 +29,7 @@ import {
   type PricePopupPosition,
 } from "../../utils/priceOptions";
 import { rateBoxMinimum } from "../../utils/priceFloor";
-import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
+import { discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -821,7 +821,7 @@ export const CartItemRow = ({
                         posDetails,
                         itemDiscount.selectedPriceList && shownLinePriceList ? Number(shownLinePriceList.rate || 0) : listRate,
                       );
-                      if (minimum !== null && clampRateToFloor(editableRate, minimum) !== editableRate) {
+                      if (minimum !== null && editableRate < minimum) {
                         handleRateChange(minimum);
                         toast.warning(`${item.name}: can't sell below ${formatCurrencyWithSymbol(minimum, currency_symbol)}. Rate reset to the minimum.`);
                       }

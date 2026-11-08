@@ -27,10 +27,18 @@ describe("same item: merge or new line", () => {
     expect(lines()[0]!.quantity).toBe(2);
   });
 
-  it("adds a second line when allow_multiple_items is 1", async () => {
+  it("merges by default even when allow_multiple_items is 1 (the setting is the grid's, passed explicitly)", async () => {
     profile({ allow_multiple_items: 1 });
     await useCartStore.getState().addToCart(pen());
     await useCartStore.getState().addToCart(pen());
+    await useCartStore.getState().addToCartWithQuantity(pen(), 2);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]!.quantity).toBe(4);
+  });
+
+  it("merge:false adds a second line", async () => {
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    await useCartStore.getState().addToCart(pen(), { merge: false });
     expect(lines()).toHaveLength(2);
     expect(lines().map((l) => l.item_code)).toEqual(["PEN", "PEN"]);
     expect(new Set(lines().map((l) => l.id)).size).toBe(2);
@@ -51,8 +59,7 @@ describe("same item: merge or new line", () => {
   });
 
   it("stock limit counts every line of the item", async () => {
-    profile({ allow_multiple_items: 1 });
-    for (let i = 0; i < 3; i++) await useCartStore.getState().addToCart(pen(2));
+    for (let i = 0; i < 3; i++) await useCartStore.getState().addToCart(pen(2), { merge: false });
     expect(lines()).toHaveLength(2);
   });
 
@@ -68,27 +75,37 @@ describe("same item: merge or new line", () => {
   });
 
   it("two lines keep their own custom rate through refreshCartPricing", async () => {
-    profile({ allow_multiple_items: 1 });
-    await useCartStore.getState().addToCart(pen());
-    await useCartStore.getState().addToCart(pen());
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    await useCartStore.getState().addToCart(pen(), { merge: false });
     useCartStore.setState({ cartItems: lines().map((l, i) => ({ ...l, custom_rate: 5 + i }) as never) });
     await useCartStore.getState().refreshCartPricing();
     expect(lines().map((l) => (l as never as { custom_rate: number }).custom_rate)).toEqual([5, 6]);
   });
 
+  it("each line keeps its own UOM price: rows match by position within the item code", async () => {
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    useCartStore.setState({ cartItems: lines().map((l, i) => ({ ...l, uom: i ? "Box" : "Nos" })) });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
+      const sent = JSON.parse(new URL(url, "http://x").searchParams.get("cart_items") || "[]");
+      return new Response(JSON.stringify({ message: { items: sent.map((s: { id: string; item_code: string; uom: string }) => ({ id: s.id, item_code: s.item_code, price: s.uom === "Box" ? 120 : 10 })) } }));
+    }));
+    await useCartStore.getState().refreshCartPricing();
+    expect(lines().map((l) => l.price)).toEqual([10, 120]);
+  });
+
   it("pricing request sends the item code as id for every line", async () => {
-    profile({ allow_multiple_items: 1 });
-    await useCartStore.getState().addToCart(pen());
-    await useCartStore.getState().addToCart(pen());
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    await useCartStore.getState().addToCart(pen(), { merge: false });
     const url = (fetch as unknown as { mock: { calls: string[][] } }).mock.calls.at(-1)![0]!;
     const sent = JSON.parse(new URL(url, "http://x").searchParams.get("cart_items")!);
     expect(sent.map((s: { id: string }) => s.id)).toEqual(["PEN", "PEN"]);
   });
 
   it("insertion position Top puts the new line first", async () => {
-    profile({ allow_multiple_items: 1, custom_cart_item_insertion_position: "Top" });
-    await useCartStore.getState().addToCart(pen());
-    const second = await useCartStore.getState().addToCart(pen());
+    profile({ custom_cart_item_insertion_position: "Top" });
+    await useCartStore.getState().addToCart(pen(), { merge: false });
+    const second = await useCartStore.getState().addToCart(pen(), { merge: false });
     expect(lines()[0]!.id).toBe(second);
     expect(lines()).toHaveLength(2);
   });

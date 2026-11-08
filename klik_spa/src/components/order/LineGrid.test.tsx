@@ -15,11 +15,11 @@ vi.mock("../../utils/lineGridSearch", () => ({
 const line = (id: string, name: string, description?: string) =>
   ({ id, item_code: id, name, category: "", price: 100, image: "", quantity: 1, description }) as CartItem;
 
-const render = (items: CartItem[], pos: Partial<POSDetails> = {}) =>
+const render = (items: CartItem[], pos: Partial<POSDetails> = {}, itemDiscounts = {}) =>
   renderToStaticMarkup(
     <LineGrid
       items={items}
-      itemDiscounts={{}}
+      itemDiscounts={itemDiscounts}
       selectedId={null}
       onSelect={() => {}}
       onUpdateQuantity={() => {}}
@@ -61,5 +61,14 @@ describe("LineGrid", () => {
     const open = render([line("A", "Apple")]);
     expect(cell(open, "rate")).not.toContain("readOnly");
     expect(cell(open, "disc")).not.toContain("readOnly");
+  });
+
+  it("a custom-rate line shows the pre-discount rate, the % of it, and the discounted total", () => {
+    const html = render([line("A", "Apple")], {}, { A: { customRate: 80, discountAmount: 4 } });
+    const val = (col: string) => html.match(new RegExp(`<input[^>]*data-col="${col}"[^>]*value="([^"]*)"`))?.[1]
+      ?? html.match(new RegExp(`<input[^>]*value="([^"]*)"[^>]*data-col="${col}"`))![1];
+    expect(val("rate")).toBe("80");
+    expect(val("disc")).toBe("5");
+    expect(html).toContain("76.00");
   });
 });

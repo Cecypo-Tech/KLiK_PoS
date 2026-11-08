@@ -36,10 +36,16 @@ describe("shouldRestorePersistedDiscount", () => {
     ).toBe(true);
   });
 
-  it("restores a manually keyed rate regardless of what the rule did", () => {
-    // A custom rate is the cashier's own number; it is never folded into price by pricing.
+  it("a custom-rate line's spent rule discount is not restored (it would come off the custom rate)", () => {
+    // The custom rate itself is restored regardless; only the discount beside it is gated.
     expect(
-      shouldRestorePersistedDiscount({ price: 2000, original_price: 2100, custom_rate: 1800 }),
+      shouldRestorePersistedDiscount({ price: 2000, original_price: 2100, discount_amount: 100, custom_rate: 1800 }),
+    ).toBe(false);
+  });
+
+  it("a custom-rate line's own discount from a held order is restored", () => {
+    expect(
+      shouldRestorePersistedDiscount({ price: 2000, original_price: 2000, discount_amount: 50, custom_rate: 1800 }),
     ).toBe(true);
   });
 });
