@@ -35,7 +35,7 @@ describe("MenuGrid", () => {
     for (const s of ['id="pos-search-input"', 'data-stub="category-tabs"', 'data-stub="product-grid"', 'title="Grid View"']) {
       expect(html).not.toContain(s);
     }
-    for (const s of ['data-mode="grid"', 'title="Scan Barcode"', 'title="Keyboard shortcuts (?)"', 'aria-label="Quick entry"', "Stores", "Till 1", 'aria-label="User menu"']) {
+    for (const s of ['id="pos-shortcuts-btn"', 'data-mode="grid"', 'title="Scan Barcode"', 'title="Keyboard shortcuts (?)"', 'aria-label="Quick entry"', "Stores", "Till 1", 'aria-label="User menu"']) {
       expect(html).toContain(s);
     }
   });

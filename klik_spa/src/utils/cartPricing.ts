@@ -144,6 +144,18 @@ export function getPreDiscountRate(item: PricingItemLike, options: RateOptions =
   return getEffectiveItemRate(item, { ...options, itemDiscounts: { ...itemDiscounts, [key]: { ...own, discountAmount: 0 } } });
 }
 
+/** The classic cart row's % basis: the custom rate on a custom-rate line, else the list price
+ * (as it always was, even with a restored discountPercentage). The grid uses getPreDiscountRate. */
+export function getCartRowPctBasis(
+  item: PricingItemLike & { id: string },
+  itemDiscount: DiscountDataLike,
+  isTaxIncludedInBasicRate?: boolean,
+) {
+  return itemDiscount.customRate != null
+    ? getPreDiscountRate(item, { itemDiscounts: { [item.id]: itemDiscount }, isTaxIncludedInBasicRate })
+    : Number(item.price || 0);
+}
+
 export function getEffectiveDisplayRate(item: PricingItemLike, options: RateOptions = {}) {
   const baseRate = getEffectiveItemRate(item, options);
   const exclusiveTaxRate = getExclusiveTaxRateForItem(item, options);

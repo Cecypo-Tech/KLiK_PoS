@@ -14,7 +14,7 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import ProductDetailsModal from "../ProductDetailsModal";
 import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
-import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getPreDiscountRate } from "../../utils/cartPricing";
+import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getCartRowPctBasis } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { qtyToSend } from "../../utils/lossOfSale";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
@@ -174,14 +174,11 @@ export const CartItemRow = ({
   useEffect(() => {
     setLocalQty(item.quantity);
   }, [item.quantity, item.los_qty]);
-  // The % is of the line's rate before its discount (a custom rate, else the price), as in the grid.
+  // The % is of the custom rate on a custom-rate line, else of the list price.
   const isTaxIncludedInBasicRate = posDetails?.is_tax_included_in_basic_rate === 1
     || posDetails?.is_tax_included_in_basic_rate === "1"
     || posDetails?.is_tax_included_in_basic_rate === true;
-  const preDiscountPrice = getPreDiscountRate(item, {
-    itemDiscounts: { [item.id]: itemDiscount },
-    isTaxIncludedInBasicRate,
-  });
+  const preDiscountPrice = getCartRowPctBasis(item, itemDiscount, isTaxIncludedInBasicRate);
   const [localDiscountPct, setLocalDiscountPct] = useState<number>(() =>
     discountPctFromAmount(preDiscountPrice, itemDiscount.discountAmount || 0));
 

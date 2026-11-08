@@ -43,7 +43,6 @@ import { discountForOverride } from "../../utils/rateOverrides";
 import LineGrid, { type LineGridHandle } from "./LineGrid";
 import DescriptionDialog from "./DescriptionDialog";
 import VariantPickerModal from "../VariantPickerModal";
-import KeyboardShortcutsPanel from "../KeyboardShortcutsPanel";
 import { useLineGridShortcuts } from "../../hooks/useLineGridShortcuts";
 
 interface OrderSummaryProps {
@@ -99,7 +98,6 @@ export default function OrderSummary({
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null); // same id: React bails out, no re-render
   const [descriptionFor, setDescriptionFor] = useState<string | null>(null);
   const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
-  const [showHelp, setShowHelp] = useState(false);
   // The panel follows every add or bump (scan or pick); the cashier's own focus moves select in between.
   useEffect(() => {
     if (isGrid && highlightItemId) setSelectedLineId(highlightItemId);
@@ -674,7 +672,8 @@ export default function OrderSummary({
     {
       focusEntry,
       focusPanel: () => document.getElementById("pos-line-panel")?.focus(),
-      toggleHelp: () => setShowHelp((v) => !v),
+      // One help panel: the top bar's (MenuGrid, header-only in grid mode).
+      toggleHelp: () => document.getElementById("pos-shortcuts-btn")?.click(),
     },
     // Off under a modal: F3/F8 would move focus behind it.
     isGrid && !showPaymentDialog && !descriptionFor && !variantItem && !savedQuote && !showSalespersonAuthModal,
@@ -895,7 +894,6 @@ export default function OrderSummary({
             onSelectVariant={async (variant) => { await pickGridItem(variant); }}
           />
         )}
-        <KeyboardShortcutsPanel isOpen={showHelp} onClose={() => setShowHelp(false)} mode="grid" />
       </div>
     );
   }

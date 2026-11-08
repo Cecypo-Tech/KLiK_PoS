@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getEffectiveItemRate, getPreDiscountRate } from "./cartPricing";
+import { getCartRowPctBasis, getEffectiveItemRate, getPreDiscountRate } from "./cartPricing";
 import { discountAmountFromPct } from "./lineEdits";
 
 describe("getEffectiveItemRate", () => {
@@ -27,5 +27,16 @@ describe("getPreDiscountRate (basis for a line discount %)", () => {
 
   it("is the price on a plain line: 10% of 100 is 10, charged 90", () => {
     expect(charged({ id: "A", price: 100 }, undefined, 10)).toEqual({ discountAmount: 10, rate: 90 });
+  });
+});
+
+describe("getCartRowPctBasis (the classic cart row's % basis)", () => {
+  it("is the list price on a plain line, even with a restored discountPercentage: 10% of 100 is 10, as before", () => {
+    const item = { id: "A", price: 100 };
+    expect(discountAmountFromPct(getCartRowPctBasis(item, { discountPercentage: 10 }), 10)).toBe(10);
+  });
+
+  it("is the custom rate on a custom-rate line", () => {
+    expect(getCartRowPctBasis({ id: "A", price: 100 }, { customRate: 80, discountAmount: 8 })).toBe(80);
   });
 });
