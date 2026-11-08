@@ -3,6 +3,9 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from frappe.tests.classes.context_managers import change_settings
+
+from klik_pos.api.pos_profile import get_pos_details
 from klik_pos.setup.pos_profile_fields import (
     POS_PROFILE_FEATURE_FIELDS,
     install_pos_profile_feature_fields,
@@ -199,3 +202,22 @@ class TestPosProfileFormLayout(FrappeTestCase):
             if (meta.get_field(order[i]) and meta.get_field(order[i]).fieldtype in breaks)
         )
         self.assertIn("custom_allow_credit_sales_as_pos", order[start + 1:end])
+
+    def test_spec_includes_line_entry_grid_toggle(self):
+        names = [f["fieldname"] for f in POS_PROFILE_FEATURE_FIELDS]
+        f = next(x for x in POS_PROFILE_FEATURE_FIELDS if x["fieldname"] == "custom_line_entry_grid")
+        self.assertEqual((f["fieldtype"], f["default"], f["module"]), ("Check", "0", "KLiK PoS"))
+        self.assertEqual(f["insert_after"], "custom_allow_quotes")
+        self.assertLess(names.index("custom_allow_quotes"), names.index("custom_line_entry_grid"))
+
+    def test_pos_details_carries_allow_multiple_items(self):
+        profiles = frappe.get_all("POS Profile", limit=1, pluck="name")
+        if not profiles:
+            self.skipTest("no POS Profile on this site")
+        pos = frappe.get_doc("POS Profile", profiles[0])
+        with patch("klik_pos.api.pos_profile.get_current_pos_opening_entry", return_value=None), \
+                patch("klik_pos.api.pos_profile.get_current_pos_profile", return_value=pos):
+            with change_settings("Selling Settings", {"allow_multiple_items": 1}):
+                self.assertEqual(get_pos_details()["allow_multiple_items"], 1)
+            with change_settings("Selling Settings", {"allow_multiple_items": 0}):
+                self.assertEqual(get_pos_details()["allow_multiple_items"], 0)

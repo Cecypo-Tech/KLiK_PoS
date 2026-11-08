@@ -52,6 +52,8 @@ export interface POSProfile {
   custom_use_item_code_as_display_name?: boolean | number;
   custom_enable_loss_of_sale?: boolean | number;
   custom_allow_quotes?: boolean | number;
+  custom_line_entry_grid?: 0 | 1;
+  allow_multiple_items?: 0 | 1;
   custom_enhanced_search?: boolean | number;
   custom_scale_barcodes_start_with?: string;
   is_tax_included_in_basic_rate?: boolean | number | string;
