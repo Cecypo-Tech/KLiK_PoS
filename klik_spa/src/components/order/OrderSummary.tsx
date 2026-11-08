@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { mergesSameItem, useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
@@ -628,10 +628,21 @@ export default function OrderSummary({
     if (isValidatingCheckout || isSavingQuote) return;
     void handleCheckoutClick();
   };
+  // A grid cell commits on blur: blur it, then check out on the next tick, from the render that
+  // has the edit (the ref holds that render's handler).
+  const checkoutShortcutRef = useRef(openCheckoutFromShortcut);
+  useLayoutEffect(() => {
+    checkoutShortcutRef.current = openCheckoutFromShortcut;
+  });
+  const checkoutFromShortcut = () => {
+    if (!isGrid) return openCheckoutFromShortcut();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setTimeout(() => checkoutShortcutRef.current(), 0);
+  };
   usePosShortcutLayer(
     {
-      f10: openCheckoutFromShortcut,
-      shiftF10: openCheckoutFromShortcut,
+      f10: checkoutFromShortcut,
+      shiftF10: checkoutFromShortcut,
     },
     cartItems.length > 0 && !showPaymentDialog && !savedQuote,
   );
@@ -665,7 +676,8 @@ export default function OrderSummary({
       focusPanel: () => document.getElementById("pos-line-panel")?.focus(),
       toggleHelp: () => setShowHelp((v) => !v),
     },
-    isGrid,
+    // Off under a modal: F3/F8 would move focus behind it.
+    isGrid && !showPaymentDialog && !descriptionFor && !variantItem && !savedQuote && !showSalespersonAuthModal,
   );
 
   const pickGridItem = async (item: MenuItem): Promise<string | null> => {
