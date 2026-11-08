@@ -96,7 +96,6 @@ export function checkoutExtrasFromHeldOrder(
   };
 }
 
-/** A held order's line as the cart holds it, its Loss of Sale split included. */
 /** A document's lines as cart lines: a repeated item keeps its code but gets its own line id. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function heldItemsToCart(items: any[]): CartItem[] {
@@ -110,6 +109,7 @@ export function heldItemsToCart(items: any[]): CartItem[] {
   });
 }
 
+/** A held order's line as the cart holds it, its Loss of Sale split included. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function heldItemToCartItem(item: any): CartItem {
   return {

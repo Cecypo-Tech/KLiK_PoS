@@ -3187,6 +3187,8 @@ def parse_invoice_data(data):
 
 		items.append({
 			"id": item_code,
+			# The cart's line id: two lines of one item keep their own saved state by it.
+			"line_id": line_id,
 			"quantity": item.get("quantity"),
 			"price": item.get("price"),
 			"price_list_rate": flt(item.get("price_list_rate") or item.get("original_price") or 0),
