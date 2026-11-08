@@ -50,16 +50,32 @@ describe("scanAdd", () => {
     expect(lines()).toHaveLength(1);
   });
 
-  it("two scans in flight both land in order", async () => {
-    const first = defer<unknown>();
-    useProductStore.setState({ fetchItemByIdentifier: (() => first.promise.then(() => pen)) as never });
-    const p1 = scanAdd("PEN");
-    useProductStore.setState({ fetchItemByIdentifier: (async () => pen) as never });
-    const p2 = scanAdd("PEN");
-    first.resolve(null);
+  it("two scans in flight land in scan order, even when the first lookup is slower", async () => {
+    const slow = defer<void>();
+    const mk = (code: string) => ({ ...pen, id: code, item_code: code, name: code });
+    useProductStore.setState({
+      fetchItemByIdentifier: (async (c: string) => {
+        if (c === "A") await slow.promise;
+        return mk(c);
+      }) as never,
+    });
+    const p1 = scanAdd("A");
+    const p2 = scanAdd("B");
+    await new Promise((r) => setTimeout(r, 5));
+    slow.resolve();
     await Promise.all([p1, p2]);
-    expect(lines()).toHaveLength(1);
-    expect(lines()[0]!.quantity).toBe(2);
+    expect(lines().map((l) => l.item_code)).toEqual(["A", "B"]);
+  });
+
+  it("a failed lookup does not break later scans", async () => {
+    useProductStore.setState({
+      fetchItemByIdentifier: (async (c: string) => {
+        if (c === "BAD") throw new Error("boom");
+        return pen;
+      }) as never,
+    });
+    await expect(scanAdd("BAD")).rejects.toThrow("boom");
+    expect(await scanAdd("PEN")).toEqual({ lineId: lines()[0]!.id });
   });
 
   it("two scans make two lines when allow_multiple_items is 1", async () => {
