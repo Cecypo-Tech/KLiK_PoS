@@ -296,6 +296,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
             except Exception:
                 discount_data = {}
 
+        # By code too, for older readers; a second line of the code overwrites it (last wins).
         entry = item_discounts[item_code] = {
             "discountPercentage": flt(item.get("discountPercentage") or 0),
             "discountAmount": flt(item.get("discountAmount") or 0),
@@ -307,7 +308,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
             "description": item.get("description") or "",
             "selectedPriceList": discount_data.get("selectedPriceList") or "",
         }
-        item_lines.append(entry)
+        item_lines.append({**entry, "item_code": item_code})
 
     # Persist the full frontend customer object (if sent) so resume can restore it
     # directly, without a re-fetch + re-transform round-trip.
@@ -343,11 +344,14 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
 
 
 def line_meta(cart_meta, idx, item_code):
-    """The saved per-line cart state of document row `idx` (rows keep the cart's line order);
-    older documents only have it by item code."""
+    """The saved per-line cart state of document row `idx` (rows keep the cart's line order),
+    when that line is for this item; otherwise, and for older documents, by item code."""
     lines = cart_meta.get("itemLines")
     if isinstance(lines, list) and idx < len(lines) and isinstance(lines[idx], dict):
-        return lines[idx]
+        line = lines[idx]
+        # A row deleted or moved in desk shifts the rest: never take another item's line.
+        if line.get("item_code") in (None, item_code):
+            return line
     return (cart_meta.get("itemDiscounts") or {}).get(item_code) or {}
 
 

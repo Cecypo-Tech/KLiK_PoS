@@ -28,3 +28,18 @@ class TestCartMetaLines(unittest.TestCase):
 
 	def test_older_meta_falls_back_to_item_code(self):
 		self.assertEqual(line_meta({"itemDiscounts": {"PEN": {"discountAmount": 2}}}, 0, "PEN")["discountAmount"], 2)
+
+	def test_desk_edited_rows_do_not_take_another_lines_meta(self):
+		# A draft edited in desk: row 0 (PEN) deleted, so PENCIL is now row 0.
+		meta = {
+			"itemDiscounts": {"PEN": {"discountAmount": 1}, "PENCIL": {"discountAmount": 2}},
+			"itemLines": [{"item_code": "PEN", "discountAmount": 1}, {"item_code": "PENCIL", "discountAmount": 2}],
+		}
+		self.assertEqual(line_meta(meta, 0, "PENCIL")["discountAmount"], 2)
+		# Lines saved before item_code was recorded still match by position.
+		self.assertEqual(line_meta({"itemLines": [{"discountAmount": 5}]}, 0, "PEN")["discountAmount"], 5)
+
+	def test_item_lines_record_their_item_code(self):
+		data = {"customer": {"id": "x"}, "items": [{"id": "PEN", "item_code": "PEN", "quantity": 1, "price": 10}]}
+		meta = _build_cart_meta(data, _parsed_items(data), "B2C", None, None, 0, None, None, 0)
+		self.assertEqual(meta["itemLines"][0]["item_code"], "PEN")
