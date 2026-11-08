@@ -455,7 +455,7 @@ export default function OrderSummary({
       item_code: item.item_code || item.id,
       quantity: 1,
     };
-    useCartStore.getState().addToCart(newItem);
+    useCartStore.getState().addToCart(newItem, { merge: false });
   };
 
   const handleCustomerSelect = (customer: Customer) => {

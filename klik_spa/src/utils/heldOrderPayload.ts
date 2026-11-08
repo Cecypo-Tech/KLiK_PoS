@@ -182,6 +182,8 @@ export function buildOrderPayload<T extends OrderLine>({
 
     return {
       ...item,
+      // The server reads id as the item code; a second line's id is `<code>-<ms>`.
+      id: code,
       price: heldPrice,
       item_code: code,
       discountPercentage,

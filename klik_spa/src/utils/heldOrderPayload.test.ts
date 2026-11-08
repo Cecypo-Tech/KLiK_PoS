@@ -138,6 +138,23 @@ describe("heldItemToCartItem", () => {
 });
 
 describe("buildOrderPayload", () => {
+  it("sends the item code as id for a second line of the same item", () => {
+    const payload = buildOrderPayload({
+      cartItems: [{ id: "PEN-1731000000000", item_code: "PEN", quantity: 1, price: 10 }],
+      itemDiscounts: {},
+      effectiveRate: () => 10,
+      customer: { id: "C" },
+      totals: { subtotal: 10, grandTotal: 10, taxAmount: 0, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+    expect(payload.items[0]).toMatchObject({ id: "PEN", item_code: "PEN" });
+  });
+
   // The payload checkout's Hold sent before it was moved here; Save Quote sends the same.
   it("builds Hold's payload for a sample cart", () => {
     const customer = { id: "CUST-1", name: "Acme" };

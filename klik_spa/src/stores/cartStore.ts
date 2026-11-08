@@ -143,10 +143,12 @@ interface CartState {
   isPricingLoading: boolean
   pricingError: string | null
 
-  addToCart: (item: Omit<CartItem, 'quantity'>) => Promise<void>
-  addToCartQueued: (item: Omit<CartItem, 'quantity'>) => Promise<void>
+  /** The line id the item went to (added or bumped), or null when the cart refused it.
+   * `merge` defaults to mergesSameItem(); false always starts a new line. */
+  addToCart: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
+  addToCartQueued: (item: Omit<CartItem, 'quantity'>, opts?: AddOpts) => Promise<string | null>
   /** The cart line the quantity went to, or null when the cart refused it (stock). */
-  addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number) => Promise<string | null>
+  addToCartWithQuantity: (item: Omit<CartItem, 'quantity'>, quantity: number, opts?: AddOpts) => Promise<string | null>
   /** Quick entry's add: many items in one cart update and one pricing refresh. The cart line
    * each entry went to, or null where stock refused it (and a toast said why). */
   addManyToCart: (entries: BulkEntry[]) => Promise<Array<string | null>>
@@ -214,6 +216,23 @@ const shouldInsertNewItemsAtTop = (): boolean => {
   return position === 'Top';
 };
 
+export type AddOpts = { merge?: boolean }
+
+/** Selling Settings "allow multiple items": when on, adding an item again makes a new line. */
+export const mergesSameItem = (): boolean =>
+  !usePOSProfileStore.getState().posDetails?.allow_multiple_items;
+
+/** A new line keeps the item's own id unless a line already has it; then `<code>-<ms>`
+ * (checkout sends item_code, never this id). */
+const newLineId = (items: CartItem[], item: { id: string; item_code?: string }): string => {
+  const taken = (id: string) => items.some((i) => i.id === id);
+  if (!taken(item.id)) return item.id;
+  const base = `${item.item_code || item.id}-${Date.now()}`;
+  let id = base;
+  for (let n = 1; taken(id); n++) id = `${base}-${n}`;
+  return id;
+};
+
 // Move the just-modified item to the configured insertion position (Top/Bottom)
 // so a quantity bump from the product list lands where new items appear.
 const reorderToInsertionPosition = (items: CartItem[], id: string): CartItem[] =>
@@ -262,7 +281,8 @@ export const useCartStore = create<CartState>()(
 
         try {
           const itemsForPricing = state.cartItems.map(item => ({
-            id: item.id,
+            // The server reads id as the item code; a second line's id is `<code>-<ms>`.
+            id: item.item_code || item.id,
             item_code: item.item_code || item.id,
             quantity: item.quantity,
             price: item.price,
@@ -326,13 +346,16 @@ export const useCartStore = create<CartState>()(
         }
       },
 
-      addToCart: async (item) => {
+      addToCart: async (item, opts) => {
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
-        const existingItem = state.cartItems.find((cartItem) =>
-          cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
-        );
+        const existingItem = (opts?.merge ?? mergesSameItem())
+          ? state.cartItems.find((cartItem) =>
+              cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
+            )
+          : undefined;
+        let lineId: string;
         // Stock and the cart's other lines in stock units; each line may be in its own unit.
         const stockAvailable = (item.available ?? 0) * stockFactor(item);
 
@@ -340,7 +363,7 @@ export const useCartStore = create<CartState>()(
         const losEnabled = losEnabledFor(item);
         if (limited && item.available <= 0 && !losEnabled) {
           toast.error(`${item.name} is out of stock`);
-          return;
+          return null;
         }
 
         if (existingItem) {
@@ -354,11 +377,12 @@ export const useCartStore = create<CartState>()(
           });
           if (!plan) {
             toast.error(noStockMessage(item.name, existingItem.uom, stockAvailable, existingItem.conversion_factor));
-            return;
+            return null;
           }
           if (plan.los_qty > (existingItem.los_qty ?? 0)) toast.warning(losToast(item.name, existingItem.uom, plan));
 
           const targetId = existingItem.id;
+          lineId = targetId;
           const taxDetails = await fetchItemTaxDetails(
             incomingCode,
             customerId,
@@ -395,7 +419,7 @@ export const useCartStore = create<CartState>()(
             losEnabled,
             factor: item.conversion_factor,
           });
-          if (!plan) return;
+          if (!plan) return null;
           if (plan.los_qty > 0) toast.warning(losToast(item.name, item.uom, plan));
 
           const taxDetails = await fetchItemTaxDetails(
@@ -407,6 +431,7 @@ export const useCartStore = create<CartState>()(
 
           const newItem = {
             ...item,
+            id: newLineId(state.cartItems, item),
             quantity: plan.quantity,
             los_qty: plan.los_qty,
             bundle_entries: [],
@@ -418,6 +443,7 @@ export const useCartStore = create<CartState>()(
           const newCartItems = shouldInsertNewItemsAtTop()
             ? [newItem, ...state.cartItems]
             : [...state.cartItems, newItem];
+          lineId = newItem.id;
           set((s) => ({
             cartItems: newCartItems,
             highlightItemId: newItem.id,
@@ -426,25 +452,29 @@ export const useCartStore = create<CartState>()(
         }
 
         await get().refreshCartPricing();
+        return lineId;
       },
 
-      addToCartQueued: (item) => {
+      addToCartQueued: (item, opts) => {
         const run = addQueue
-          .then(() => get().addToCart(item))
+          .then(() => get().addToCart(item, opts))
           .catch((error) => {
             console.error('Queued add to cart failed:', error);
+            return null;
           });
         addQueue = run;
         return run;
       },
 
-      addToCartWithQuantity: async (item, quantity) => {
+      addToCartWithQuantity: async (item, quantity, opts) => {
         const state = get();
         const incomingCode = item.item_code || item.id;
         const customerId = state.selectedCustomer?.id;
-        const existingItem = state.cartItems.find((cartItem) =>
-          cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
-        );
+        const existingItem = (opts?.merge ?? mergesSameItem())
+          ? state.cartItems.find((cartItem) =>
+              cartItem.id === item.id || (cartItem.item_code || cartItem.id) === incomingCode
+            )
+          : undefined;
         const target = existingItem ?? item;
         const stockAvailable = (item.available ?? 0) * stockFactor(item);
         const plan = planLineQty({
@@ -503,6 +533,7 @@ export const useCartStore = create<CartState>()(
 
           const newItem = {
             ...item,
+            id: newLineId(state.cartItems, item),
             quantity: plan.quantity,
             los_qty: plan.los_qty,
             bundle_entries: [],
