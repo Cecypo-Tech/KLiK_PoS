@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { useCartStore } from "../stores/cartStore";
 
 interface LineGridShortcuts {
   focusEntry: () => void;
@@ -8,8 +9,10 @@ interface LineGridShortcuts {
 
 /**
  * The grid till's page keys, standing in for MenuGrid's (which isn't mounted in grid mode):
- * F2 customer, F3 entry row, F8 side panel, `?` help (outside inputs). F4 and F10 stay with
- * CustomerSearchSection / posShortcuts; Backspace is plain editing here.
+ * F2 customer, F3 entry row, F8 side panel, `?` help (outside inputs). F10 stays with posShortcuts
+ * and F4 with CustomerSearchSection, which ignores keys typed in inputs - but the grid's cursor is
+ * always in one, so F4 from a grid cell is handled here, under the same customer rule.
+ * Backspace is plain editing here.
  */
 export function useLineGridShortcuts(handlers: LineGridShortcuts, active: boolean): void {
   const latest = useRef(handlers);
@@ -31,6 +34,9 @@ export function useLineGridShortcuts(handlers: LineGridShortcuts, active: boolea
       } else if (e.key === "F8") {
         e.preventDefault();
         latest.current.focusPanel();
+      } else if (e.key === "F4" && target.closest("[data-col]") && useCartStore.getState().selectedCustomer) {
+        e.preventDefault();
+        useCartStore.getState().setAdditionalInfoOpen(true);
       } else if (e.key === "?" && !inInput) {
         e.preventDefault();
         latest.current.toggleHelp();

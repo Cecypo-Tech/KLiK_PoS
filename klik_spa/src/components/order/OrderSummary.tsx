@@ -84,6 +84,7 @@ export default function OrderSummary({
     checkoutExtras,
     selectedPriceList,
     highlightItemId,
+    highlightNonce,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -99,6 +100,10 @@ export default function OrderSummary({
   const [descriptionFor, setDescriptionFor] = useState<string | null>(null);
   const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  // The panel follows every add or bump (scan or pick); the cashier's own focus moves select in between.
+  useEffect(() => {
+    if (isGrid && highlightItemId) setSelectedLineId(highlightItemId);
+  }, [isGrid, highlightItemId, highlightNonce]);
 
   const { posDetails } = usePOSProfileStore();
   const refreshStockOnly = useProductStore((s) => s.refreshStockOnly);

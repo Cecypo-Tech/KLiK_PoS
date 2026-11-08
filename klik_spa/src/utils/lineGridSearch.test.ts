@@ -90,6 +90,11 @@ describe("scanAdd", () => {
     expect(lines()).toHaveLength(0);
   });
 
+  it("quiet: an unknown code returns notFound without a toast (the grid picks the typed search instead)", async () => {
+    expect(await scanAdd("NOPE", { quiet: true })).toEqual({ notFound: true });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it("returns refused when the cart refuses the add", async () => {
     useProductStore.setState({ fetchItemByIdentifier: (async () => ({ ...pen, available: 0 })) as never });
     expect(await scanAdd("PEN")).toEqual({ refused: true });

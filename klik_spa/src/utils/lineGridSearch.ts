@@ -26,10 +26,10 @@ export type ScanResult = { lineId: string } | { notFound: true } | { refused: tr
 
 let scanTail: Promise<unknown> = Promise.resolve();
 
-async function run(code: string): Promise<ScanResult> {
+async function run(code: string, quiet: boolean): Promise<ScanResult> {
   const item = await useProductStore.getState().fetchItemByIdentifier(code);
   if (!item) {
-    toast.error(`No item found for ${code}`);
+    if (!quiet) toast.error(`No item found for ${code}`);
     return { notFound: true };
   }
   const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never);
@@ -37,9 +37,10 @@ async function run(code: string): Promise<ScanResult> {
 }
 
 /** Resolve a scanned code and add it. Scans are serialised (lookup included) so lines land in scan order.
- * Ignores auto_add_item_to_cart and custom_use_scanner_fully. */
-export function scanAdd(code: string): Promise<ScanResult> {
-  const result = scanTail.then(() => run(code));
+ * Ignores auto_add_item_to_cart and custom_use_scanner_fully. `quiet`: no "not found" toast, for a
+ * caller with a typed-search pick to fall back on. */
+export function scanAdd(code: string, { quiet = false } = {}): Promise<ScanResult> {
+  const result = scanTail.then(() => run(code, quiet));
   scanTail = result.catch(() => undefined); // a failed scan must not break the chain
   return result;
 }

@@ -158,7 +158,7 @@ export default function KeyboardShortcutsPanel({ isOpen, onClose, mode = "cart" 
               </p>
               <div className="divide-y divide-gray-50 dark:divide-gray-800">
                 {group.shortcuts.map((s, i) => (
-                  <ShortcutRow key={i} keys={s.keys} description={s.description} />
+                  <ShortcutRow key={i} keys={s.keys} description={s.description} separator={s.separator} />
                 ))}
               </div>
             </div>

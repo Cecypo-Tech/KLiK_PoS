@@ -72,7 +72,10 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   // Runs after every render: deletes and picks change `items`, and the target cell only exists afterwards.
   useLayoutEffect(flushFocus);
 
-  useImperativeHandle(ref, () => ({ focusEntry: () => focusCell(entryRow, "item") }), [entryRow]);
+  // By the entry row's own marker, not its index: after an awaited add the index captured by this
+  // render's closures is stale (the new line takes it when lines land at the bottom).
+  const focusEntry = () => tableRef.current?.querySelector<HTMLElement>("[data-entry-row] input")?.focus();
+  useImperativeHandle(ref, () => ({ focusEntry }), []);
 
   useEffect(() => {
     const q = query.trim();
@@ -100,7 +103,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     setOpen(false);
     const lineId = await onPickItem(item);
     if (!lineId) {
-      focusCell(entryRow, "item"); // refused, or the variant picker took over: keep the typed text
+      focusEntry(); // refused, or the variant picker took over: keep the typed text
       return;
     }
     setQuery("");
@@ -113,14 +116,14 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     if (!q) return;
     let r;
     try {
-      r = await scanAdd(q);
+      r = await scanAdd(q, { quiet: results.length > 0 }); // with results to pick, a miss isn't an error
     } catch (e) {
       console.error("Grid scan failed:", e); // leave the text so the cashier can retry
       return;
     }
     if ("lineId" in r) {
       setQuery("");
-      focusCell(entryRow, "item");
+      focusEntry();
     } else if ("notFound" in r && results.length) {
       await pick(results[highlight]);
     }
