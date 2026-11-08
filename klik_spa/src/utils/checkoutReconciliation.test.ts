@@ -61,3 +61,13 @@ describe("reconcileCheckout", () => {
     expect(result.extraCharges).toEqual([]);
   });
 });
+
+describe("two lines of one item", () => {
+  it("each matches its own preview line", () => {
+    const out = reconcileCheckout(
+      [{ item_code: "PEN", qty: 1, rate: 10 }, { item_code: "PEN", qty: 1, rate: 8 }],
+      [{ item_code: "PEN", qty: 1, rate: 10, amount: 10 }, { item_code: "PEN", qty: 1, rate: 8, amount: 8 }] as never,
+    );
+    expect(out.ok).toBe(true);
+  });
+});

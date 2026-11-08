@@ -15,7 +15,7 @@ from klik_pos.api.sales_invoice import (
     resolve_selling_price_list,
     set_line_price_list,
 )
-from klik_pos.api.sales_order import _active_till, _apply_order_discount, _build_cart_meta
+from klik_pos.api.sales_order import _active_till, _apply_order_discount, _build_cart_meta, line_meta
 from klik_pos.overrides.loss_of_sale import split_held_items
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,6 @@ def get_quote_details(quote_id):
                 cart_meta = json.loads(q.custom_klik_cart_meta)
             except Exception:
                 pass
-        item_discounts = cart_meta.get("itemDiscounts", {})
         expired = _is_expired(q.valid_till)
 
         names = {
@@ -256,15 +255,15 @@ def get_quote_details(quote_id):
                 "quantity": flt(row.qty),
                 "los_qty": 0,
                 "uom": row.uom,
-                "bundle_entries": (item_discounts.get(row.item_code) or {}).get("bundle_entries") or [],
+                "bundle_entries": line_meta(cart_meta, i, row.item_code).get("bundle_entries") or [],
             }
-            for row in q.items
+            for i, row in enumerate(q.items)
         ]
         split_held_items(lines, _active_till())
 
         items = []
-        for row, line in zip(q.items, lines):
-            d = item_discounts.get(row.item_code) or {}
+        for i, (row, line) in enumerate(zip(q.items, lines)):
+            d = line_meta(cart_meta, i, row.item_code)
             fresh = expired
             items.append({
                 "item_code": row.item_code,

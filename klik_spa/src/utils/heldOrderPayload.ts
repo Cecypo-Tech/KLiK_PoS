@@ -97,6 +97,19 @@ export function checkoutExtrasFromHeldOrder(
 }
 
 /** A held order's line as the cart holds it, its Loss of Sale split included. */
+/** A document's lines as cart lines: a repeated item keeps its code but gets its own line id. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function heldItemsToCart(items: any[]): CartItem[] {
+  const seen = new Set<string>();
+  return items.map((raw) => {
+    const line = heldItemToCartItem(raw);
+    let id = line.id;
+    for (let n = 1; seen.has(id); n++) id = `${line.id}-${n}`;
+    seen.add(id);
+    return { ...line, id };
+  });
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function heldItemToCartItem(item: any): CartItem {
   return {
@@ -171,7 +184,7 @@ export function buildOrderPayload<T extends OrderLine>({
 }) {
   const items = cartItems.map((item) => {
     const code = item.item_code || item.id;
-    const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
+    const discountData = itemDiscounts[item.id] || itemDiscounts[code] || {};
     const discountPercentage = Number(discountData.discountPercentage) || Number(item.discount_percentage) || 0;
     const discountAmount = Number(discountData.discountAmount) || Number(item.discount_amount) || 0;
 
@@ -184,6 +197,8 @@ export function buildOrderPayload<T extends OrderLine>({
       ...item,
       // The server reads id as the item code; a second line's id is `<code>-<ms>`.
       id: code,
+      // The cart's own line id: the server keeps each line's state apart by it.
+      line_id: item.id,
       price: heldPrice,
       item_code: code,
       discountPercentage,

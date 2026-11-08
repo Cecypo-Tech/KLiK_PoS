@@ -3157,9 +3157,9 @@ def parse_invoice_data(data):
 	for item in data.get("items", []):
 		# Draft edit flows can send a unique cart-line id and the actual item code separately.
 		item_code = item.get("item_code") or item.get("id")
-		line_id = item.get("id")
+		line_id = item.get("line_id") or item.get("id")
 
-		discount_data = item_discounts.get(item_code) or item_discounts.get(line_id) or {}
+		discount_data = item_discounts.get(line_id) or item_discounts.get(item_code) or {}
 		if isinstance(discount_data, str):
 			try:
 				discount_data = json.loads(discount_data)

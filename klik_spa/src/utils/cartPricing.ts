@@ -59,7 +59,7 @@ function parseItemTaxRate(raw: string | Record<string, number> | undefined) {
 function resolveDiscountData(item: PricingItemLike, itemDiscounts: DiscountMapLike = {}) {
   const itemCodeKey = typeof item.item_code === "string" ? item.item_code : undefined;
   const itemIdKey = typeof item.id === "string" ? item.id : undefined;
-  return (itemCodeKey ? itemDiscounts[itemCodeKey] : undefined) || (itemIdKey ? itemDiscounts[itemIdKey] : undefined) || {};
+  return (itemIdKey ? itemDiscounts[itemIdKey] : undefined) || (itemCodeKey ? itemDiscounts[itemCodeKey] : undefined) || {};
 }
 
 function getLegacyExclusiveTaxRate(item: PricingItemLike) {

@@ -1016,10 +1016,11 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return {
       items: cartItems.map((item) => {
         const code = item.item_code || item.id;
-        const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
+        const discountData = itemDiscounts[item.id] || itemDiscounts[code] || {};
         return {
           ...item,
           id: item.item_code || item.id,
+          line_id: item.id,
           item_code: item.item_code || item.id,
           price: getEffectiveItemRate(item),
           uom: item.uom || "Nos",
@@ -1408,7 +1409,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       customer: { id: selectedCustomer?.id },
       items: cartItems.map((item) => {
         const code = item.item_code || item.id;
-        const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
+        const discountData = itemDiscounts[item.id] || itemDiscounts[code] || {};
         const rawItemTaxRate = (item.item_tax_rate || {}) as Record<string, number>;
         const normalizedItemTaxRate: Record<string, number> = {};
         Object.keys(rawItemTaxRate)
@@ -1495,7 +1496,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           customer: { id: selectedCustomer.id },
           items: cartItems.map((item) => {
             const code = item.item_code || item.id;
-            const discountData = itemDiscounts[code] || itemDiscounts[item.id] || {};
+            const discountData = itemDiscounts[item.id] || itemDiscounts[code] || {};
             return {
               id: code,
               quantity: item.quantity,
