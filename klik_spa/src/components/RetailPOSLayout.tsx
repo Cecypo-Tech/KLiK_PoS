@@ -10,6 +10,8 @@ import BarcodeScannerModal from "./BarcodeScanner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useProduct } from "../providers/ProductProvider";
 import { usePOSProfileStore } from "../stores/posProfileStore";
+import { scanAdd } from "../utils/lineGridSearch";
+import { toast } from "react-toastify";
 
 export default function RetailPOSLayout() {
   const [showScanner, setShowScanner] = useState(false);
@@ -65,10 +67,24 @@ export default function RetailPOSLayout() {
     searchProducts(query);
   }, [searchProducts]);
 
+  const isGrid = !!posDetails?.custom_line_entry_grid && !isMobile;
+
   const handleBarcodeDetected = useCallback((barcode: string) => {
-    searchProducts(barcode, true);
     setShowScanner(false);
-  }, [searchProducts]);
+    if (!isGrid) {
+      searchProducts(barcode, true);
+      return;
+    }
+    // Grid tills: a camera scan adds like a scanner scan into the entry row.
+    scanAdd(barcode)
+      .then((r) => {
+        if ("pick" in r) toast.info(`${r.pick.name} has variants: type it in the entry row to pick one`);
+      })
+      .catch((e) => {
+        console.error("Camera scan failed:", e);
+        toast.error(`Lookup for ${barcode} failed`);
+      });
+  }, [searchProducts, isGrid]);
 
   const handleCategoryChange = useCallback((category: string) => {
     setCategory(category);
@@ -140,6 +156,16 @@ export default function RetailPOSLayout() {
 
   return (
     <>
+      {isGrid ? (
+        <div className="flex h-screen bg-gray-50 dark:bg-gray-900 pb-2">
+          <div className="flex-1 overflow-hidden ml-20 flex flex-col">
+            <MenuGrid headerOnly onRefreshStock={handleRefreshStock} onScanBarcode={() => setShowScanner(true)} />
+            <div className="flex-1 min-h-0">
+              <OrderSummary layout="grid" onClearCart={clearCart} />
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900 pb-2">
         <div className="flex-1 overflow-hidden ml-20">
           <MenuGrid
@@ -147,11 +173,12 @@ export default function RetailPOSLayout() {
             onScanBarcode={() => setShowScanner(true)}
           />
         </div>
-        
+
         <div className="w-[35%] min-w-[420px] max-w-[600px] bg-white shadow-lg overflow-y-auto">
           <OrderSummary onClearCart={clearCart} />
         </div>
       </div>
+      )}
 
       <BarcodeScannerModal
         isOpen={showScanner}

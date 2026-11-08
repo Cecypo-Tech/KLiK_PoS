@@ -59,7 +59,7 @@ function parseItemTaxRate(raw: string | Record<string, number> | undefined) {
 function resolveDiscountData(item: PricingItemLike, itemDiscounts: DiscountMapLike = {}) {
   const itemCodeKey = typeof item.item_code === "string" ? item.item_code : undefined;
   const itemIdKey = typeof item.id === "string" ? item.id : undefined;
-  return (itemCodeKey ? itemDiscounts[itemCodeKey] : undefined) || (itemIdKey ? itemDiscounts[itemIdKey] : undefined) || {};
+  return (itemIdKey ? itemDiscounts[itemIdKey] : undefined) || (itemCodeKey ? itemDiscounts[itemCodeKey] : undefined) || {};
 }
 
 function getLegacyExclusiveTaxRate(item: PricingItemLike) {
@@ -116,12 +116,14 @@ export function getEffectiveItemRate(item: PricingItemLike, options: RateOptions
   const customRate = discountData.customRate;
 
   if (customRate !== undefined && customRate !== null) {
-    const enteredRate = Math.max(0, Number(customRate) || 0);
+    let rate = Math.max(0, Number(customRate) || 0);
     const exclusiveTaxRate = getExclusiveTaxRateForItem(item, options);
     if (exclusiveTaxRate > 0 && discountData.customRateIncludesTax !== false) {
-      return roundCurrency(enteredRate / (1 + exclusiveTaxRate / 100));
+      rate = rate / (1 + exclusiveTaxRate / 100);
     }
-    return roundCurrency(enteredRate);
+    // A line discount on top of the cashier's rate, in the same (tax-exclusive) basis as below.
+    if (discountAmount > 0) rate = Math.max(0, roundCurrency(rate) - discountAmount);
+    return roundCurrency(rate);
   }
 
   let rate = Number(item?.price || 0);
@@ -132,6 +134,26 @@ export function getEffectiveItemRate(item: PricingItemLike, options: RateOptions
     rate = Math.max(0, rate - discountAmount);
   }
   return roundCurrency(Math.max(0, rate));
+}
+
+/** The line's rate before its line discount (a custom rate, else the price): the basis of a line discount %. */
+export function getPreDiscountRate(item: PricingItemLike, options: RateOptions = {}) {
+  const key = String(item.id ?? item.item_code ?? "");
+  const itemDiscounts = options.itemDiscounts || {};
+  const own = resolveDiscountData(item, itemDiscounts);
+  return getEffectiveItemRate(item, { ...options, itemDiscounts: { ...itemDiscounts, [key]: { ...own, discountAmount: 0 } } });
+}
+
+/** The classic cart row's % basis: the custom rate on a custom-rate line, else the list price
+ * (as it always was, even with a restored discountPercentage). The grid uses getPreDiscountRate. */
+export function getCartRowPctBasis(
+  item: PricingItemLike & { id: string },
+  itemDiscount: DiscountDataLike,
+  isTaxIncludedInBasicRate?: boolean,
+) {
+  return itemDiscount.customRate != null
+    ? getPreDiscountRate(item, { itemDiscounts: { [item.id]: itemDiscount }, isTaxIncludedInBasicRate })
+    : Number(item.price || 0);
 }
 
 export function getEffectiveDisplayRate(item: PricingItemLike, options: RateOptions = {}) {

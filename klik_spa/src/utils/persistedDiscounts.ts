@@ -24,10 +24,8 @@ export interface PersistedDiscountFields {
 }
 
 export function shouldRestorePersistedDiscount(item: PersistedDiscountFields): boolean {
-  // A custom rate is the cashier's own number. Pricing never folds it into `price`, so
-  // it always has to be restored, whatever a rule did alongside it.
-  if (item.custom_rate !== undefined && item.custom_rate !== null) return true;
-
+  // A custom rate is restored by the caller regardless; the discount beside it follows the
+  // same rule as any line's, since it now comes off the custom rate too.
   const price = Number(item.price || 0);
   const original = Number(item.original_price || 0);
 

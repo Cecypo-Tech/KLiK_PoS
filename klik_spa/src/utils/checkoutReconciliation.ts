@@ -43,13 +43,14 @@ export function reconcileCheckout(
   previewLines: PreviewLine[],
   epsilon: number = DEFAULT_EPSILON,
 ): Reconciliation {
-  const previewByCode = new Map<string, PreviewLine>();
+  // Two cart lines of one item match its preview lines in order.
+  const previewByCode = new Map<string, PreviewLine[]>();
   for (const line of previewLines) {
-    previewByCode.set(line.item_code, line);
+    previewByCode.set(line.item_code, [...(previewByCode.get(line.item_code) ?? []), line]);
   }
 
   for (const cartLine of cartLines) {
-    const previewLine = previewByCode.get(cartLine.item_code);
+    const previewLine = previewByCode.get(cartLine.item_code)?.shift();
 
     if (!previewLine) {
       return {

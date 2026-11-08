@@ -7,7 +7,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useProduct } from "../providers/ProductProvider";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useCartStore } from "../stores/cartStore";
-import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap, Warehouse } from "lucide-react";
+import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap, Warehouse, Scan } from "lucide-react";
 import { toast } from "react-toastify";
 import { clearCacheAndReload } from "../utils/clearCache";
 import { isItemOutOfStock } from "../utils/stock";
@@ -23,9 +23,11 @@ import QuickEntryDialog from "./QuickEntryDialog";
 interface MenuGridProps {
   onRefreshStock?: () => void;
   onScanBarcode?: () => void;
+  /** Line-entry grid tills: the top bar only. The grid's entry row is the search and owns the keys. */
+  headerOnly?: boolean;
 }
 
-export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProps) {
+export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = false }: MenuGridProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const {
@@ -133,6 +135,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
   };
 
   useEffect(() => {
+    if (headerOnly) return; // useLineGridShortcuts owns F2/F3/?
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const tag = target.tagName;
@@ -165,14 +168,14 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, []);
+  }, [headerOnly]);
 
   const handleCategoryChange = (category: string) => {
     setCategory(category);
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={headerOnly ? "flex flex-col" : "flex flex-col h-full"}>
       {/* Above the item list's sticky group headers (z-20), so the user menu that drops from
           here is never drawn under them; below dialogs (z-50) and checkout (z-60), which cover
           this whole page. Cards are their own stacking contexts (z-1/z-2), so their inner
@@ -180,13 +183,27 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
       <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3 flex-1 max-w-md">
-            <SearchBar
-              searchQuery={searchQuery}
-              onSearchChange={handleSearchChange}
-              onScanBarcode={onScanBarcode}
-              onSearchKeyDown={handleSearchKeyDown}
-            />
+            {headerOnly ? (
+              onScanBarcode && (
+                <button
+                  onClick={onScanBarcode}
+                  className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  title="Scan Barcode"
+                  type="button"
+                >
+                  <Scan className="w-4 h-4" />
+                </button>
+              )
+            ) : (
+              <SearchBar
+                searchQuery={searchQuery}
+                onSearchChange={handleSearchChange}
+                onScanBarcode={onScanBarcode}
+                onSearchKeyDown={handleSearchKeyDown}
+              />
+            )}
             <button
+              id="pos-shortcuts-btn"
               onClick={() => setShowShortcuts(true)}
               className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               title="Keyboard shortcuts (?)"
@@ -201,7 +218,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
             >
               <Zap className="w-4 h-4" />
             </button>}
-            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+            {!headerOnly && <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
@@ -224,7 +241,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
               >
                 <List className="w-4 h-4" />
               </button>
-            </div>
+            </div>}
 
             {!posDetails?.allow_warehouse_change && posDetails?.warehouse && (
               <div
@@ -356,15 +373,15 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
           </div>
         </div>
 
-        <div className="px-6">
+        {!headerOnly && <div className="px-6">
           <CategoryTabs
             selectedCategory={selectedCategory}
             onCategoryChange={handleCategoryChange}
           />
-        </div>
+        </div>}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {!headerOnly && <div className="flex-1 overflow-y-auto">
         <ProductGrid
           scannerOnly={useScannerOnly}
           viewMode={viewMode}
@@ -374,9 +391,9 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode }: MenuGridProp
           totalCount={totalCount}
           isSearching={isSearching}
         />
-      </div>
+      </div>}
 
-      <KeyboardShortcutsPanel isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <KeyboardShortcutsPanel isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} mode={headerOnly ? "grid" : "cart"} />
       <QuickEntryDialog
         isOpen={showQuickEntry}
         onClose={() => setShowQuickEntry(false)}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useCartStore } from "../../stores/cartStore";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { mergesSameItem, useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
 import { ShoppingCart } from "lucide-react";
@@ -9,7 +9,7 @@ import { extractErrorFromException } from "../../utils/errorExtraction";
 import { getBatches } from "../../utils/batch";
 import { getSerials } from "../../utils/serial";
 import { isExplicitlyNotTracked } from "../../utils/trackingFlags";
-import type { CartItem } from "../../../types";
+import type { CartItem, MenuItem } from "../../../types";
 import type { Customer } from "../../types/customer";
 import PaymentDialog from "../dialog/PaymentDialog";
 import QuoteSavedDialog from "../dialog/QuoteSavedDialog";
@@ -40,18 +40,26 @@ import { roundCurrency } from "../../utils/currencyMath";
 import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import { CART_ROW_GRID } from "./cartTableLayout";
 import { discountForOverride } from "../../utils/rateOverrides";
+import LineGrid, { type LineGridHandle } from "./LineGrid";
+import DescriptionDialog from "./DescriptionDialog";
+import VariantPickerModal from "../VariantPickerModal";
+import { useLineGridShortcuts } from "../../hooks/useLineGridShortcuts";
 
 interface OrderSummaryProps {
   onClearCart?: () => void;
   isMobile?: boolean;
   onPaymentCompleted?: () => void;
+  /** "grid": the line-entry till (LineGrid + a side panel for the selected line). */
+  layout?: "cart" | "grid";
 }
 
 export default function OrderSummary({
   onClearCart,
   isMobile = false,
   onPaymentCompleted,
+  layout = "cart",
 }: OrderSummaryProps) {
+  const isGrid = layout === "grid";
   const {
     cartItems,
     selectedCustomer,
@@ -74,6 +82,8 @@ export default function OrderSummary({
     shippingRule,
     checkoutExtras,
     selectedPriceList,
+    highlightItemId,
+    highlightNonce,
   } = useCartStore();
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -83,6 +93,15 @@ export default function OrderSummary({
   const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | "quote" | null>(null);
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [savedQuote, setSavedQuote] = useState<{ name: string; customerName: string; phone: string } | null>(null);
+  // Grid mode only.
+  const gridRef = useRef<LineGridHandle>(null);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null); // same id: React bails out, no re-render
+  const [descriptionFor, setDescriptionFor] = useState<string | null>(null);
+  const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
+  // The panel follows every add or bump (scan or pick); the cashier's own focus moves select in between.
+  useEffect(() => {
+    if (isGrid && highlightItemId) setSelectedLineId(highlightItemId);
+  }, [isGrid, highlightItemId, highlightNonce]);
 
   const { posDetails } = usePOSProfileStore();
   const refreshStockOnly = useProductStore((s) => s.refreshStockOnly);
@@ -455,7 +474,7 @@ export default function OrderSummary({
       item_code: item.item_code || item.id,
       quantity: 1,
     };
-    useCartStore.getState().addToCart(newItem);
+    useCartStore.getState().addToCart(newItem, { merge: false });
   };
 
   const handleCustomerSelect = (customer: Customer) => {
@@ -607,10 +626,21 @@ export default function OrderSummary({
     if (isValidatingCheckout || isSavingQuote) return;
     void handleCheckoutClick();
   };
+  // A grid cell commits on blur: blur it, then check out on the next tick, from the render that
+  // has the edit (the ref holds that render's handler).
+  const checkoutShortcutRef = useRef(openCheckoutFromShortcut);
+  useLayoutEffect(() => {
+    checkoutShortcutRef.current = openCheckoutFromShortcut;
+  });
+  const checkoutFromShortcut = () => {
+    if (!isGrid) return openCheckoutFromShortcut();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setTimeout(() => checkoutShortcutRef.current(), 0);
+  };
   usePosShortcutLayer(
     {
-      f10: openCheckoutFromShortcut,
-      shiftF10: openCheckoutFromShortcut,
+      f10: checkoutFromShortcut,
+      shiftF10: checkoutFromShortcut,
     },
     cartItems.length > 0 && !showPaymentDialog && !savedQuote,
   );
@@ -637,139 +667,119 @@ export default function OrderSummary({
     }
   };
 
-  return (
+  const focusEntry = () => gridRef.current?.focusEntry();
+  useLineGridShortcuts(
+    {
+      focusEntry,
+      focusPanel: () => document.getElementById("pos-line-panel")?.focus(),
+      // One help panel: the top bar's (MenuGrid, header-only in grid mode).
+      toggleHelp: () => document.getElementById("pos-shortcuts-btn")?.click(),
+    },
+    // Off under a modal: F3/F8 would move focus behind it.
+    isGrid && !showPaymentDialog && !descriptionFor && !variantItem && !savedQuote && !showSalespersonAuthModal,
+  );
+
+  const pickGridItem = async (item: MenuItem): Promise<string | null> => {
+    if (item.is_variant_template || item.has_variants) {
+      setVariantItem(item);
+      return null;
+    }
+    return useCartStore.getState().addToCartQueued({ ...item, item_code: item.id }, { merge: mergesSameItem() });
+  };
+
+  const customerHeader = (
+    <div className={!isMobile ? "px-6 py-4 border-b border-gray-100 dark:border-gray-700" : ""}>
+      <CustomerSearchSection
+        selectedCustomer={selectedCustomer}
+        onCustomerSelect={handleCustomerSelect}
+        onCustomerClear={handleCustomerClear}
+        isMobile={isMobile}
+      />
+      <CustomerLoyaltySummary
+        customer={selectedCustomer}
+        currencySymbol={currency_symbol}
+      />
+    </div>
+  );
+
+  const quoteBanner = quoteMode && (
     <div
-      className={`${
-        isMobile ? "h-full flex flex-col" : "h-full flex flex-col"
-      } bg-white dark:bg-gray-800 ${
-        !isMobile ? "border-l" : ""
-      } border-gray-200 dark:border-gray-700`}
+      role="status"
+      className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm"
     >
-      <div className={!isMobile ? "px-6 py-4 border-b border-gray-100 dark:border-gray-700" : ""}>
-        <CustomerSearchSection
-          selectedCustomer={selectedCustomer}
-          onCustomerSelect={handleCustomerSelect}
-          onCustomerClear={handleCustomerClear}
-          isMobile={isMobile}
-        />
-        <CustomerLoyaltySummary
-          customer={selectedCustomer}
-          currencySymbol={currency_symbol}
-        />
-      </div>
-
-      {quoteMode && (
-        <div
-          role="status"
-          className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm"
-        >
-          <span className="font-semibold">QUOTE MODE — not a sale; stock is not limited</span>
-          <button
-            id="pos-cancel-quote-btn"
-            onClick={exitQuoteMode}
-            className="shrink-0 rounded-lg border border-amber-500 px-2 py-1 text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-800/40"
-          >
-            Cancel quote
-          </button>
-        </div>
-      )}
-
-      <div
-        className={`${
-          isMobile
-            ? "flex-1 overflow-y-auto custom-scrollbar"
-            : "flex-1 overflow-y-auto cart-scroll"
-        }`}
+      <span className="font-semibold">QUOTE MODE — not a sale; stock is not limited</span>
+      <button
+        id="pos-cancel-quote-btn"
+        onClick={exitQuoteMode}
+        className="shrink-0 rounded-lg border border-amber-500 px-2 py-1 text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-800/40"
       >
-        {/* A table like the product list: one header, rows split by a rule, no cards. */}
-        {cartItems.length > 0 && (
-          <div
-            className={`${CART_ROW_GRID} sticky top-0 z-10 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400`}
-          >
-            <span>Item</span>
-            <span className="text-center">Qty</span>
-            <span className="text-right">Rate</span>
-            <span className="text-right">Total</span>
-          </div>
-        )}
-        <div className="divide-y divide-gray-200 dark:divide-gray-700">
-          {cartItems.length === 0 ? (
-            <div className="text-center py-8">
-              <ShoppingCart className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                Your cart is empty
-              </h3>
-              <p className="text-gray-500 dark:text-gray-400">
-                Add some items to get started!
-              </p>
-              {!quoteMode && canQuote && (
-                <button
-                  id="pos-quote-btn"
-                  onClick={enterQuoteMode}
-                  className="mt-4 px-3 py-2 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm"
-                >
-                  Quote
-                </button>
-              )}
-            </div>
-          ) : (
-            cartItems.map((item) => {
-              const itemDiscount = itemDiscounts[item.id] || {
-                discountPercentage: 0,
-                discountAmount: 0,
-                batchNumber: "",
-                serialNumber: "",
-                availableQuantity: 150,
-              };
+        Cancel quote
+      </button>
+    </div>
+  );
 
-              return (
-                <CartItemRow
-                  key={item.id}
-                  item={item}
-                  itemId={item.id}
-                  isExpanded={expandedCartItemId === item.id}
-                  onToggleExpand={() => toggleItemExpansion(item.id)}
-                  itemDiscount={itemDiscount}
-                  onUpdateQuantity={handleUpdateQuantity}
-                  onRemoveItem={handleRemoveItem}
-                  onUOMChange={handleUOMChange}
-                  onDiscountChange={updateItemDiscount}
-                  onCustomRateChange={handleCustomRateChange}
-                  onDuplicateItem={handleDuplicateItem}
-                  onBundleUpdate={handleBundleUpdate}
-                  onDescriptionChange={updateItemDescription}
-                  selectedCustomer={selectedCustomer}
-                  posDetails={posDetails}
-                  itemBatches={itemBatches[item.item_code || item.id] || []}
-                  itemSerials={itemSerials[item.item_code || item.id] || []}
-                  currency_symbol={currency_symbol}
-                  isMobile={isMobile}
-                  autoFetchBatch={autoFetchBatch}
-                />
-              );
-            })
-          )}
-        </div>
-      </div>
+  const quoteButton = !quoteMode && canQuote && (
+    <button
+      id="pos-quote-btn"
+      onClick={enterQuoteMode}
+      className="mt-4 px-3 py-2 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm"
+    >
+      Quote
+    </button>
+  );
 
-      {cartItems.length > 0 && (
-        <OrderSummaryFooter
-          subtotal={subtotal}
-          total={total}
-          totalItemDiscount={totalItemDiscount}
-          couponDiscount={couponDiscount}
-          onCheckout={handleCheckoutClick}
-          onClearCart={handleClearCart}
-          isValidating={isValidatingCheckout || isRecoveringCheckout || isSavingQuote}
-          isMobile={isMobile}
-          currency_symbol={currency_symbol}
-          taxExclusive={!isTaxIncludedInBasicRate}
-          netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
-          quoteMode={quoteMode}
-          onQuote={canQuote ? enterQuoteMode : undefined}
-        />
-      )}
+  const cartRow = (item: CartItem, isExpanded: boolean, onToggleExpand: () => void) => (
+    <CartItemRow
+      key={item.id}
+      item={item}
+      itemId={item.id}
+      isExpanded={isExpanded}
+      onToggleExpand={onToggleExpand}
+      itemDiscount={itemDiscounts[item.id] || {
+        discountPercentage: 0,
+        discountAmount: 0,
+        batchNumber: "",
+        serialNumber: "",
+        availableQuantity: 150,
+      }}
+      onUpdateQuantity={handleUpdateQuantity}
+      onRemoveItem={handleRemoveItem}
+      onUOMChange={handleUOMChange}
+      onDiscountChange={updateItemDiscount}
+      onCustomRateChange={handleCustomRateChange}
+      onDuplicateItem={handleDuplicateItem}
+      onBundleUpdate={handleBundleUpdate}
+      onDescriptionChange={updateItemDescription}
+      selectedCustomer={selectedCustomer}
+      posDetails={posDetails}
+      itemBatches={itemBatches[item.item_code || item.id] || []}
+      itemSerials={itemSerials[item.item_code || item.id] || []}
+      currency_symbol={currency_symbol}
+      isMobile={isMobile}
+      autoFetchBatch={autoFetchBatch}
+    />
+  );
 
+  const footer = cartItems.length > 0 && (
+    <OrderSummaryFooter
+      subtotal={subtotal}
+      total={total}
+      totalItemDiscount={totalItemDiscount}
+      couponDiscount={couponDiscount}
+      onCheckout={handleCheckoutClick}
+      onClearCart={handleClearCart}
+      isValidating={isValidatingCheckout || isRecoveringCheckout || isSavingQuote}
+      isMobile={isMobile}
+      currency_symbol={currency_symbol}
+      taxExclusive={!isTaxIncludedInBasicRate}
+      netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
+      quoteMode={quoteMode}
+      onQuote={canQuote ? enterQuoteMode : undefined}
+    />
+  );
+
+  const dialogs = (
+    <>
       {showPaymentDialog && (
         <PaymentDialog
           isOpen={showPaymentDialog}
@@ -808,6 +818,139 @@ export default function OrderSummary({
         title="Start transaction"
         description="Verify the salesperson before checkout or holding this order."
       />
+    </>
+  );
+
+  if (isGrid) {
+    const lineIds = (id: string | null) => (id && cartItems.some((i) => i.id === id) ? id : null);
+    // Nothing picked (or it was removed): follow the line the cart last added to or bumped.
+    const selectedId = lineIds(selectedLineId) ?? lineIds(highlightItemId);
+    const selected = cartItems.find((i) => i.id === selectedId);
+    const descriptionLine = cartItems.find((i) => i.id === descriptionFor);
+    return (
+      <div className="h-full flex bg-white dark:bg-gray-800">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {quoteBanner}
+          <div className="flex-1 overflow-y-auto cart-scroll">
+            <LineGrid
+              ref={gridRef}
+              items={cartItems}
+              itemDiscounts={itemDiscounts}
+              selectedId={selectedId}
+              onSelect={setSelectedLineId}
+              onUpdateQuantity={handleUpdateQuantity}
+              onCustomRateChange={handleCustomRateChange}
+              onDiscountChange={updateItemDiscount}
+              onRemoveItem={handleRemoveItem}
+              onOpenDescription={setDescriptionFor}
+              onPickItem={pickGridItem}
+              currencySymbol={currency_symbol || ""}
+              posDetails={posDetails}
+            />
+          </div>
+        </div>
+        <div className="w-[380px] shrink-0 flex flex-col border-l border-gray-200 dark:border-gray-700 shadow-lg">
+          {customerHeader}
+          <div
+            id="pos-line-panel"
+            tabIndex={-1}
+            className="flex-1 overflow-y-auto cart-scroll outline-none focus-visible:ring-2 focus-visible:ring-beveren-400/50"
+            onKeyDown={(e) => {
+              // Esc goes back to the grid, unless it belongs to a modal/popup opened from the panel.
+              if (e.key !== "Escape" || (e.target as HTMLElement).closest(".fixed, [role='dialog']")) return;
+              e.preventDefault();
+              focusEntry();
+            }}
+          >
+            {selected ? (
+              cartRow(selected, true, () => {})
+            ) : (
+              <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                {cartItems.length ? "Select a line" : "Scan or type an item to start"}
+                {cartItems.length === 0 && <div>{quoteButton}</div>}
+              </div>
+            )}
+          </div>
+          {footer}
+        </div>
+
+        {dialogs}
+        <DescriptionDialog
+          isOpen={!!descriptionLine}
+          itemName={descriptionLine?.name || ""}
+          initialValue={descriptionLine?.description || ""}
+          onSave={(value) => {
+            if (descriptionLine) updateItemDescription(descriptionLine.id, value);
+            setDescriptionFor(null);
+            focusEntry();
+          }}
+          onClose={() => setDescriptionFor(null)}
+        />
+        {variantItem && (
+          <VariantPickerModal
+            item={variantItem}
+            customerId={selectedCustomer?.id}
+            onClose={() => { setVariantItem(null); focusEntry(); }}
+            onSelectVariant={async (variant) => { await pickGridItem(variant); }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`${
+        isMobile ? "h-full flex flex-col" : "h-full flex flex-col"
+      } bg-white dark:bg-gray-800 ${
+        !isMobile ? "border-l" : ""
+      } border-gray-200 dark:border-gray-700`}
+    >
+      {customerHeader}
+
+      {quoteBanner}
+
+      <div
+        className={`${
+          isMobile
+            ? "flex-1 overflow-y-auto custom-scrollbar"
+            : "flex-1 overflow-y-auto cart-scroll"
+        }`}
+      >
+        {/* A table like the product list: one header, rows split by a rule, no cards. */}
+        {cartItems.length > 0 && (
+          <div
+            className={`${CART_ROW_GRID} sticky top-0 z-10 px-3 py-1.5 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400`}
+          >
+            <span>Item</span>
+            <span className="text-center">Qty</span>
+            <span className="text-right">Rate</span>
+            <span className="text-right">Total</span>
+          </div>
+        )}
+        <div className="divide-y divide-gray-200 dark:divide-gray-700">
+          {cartItems.length === 0 ? (
+            <div className="text-center py-8">
+              <ShoppingCart className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                Your cart is empty
+              </h3>
+              <p className="text-gray-500 dark:text-gray-400">
+                Add some items to get started!
+              </p>
+              {quoteButton}
+            </div>
+          ) : (
+            cartItems.map((item) =>
+              cartRow(item, expandedCartItemId === item.id, () => toggleItemExpansion(item.id))
+            )
+          )}
+        </div>
+      </div>
+
+      {footer}
+
+      {dialogs}
     </div>
   );
 }

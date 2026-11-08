@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from klik_pos.api.sales_invoice import get_current_pos_opening_entry
 from klik_pos.klik_pos.utils import get_current_pos_profile
@@ -334,6 +335,7 @@ def get_pos_details():
         "current_opening_entry": current_opening_entry,
         "business_type": getattr(pos, "custom_business_type", "B2C") or "B2C",
         "allow_warehouse_change": int(getattr(pos, "allow_warehouse_change", 0) or 0),
+        "allow_multiple_items": cint(frappe.db.get_single_value("Selling Settings", "allow_multiple_items")),
         # The walk-in Tax ID field offers a KRA name lookup only when cecypo_pin_checker is usable.
         "pin_checker_available": int(pin_checker_available()),
     })

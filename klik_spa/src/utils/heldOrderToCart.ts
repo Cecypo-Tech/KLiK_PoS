@@ -3,7 +3,7 @@ import { cacheHeldOrder, loadCachedItemsToCart } from './draftInvoiceCache';
 import { transformCustomerInfo } from './transformCustomerInfo';
 import { useCartStore } from '../stores/cartStore';
 import { usePOSProfileStore } from '../stores/posProfileStore';
-import { checkoutExtrasFromHeldOrder, heldItemToCartItem, tillFlags } from './heldOrderPayload';
+import { checkoutExtrasFromHeldOrder, heldItemsToCart, tillFlags } from './heldOrderPayload';
 import { toast } from 'react-toastify';
 import { losToast } from './lossOfSale';
 import type { CartItem, Customer } from '../../types';
@@ -36,7 +36,7 @@ export async function addHeldOrderToCart(orderId: string): Promise<boolean> {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function fillCartFromOrder(orderData: any, cache: (items: CartItem[], customer: CacheCustomer | null) => void): Promise<boolean> {
-  const items = orderData.items.map(heldItemToCartItem);
+  const items = heldItemsToCart(orderData.items);
   // The server split each line's full ask against the stock at this till now.
   for (const item of items) {
     if ((item.los_qty ?? 0) > 0) {

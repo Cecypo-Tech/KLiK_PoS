@@ -14,7 +14,7 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import ProductDetailsModal from "../ProductDetailsModal";
 import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
-import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem } from "../../utils/cartPricing";
+import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getCartRowPctBasis } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { qtyToSend } from "../../utils/lossOfSale";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
@@ -29,6 +29,7 @@ import {
   type PricePopupPosition,
 } from "../../utils/priceOptions";
 import { rateBoxMinimum } from "../../utils/priceFloor";
+import { discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -173,16 +174,17 @@ export const CartItemRow = ({
   useEffect(() => {
     setLocalQty(item.quantity);
   }, [item.quantity, item.los_qty]);
-  const [localDiscountPct, setLocalDiscountPct] = useState<number>(() => {
-    const amt = itemDiscount.discountAmount || 0;
-    return item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0;
-  });
+  // The % is of the custom rate on a custom-rate line, else of the list price.
+  const isTaxIncludedInBasicRate = posDetails?.is_tax_included_in_basic_rate === 1
+    || posDetails?.is_tax_included_in_basic_rate === "1"
+    || posDetails?.is_tax_included_in_basic_rate === true;
+  const preDiscountPrice = getCartRowPctBasis(item, itemDiscount, isTaxIncludedInBasicRate);
+  const [localDiscountPct, setLocalDiscountPct] = useState<number>(() =>
+    discountPctFromAmount(preDiscountPrice, itemDiscount.discountAmount || 0));
 
   useEffect(() => {
-    const amt = itemDiscount.discountAmount || 0;
-    const nextDiscountPct = item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0;
-    setLocalDiscountPct(nextDiscountPct);
-  }, [itemDiscount.discountAmount, item.price]);
+    setLocalDiscountPct(discountPctFromAmount(preDiscountPrice, itemDiscount.discountAmount || 0));
+  }, [itemDiscount.discountAmount, preDiscountPrice]);
   const [fullItemData, setFullItemData] = useState<ItemFullData | null>(null);
   const [isLoadingFullData, setIsLoadingFullData] = useState(false);
 
@@ -370,11 +372,6 @@ export const CartItemRow = ({
     await fetchBundleData(qty, true);
   };
 
-  const isTaxIncludedInBasicRate =
-    posDetails?.is_tax_included_in_basic_rate === 1
-    || posDetails?.is_tax_included_in_basic_rate === "1"
-    || posDetails?.is_tax_included_in_basic_rate === true;
-
   const handleRateChange = (value?: number) => {
     if (value === undefined || value === null || Number.isNaN(value)) {
       onCustomRateChange(item, undefined);
@@ -391,7 +388,7 @@ export const CartItemRow = ({
 
   const handleDiscountPercentageChange = (value: number) => {
     const pct = Math.min(100, Math.max(0, value || 0));
-    const amt = parseFloat(((item.price * pct) / 100).toFixed(2));
+    const amt = discountAmountFromPct(preDiscountPrice, pct);
     setLocalDiscountPct(pct);
     onDiscountChange(item.id, "discountAmount", amt);
   };
@@ -399,7 +396,7 @@ export const CartItemRow = ({
   const handleDiscountAmountChange = (value: number) => {
     const amt = Math.max(0, value || 0);
     onDiscountChange(item.id, "discountAmount", amt);
-    setLocalDiscountPct(item.price > 0 ? parseFloat(((amt / item.price) * 100).toFixed(2)) : 0);
+    setLocalDiscountPct(discountPctFromAmount(preDiscountPrice, amt));
   };
 
   // `entry` pins the exact row picked: one price list can have several Item Prices (per UOM,
@@ -834,8 +831,7 @@ export const CartItemRow = ({
                         return;
                       }
 
-                      const parsedValue = parseFloat(value);
-                      handleRateChange(Number.isNaN(parsedValue) ? undefined : parsedValue);
+                      handleRateChange(parseDecimalInput(value));
                     }}
                     readOnly={!posDetails?.allow_rate_change}
                     placeholder="0"

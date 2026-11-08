@@ -284,17 +284,20 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
     """Serialise all POS-specific cart state that doesn't live on the SO itself."""
     raw_discounts = data.get("itemDiscounts", {}) if isinstance(data, dict) else {}
     item_discounts = {}
+    item_lines = []
 
     for item in parsed_items:
         item_code = item["id"]
-        discount_data = raw_discounts.get(item_code) or {}
+        # The cart's line id (two lines of one item differ); older carts only sent the code.
+        discount_data = raw_discounts.get(item.get("line_id")) or raw_discounts.get(item_code) or {}
         if isinstance(discount_data, str):
             try:
                 discount_data = json.loads(discount_data)
             except Exception:
                 discount_data = {}
 
-        item_discounts[item_code] = {
+        # By code too, for older readers; a second line of the code overwrites it (last wins).
+        entry = item_discounts[item_code] = {
             "discountPercentage": flt(item.get("discountPercentage") or 0),
             "discountAmount": flt(item.get("discountAmount") or 0),
             "customRate": discount_data.get("customRate"),
@@ -305,6 +308,7 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
             "description": item.get("description") or "",
             "selectedPriceList": discount_data.get("selectedPriceList") or "",
         }
+        item_lines.append({**entry, "item_code": item_code})
 
     # Persist the full frontend customer object (if sent) so resume can restore it
     # directly, without a re-fetch + re-transform round-trip.
@@ -317,6 +321,8 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
 
     return {
         "itemDiscounts": item_discounts,
+        # One entry per line, in order: two lines of one item keep their own discounts.
+        "itemLines": item_lines,
         "appliedCoupons": data.get("appliedCoupons") or [] if isinstance(data, dict) else [],
         "businessType": business_type or "B2C",
         "salesperson": salesperson,
@@ -335,6 +341,18 @@ def _build_cart_meta(data, parsed_items, business_type, salesperson, tax_id,
         # None when the cart sent no remarks at all - an older POS - so a re-hold keeps them.
         "remarks": (_parse_remarks(data) or "") if isinstance(data, dict) and "remarks" in data else None,
     }
+
+
+def line_meta(cart_meta, idx, item_code):
+    """The saved per-line cart state of document row `idx` (rows keep the cart's line order),
+    when that line is for this item; otherwise, and for older documents, by item code."""
+    lines = cart_meta.get("itemLines")
+    if isinstance(lines, list) and idx < len(lines) and isinstance(lines[idx], dict):
+        line = lines[idx]
+        # A row deleted or moved in desk shifts the rest: never take another item's line.
+        if line.get("item_code") in (None, item_code):
+            return line
+    return (cart_meta.get("itemDiscounts") or {}).get(item_code) or {}
 
 
 def _apply_order_discount(so, pos_profile, order_discount_amount):
@@ -608,7 +626,6 @@ def get_held_order_details(order_id):
             except Exception:
                 pass
 
-        item_discounts = cart_meta.get("itemDiscounts", {})
 
         # Batch-fetch item names
         item_codes = [row.item_code for row in so.items]
@@ -629,15 +646,15 @@ def get_held_order_details(order_id):
                 "quantity": flt(row.qty),
                 "los_qty": flt(row.get(LOS_FIELD)),
                 "uom": row.uom,
-                "bundle_entries": (item_discounts.get(row.item_code) or {}).get("bundle_entries") or [],
+                "bundle_entries": line_meta(cart_meta, i, row.item_code).get("bundle_entries") or [],
             }
-            for row in so.items
+            for i, row in enumerate(so.items)
         ]
         split_held_items(lines, None if so.get("custom_klik_mpesa_order") else _active_till())
 
         items = []
-        for row, line in zip(so.items, lines):
-            d = item_discounts.get(row.item_code) or {}
+        for i, (row, line) in enumerate(zip(so.items, lines)):
+            d = line_meta(cart_meta, i, row.item_code)
             items.append({
                 "item_code": row.item_code,
                 "item_name": item_names.get(row.item_code) or row.item_code,

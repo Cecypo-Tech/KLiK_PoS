@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_CHECKOUT_EXTRAS, buildOrderPayload, checkoutExtrasFromHeldOrder, heldItemToCartItem, heldOrderPayloadExtras,
   tillFlags,
+  heldItemsToCart,
 } from "./heldOrderPayload";
 
 const allOn = { deliveryCharge: true, shippingRule: true, discountChange: true };
@@ -138,6 +139,23 @@ describe("heldItemToCartItem", () => {
 });
 
 describe("buildOrderPayload", () => {
+  it("sends the item code as id for a second line of the same item", () => {
+    const payload = buildOrderPayload({
+      cartItems: [{ id: "PEN-1731000000000", item_code: "PEN", quantity: 1, price: 10 }],
+      itemDiscounts: {},
+      effectiveRate: () => 10,
+      customer: { id: "C" },
+      totals: { subtotal: 10, grandTotal: 10, taxAmount: 0, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+    expect(payload.items[0]).toMatchObject({ id: "PEN", item_code: "PEN" });
+  });
+
   // The payload checkout's Hold sent before it was moved here; Save Quote sends the same.
   it("builds Hold's payload for a sample cart", () => {
     const customer = { id: "CUST-1", name: "Acme" };
@@ -162,11 +180,11 @@ describe("buildOrderPayload", () => {
     expect(payload).toEqual({
       items: [
         {
-          id: "A", item_code: "A", quantity: 2, price: 90, originalPrice: 100, discountedPriceExcl: 90,
+          id: "A", line_id: "A", item_code: "A", quantity: 2, price: 90, originalPrice: 100, discountedPriceExcl: 90,
           discountPercentage: 10, discountAmount: 0, selectedPriceList: "Wholesale",
         },
         {
-          id: "B", item_code: "B", quantity: 1, price: 45, discount_amount: 5,
+          id: "B", line_id: "B", item_code: "B", quantity: 1, price: 45, discount_amount: 5,
           discountPercentage: 0, discountAmount: 5, selectedPriceList: "",
         },
       ],
@@ -217,5 +235,59 @@ describe("buildOrderPayload", () => {
     });
     expect(payload.loyalty).toEqual({ loyalty_program: "LP", loyalty_points: 10 });
     expect(payload.taxType).toBe("inclusive");
+  });
+});
+
+describe("custom-rate line", () => {
+  it("sends only the cashier's discount, never the item's rule discount (it would come off the custom rate on recall)", () => {
+    const payload = buildOrderPayload({
+      cartItems: [{ id: "PEN", item_code: "PEN", quantity: 1, price: 10, discount_amount: 2 }],
+      itemDiscounts: { PEN: { customRate: 8, discountAmount: 0 } },
+      effectiveRate: () => 8,
+      customer: { id: "C" },
+      totals: { subtotal: 8, grandTotal: 8, taxAmount: 0, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+    expect(payload.items[0]!.discountAmount).toBe(0);
+  });
+});
+
+describe("two lines of one item", () => {
+  it("payload keeps each line's own discount, keyed by its line id", () => {
+    const payload = buildOrderPayload({
+      cartItems: [
+        { id: "PEN", item_code: "PEN", quantity: 1, price: 10 },
+        { id: "PEN-1731000000000", item_code: "PEN", quantity: 1, price: 10 },
+      ],
+      itemDiscounts: { PEN: { discountAmount: 1 }, "PEN-1731000000000": { discountAmount: 3 } },
+      effectiveRate: () => 10,
+      customer: { id: "C" },
+      totals: { subtotal: 20, grandTotal: 20, taxAmount: 0, isInclusive: false, couponDiscount: 0 },
+      appliedCoupons: [],
+      businessType: "B2C",
+      salesperson: null,
+      sellingPriceList: null,
+      extras: { walkin: {}, extraFields: {}, shippingRule: null, extras: EMPTY_CHECKOUT_EXTRAS, flags: allOn },
+      loyalty: null,
+    });
+    expect(payload.items.map((i: { discountAmount: number }) => i.discountAmount)).toEqual([1, 3]);
+    expect(payload.items.map((i: { id: string; line_id: string }) => [i.id, i.line_id])).toEqual([["PEN", "PEN"], ["PEN", "PEN-1731000000000"]]);
+  });
+
+  it("a held order with two PEN rows reloads as two lines with distinct ids", () => {
+    const lines = heldItemsToCart([
+      { item_code: "PEN", item_name: "Pen", quantity: 1, price: 10, uom: "Nos" },
+      { item_code: "PEN", item_name: "Pen", quantity: 2, price: 8, uom: "Nos", discountAmount: 3 },
+    ]);
+    expect(lines.map((l) => l.item_code)).toEqual(["PEN", "PEN"]);
+    expect(new Set(lines.map((l) => l.id)).size).toBe(2);
+    expect(lines.map((l) => l.price)).toEqual([10, 8]);
+    expect(lines.map((l) => l.discount_amount)).toEqual([0, 3]);
+    expect(lines[0]!.id).toBe("PEN");
   });
 });
