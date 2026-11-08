@@ -22,16 +22,34 @@ export async function searchGridItems(query: string): Promise<MenuItem[]> {
   return items;
 }
 
-export type ScanResult = { lineId: string } | { notFound: true } | { refused: true };
+/** The result whose code (item_code, else id) is exactly the typed text: an item code typed and
+ * Entered is a scan, though the identifier lookup only knows barcodes, batches and serials. */
+export function exactCodeMatch(list: MenuItem[], q: string): MenuItem | undefined {
+  const want = q.trim().toLowerCase();
+  return list.find((r) => (r.item_code || r.id).toLowerCase() === want);
+}
 
+/** `pick`: a variant template, for the caller's variant picker; it is never added itself. */
+export type ScanResult = { lineId: string } | { notFound: true } | { refused: true } | { pick: MenuItem };
+
+const LOOKUP_TIMEOUT_MS = 8000;
 let scanTail: Promise<unknown> = Promise.resolve();
 
 async function run(code: string, quiet: boolean): Promise<ScanResult> {
-  const item = await useProductStore.getState().fetchItemByIdentifier(code);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<"timeout">((r) => (timer = setTimeout(() => r("timeout"), LOOKUP_TIMEOUT_MS)));
+  // A lookup that never answers must not hold up every later scan in the chain.
+  const item = await Promise.race([useProductStore.getState().fetchItemByIdentifier(code), timedOut])
+    .finally(() => clearTimeout(timer));
+  if (item === "timeout") {
+    toast.error(`Lookup for ${code} timed out`);
+    return { notFound: true };
+  }
   if (!item) {
     if (!quiet) toast.error(`No item found for ${code}`);
     return { notFound: true };
   }
+  if (item.has_variants || item.is_variant_template) return { pick: item };
   const lineId = await useCartStore.getState().addToCartQueued({ ...item, item_code: item.id } as never, { merge: mergesSameItem() });
   return lineId ? { lineId } : { refused: true };
 }

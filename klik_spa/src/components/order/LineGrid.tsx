@@ -4,7 +4,8 @@ import type { POSDetails } from "../../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import type { DiscountMapLike } from "../../utils/cartPricing";
 import { gridKeyAction, type GridCol } from "../../utils/lineGridKeys";
-import { latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
+import { toast } from "react-toastify";
+import { exactCodeMatch, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
 import LineGridRow from "./LineGridRow";
 
 export interface LineGridProps {
@@ -40,6 +41,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   const { items, itemDiscounts, selectedId, onSelect, onRemoveItem, onOpenDescription, onPickItem, currencySymbol, posDetails } = props;
   const tableRef = useRef<HTMLTableElement>(null);
   const pending = useRef<PendingFocus | null>(null);
+  const busy = useRef(false); // a double Enter must not add twice
   const latest = useRef(latestOnly<MenuItem[]>());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MenuItem[]>([]);
@@ -76,6 +78,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   // render's closures is stale (the new line takes it when lines land at the bottom).
   const focusEntry = () => tableRef.current?.querySelector<HTMLElement>("[data-entry-row] input")?.focus();
   useImperativeHandle(ref, () => ({ focusEntry }), []);
+  useEffect(() => { focusEntry(); }, []); // grid mode opens ready to scan
 
   useEffect(() => {
     const q = query.trim();
@@ -98,34 +101,52 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     return () => clearTimeout(t);
   }, [query]);
 
-  const pick = async (item: MenuItem | undefined) => {
+  // Clears the entry only if it still holds what was submitted: a second scan may be typing in it.
+  const clearEntry = (q: string) => setQuery((cur) => (cur.trim() === q ? "" : cur));
+
+  /** `then`: focus the new line's Qty (a picked result) or go back to the entry (a scan). */
+  const pick = async (item: MenuItem | undefined, then: "qty" | "entry" = "qty") => {
     if (!item) return;
+    const q = query.trim();
     setOpen(false);
     const lineId = await onPickItem(item);
     if (!lineId) {
       focusEntry(); // refused, or the variant picker took over: keep the typed text
       return;
     }
-    setQuery("");
+    clearEntry(q);
+    if (then === "entry") return void focusEntry();
     pending.current = { id: lineId, col: "qty" };
     flushFocus();
   };
 
   const submitEntry = async () => {
     const q = query.trim();
-    if (!q) return;
-    let r;
+    if (!q || busy.current) return;
+    busy.current = true;
     try {
-      r = await scanAdd(q, { quiet: results.length > 0 }); // with results to pick, a miss isn't an error
-    } catch (e) {
-      console.error("Grid scan failed:", e); // leave the text so the cashier can retry
-      return;
-    }
-    if ("lineId" in r) {
-      setQuery("");
-      focusEntry();
-    } else if ("notFound" in r && results.length) {
-      await pick(results[highlight]);
+      let r;
+      try {
+        r = await scanAdd(q, { quiet: true }); // a miss may still be an item code or a pick; toasted below
+      } catch (e) {
+        console.error("Grid scan failed:", e); // leave the text so the cashier can retry
+        return;
+      }
+      if ("lineId" in r) {
+        clearEntry(q);
+        focusEntry();
+        return;
+      }
+      if ("pick" in r) return void (await pick(r.pick, "entry")); // a variant template: the picker
+      if (!("notFound" in r)) return; // refused: the cart said why
+      // An exact item code is a scan; the highlighted result only once the cashier moved off the top.
+      let exact = highlight === 0 ? exactCodeMatch(results, q) : undefined;
+      if (!results.length) exact = exactCodeMatch(await searchGridItems(q).catch(() => []), q);
+      if (exact) return void (await pick(exact, "entry"));
+      if (results.length) return void (await pick(results[highlight]));
+      toast.error(`No item found for ${q}`);
+    } finally {
+      busy.current = false;
     }
   };
 

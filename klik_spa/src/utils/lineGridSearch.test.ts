@@ -3,7 +3,7 @@ import { toast } from "react-toastify";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useProductStore } from "../stores/productStore";
-import { latestOnly, scanAdd, searchGridItems, STALE } from "./lineGridSearch";
+import { exactCodeMatch, latestOnly, scanAdd, searchGridItems, STALE } from "./lineGridSearch";
 
 vi.mock("react-toastify", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
 
@@ -99,6 +99,45 @@ describe("scanAdd", () => {
     useProductStore.setState({ fetchItemByIdentifier: (async () => ({ ...pen, available: 0 })) as never });
     expect(await scanAdd("PEN")).toEqual({ refused: true });
     expect(toast.error).not.toHaveBeenCalledWith("No item found for PEN");
+  });
+});
+
+describe("scanAdd: templates and timeouts", () => {
+  it("a variant template is handed back to pick, not added", async () => {
+    const tpl = { ...pen, id: "SHIRT", item_code: "SHIRT", has_variants: 1 };
+    useProductStore.setState({ fetchItemByIdentifier: (async () => tpl) as never });
+    expect(await scanAdd("SHIRT")).toEqual({ pick: tpl });
+    expect(lines()).toHaveLength(0);
+  });
+
+  it("a lookup that never answers times out after 8s, toasts, and does not block the next scan", async () => {
+    vi.useFakeTimers();
+    try {
+      useProductStore.setState({
+        fetchItemByIdentifier: ((c: string) => (c === "HANG" ? new Promise(() => {}) : Promise.resolve(pen))) as never,
+      });
+      const p1 = scanAdd("HANG");
+      const p2 = scanAdd("PEN");
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(await p1).toEqual({ notFound: true });
+      expect(toast.error).toHaveBeenCalledWith("Lookup for HANG timed out");
+      expect(await p2).toEqual({ lineId: expect.any(String) });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("exactCodeMatch", () => {
+  it("finds the result whose code is exactly the query, case-insensitive", () => {
+    const list = [{ id: "GREEN-TEA", item_code: "GREEN-TEA" }, { id: "GRE", item_code: "GRE" }] as never;
+    expect(exactCodeMatch(list, "gre")).toBe((list as unknown[])[1]);
+    expect(exactCodeMatch(list, "GR")).toBeUndefined();
+  });
+
+  it("falls back to the id when there is no item_code", () => {
+    const list = [{ id: "GRE" }] as never;
+    expect(exactCodeMatch(list, " GRE ")).toBe((list as unknown[])[0]);
   });
 });
 
