@@ -5,7 +5,7 @@ import type { CartItem } from "../../../types";
 import type { POSDetails } from "../../stores/posProfileStore";
 import type { GridCol } from "../../utils/lineGridKeys";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
-import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, type DiscountMapLike } from "../../utils/cartPricing";
+import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getPreDiscountRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { rateBoxMinimum } from "../../utils/priceFloor";
@@ -63,7 +63,7 @@ export default function LineGridRow({
   const discountedPrice = getEffectiveItemRate(item, opts);
   // The Rate cell and the % are of the line's rate before its discount (a custom rate, else the price).
   const preOpts = { ...opts, itemDiscounts: { [item.id]: { ...itemDiscount, discountAmount: 0 } } };
-  const preDiscountPrice = getEffectiveItemRate(item, preOpts);
+  const preDiscountPrice = getPreDiscountRate(item, opts);
   const hasExclusiveTax = getExclusiveTaxRateForItem(item, { isTaxIncludedInBasicRate }) > 0;
   const editableRate = hasExclusiveTax ? preDiscountPrice : getEffectiveDisplayRate(item, preOpts);
   const total = roundCurrency(discountedPrice * item.quantity);

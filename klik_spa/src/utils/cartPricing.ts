@@ -136,6 +136,14 @@ export function getEffectiveItemRate(item: PricingItemLike, options: RateOptions
   return roundCurrency(Math.max(0, rate));
 }
 
+/** The line's rate before its line discount (a custom rate, else the price): the basis of a line discount %. */
+export function getPreDiscountRate(item: PricingItemLike, options: RateOptions = {}) {
+  const key = String(item.id ?? item.item_code ?? "");
+  const itemDiscounts = options.itemDiscounts || {};
+  const own = resolveDiscountData(item, itemDiscounts);
+  return getEffectiveItemRate(item, { ...options, itemDiscounts: { ...itemDiscounts, [key]: { ...own, discountAmount: 0 } } });
+}
+
 export function getEffectiveDisplayRate(item: PricingItemLike, options: RateOptions = {}) {
   const baseRate = getEffectiveItemRate(item, options);
   const exclusiveTaxRate = getExclusiveTaxRateForItem(item, options);
