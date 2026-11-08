@@ -11,6 +11,7 @@ import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { rateBoxMinimum } from "../../utils/priceFloor";
 import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
 const CELL = "w-full bg-transparent px-1.5 py-1 text-right tabular-nums rounded focus:outline-none focus:ring-2 focus:ring-beveren-500 read-only:text-gray-500";
 
 /** A number cell: shows `value`, edits as text, commits once on blur (Enter/Tab/arrows blur it by moving focus). */
@@ -108,10 +109,10 @@ export default function LineGridRow({
       </td>
       <td className="w-20 px-1"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></td>
       <td className="w-28 px-1">
-        <NumCell row={row} col="rate" value={editableRate} readOnly={!Number(posDetails?.allow_rate_change)} onCommit={commitRate} />
+        <NumCell row={row} col="rate" value={round2(editableRate)} readOnly={!Number(posDetails?.allow_rate_change)} onCommit={commitRate} />
       </td>
       <td className="w-20 px-1">
-        <NumCell row={row} col="disc" value={discPct} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />
+        <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />
       </td>
       <td className="w-28 px-2 text-right font-semibold tabular-nums whitespace-nowrap text-beveren-600 dark:text-beveren-400">
         {formatCurrencyWithSymbol(total, currencySymbol)}

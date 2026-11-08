@@ -142,7 +142,8 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     switch (action.type) {
       case "focus": return void focusCell(action.row, action.col);
       case "commit": return void focusCell(action.then.row, action.then.col); // the cell commits on blur
-      case "pickHighlighted": return void pick(results[highlight]);
+      // Enter still tries an exact scan first (submitEntry falls back to the highlighted result); Tab picks.
+      case "pickHighlighted": return void (e.key === "Enter" ? submitEntry() : pick(results[highlight]));
       case "moveHighlight": return setHighlight((h) => Math.min(results.length - 1, Math.max(0, h + action.delta)));
       case "closeDropdown": return setOpen(false);
       case "submitEntry": return void submitEntry();
@@ -166,7 +167,11 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
           value={query}
           placeholder="Scan or type an item…"
           autoComplete="off"
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setResults([]); // only results for the current text may be picked
+            setOpen(false);
+          }}
           onBlur={() => setOpen(false)}
           onFocus={() => results.length && query.trim() && setOpen(true)}
           className="w-full rounded px-1.5 py-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-beveren-500"
