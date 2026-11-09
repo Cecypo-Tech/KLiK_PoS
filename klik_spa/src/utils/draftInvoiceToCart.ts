@@ -186,6 +186,32 @@ async function getDraftCustomer(invoiceData: any): Promise<Customer | null> {
   }
 }
 
+/** A draft invoice row as the cart line it is recalled into. */
+export function draftItemToCartItem(item: InvoiceItem, index: number): CartItem {
+  const discountPercentage = Number(item.discount_percentage) || 0;
+  // ERPNext stores a % discount twice: discount_amount is the same discount, worked out from
+  // the % (taxes_and_totals.calculate_item_values). The cart applies both fields, so keep one.
+  const discountAmount = discountPercentage > 0 ? 0 : Number(item.discount_amount) || 0;
+  const priceListRate = Number(item.price_list_rate) || 0;
+  const rate = Number(item.rate || 0);
+  // A rate above the list rate is an ERPNext margin (no discount): price the line at that rate.
+  const originalRate = priceListRate > 0 ? Math.max(priceListRate, rate) : rate + discountAmount;
+  return {
+    // Keep each draft line unique so duplicate item codes don't collapse into one cart row.
+    id: item.name || `${item.item_code}-${index}`,
+    item_code: item.item_code,
+    name: item.item_name,
+    category: 'General',
+    price: originalRate,
+    original_price: originalRate,
+    discount_amount: discountAmount,
+    discount_percentage: discountPercentage,
+    image: '',
+    quantity: item.qty,
+    uom: item.uom,
+  };
+}
+
 export async function addDraftInvoiceToCart(invoiceId: string): Promise<boolean> {
   try {
     // Fetch draft invoice items
@@ -198,25 +224,7 @@ export async function addDraftInvoiceToCart(invoiceId: string): Promise<boolean>
     // Convert invoice items to cart items
     const cartItems: CartItem[] = [];
     for (const [index, item] of invoiceData.items.entries()) {
-      const discountAmount = Number(item.discount_amount) || 0;
-      const discountPercentage = Number(item.discount_percentage) || 0;
-      const priceListRate = Number(item.price_list_rate) || 0;
-      const originalRate = priceListRate > 0 ? priceListRate : Number(item.rate || 0) + discountAmount;
-      const cartItem: CartItem = {
-        // Keep each draft line unique so duplicate item codes don't collapse into one cart row.
-        id: item.name || `${item.item_code}-${index}`,
-        item_code: item.item_code,
-        name: item.item_name,
-        category: 'General',
-        price: originalRate,
-        original_price: originalRate,
-        discount_amount: discountAmount,
-        discount_percentage: discountPercentage,
-        image: '',
-        quantity: item.qty,
-        uom: item.uom,
-      };
-      cartItems.push(cartItem);
+      cartItems.push(draftItemToCartItem(item, index));
     }
 
     const customer = await getDraftCustomer(invoiceData);
