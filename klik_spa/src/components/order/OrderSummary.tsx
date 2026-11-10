@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react
 import { mergesSameItem, useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
 import { toast } from "react-toastify";
+import { fractionInWholeUnit } from "../../utils/lineEdits";
 import { ShoppingCart } from "lucide-react";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { getBatches } from "../../utils/batch";
@@ -411,6 +412,11 @@ export default function OrderSummary({
     // bundle editor only when its total differs.
     if (quantity <= 0) {
       removeItem(id);
+      return;
+    }
+    const uom = cartItems.find((i) => i.id === id)?.uom;
+    if (fractionInWholeUnit(quantity, uom, posDetails?.whole_number_uoms)) {
+      toast.error(`${uom} is sold in whole units only: ${quantity} can't be used`);
     } else {
       updateQuantity(id, quantity);
     }
@@ -829,6 +835,8 @@ export default function OrderSummary({
     const descriptionLine = cartItems.find((i) => i.id === descriptionFor);
     return (
       <div className="h-full flex bg-white dark:bg-gray-800">
+        {/* The payment page sits over the cart: nothing under it may take focus or a stray key. */}
+        <div className="contents" inert={showPaymentDialog}>
         <div className="flex-1 min-w-0 flex flex-col">
           {quoteBanner}
           <div className="flex-1 overflow-y-auto cart-scroll">
@@ -875,6 +883,7 @@ export default function OrderSummary({
           </div>
           {footer}
         </div>
+        </div>
 
         {dialogs}
         <DescriptionDialog
@@ -908,6 +917,7 @@ export default function OrderSummary({
         !isMobile ? "border-l" : ""
       } border-gray-200 dark:border-gray-700`}
     >
+      <div className="contents" inert={showPaymentDialog}>
       {customerHeader}
 
       {quoteBanner}
@@ -951,6 +961,7 @@ export default function OrderSummary({
       </div>
 
       {footer}
+      </div>
 
       {dialogs}
     </div>

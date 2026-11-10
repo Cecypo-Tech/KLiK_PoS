@@ -13,3 +13,18 @@ export function discountPctFromAmount(price: number, amount: number): number {
 export function clampRateToFloor(rate: number, minimum: number | null): number {
   return minimum !== null && rate < minimum ? minimum : rate;
 }
+
+/** A fraction typed in a unit marked Must be Whole Number (ERPNext's UOM setting), which ERPNext refuses on save. */
+export function fractionInWholeUnit(qty: number, uom: string | undefined, wholeUoms: string[] | undefined): boolean {
+  return !Number.isInteger(qty) && !!uom && !!wholeUoms?.includes(uom);
+}
+
+/** The invoice discount once the subtotal moves, as ERPNext's: given in %, the % holds and the
+ * amount follows; given as an amount, the amount holds and the % follows. */
+export function rebaseOrderDiscount(
+  d: { byPercent: boolean; percent: number; amount: number },
+  subtotal: number,
+): { percent: number; amount: number } {
+  if (d.byPercent) return { percent: d.percent, amount: Math.round(subtotal * d.percent) / 100 };
+  return { percent: subtotal > 0 ? discountPctFromAmount(subtotal, d.amount) : 0, amount: d.amount };
+}
