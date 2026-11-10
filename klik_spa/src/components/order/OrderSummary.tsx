@@ -427,8 +427,13 @@ export default function OrderSummary({
   };
 
   const handleUOMChange = useCallback((itemId: string, uom: string, price: number, conversionFactor?: number) => {
+    const qty = cartItems.find((i) => i.id === itemId)?.quantity ?? 0;
+    if (fractionInWholeUnit(qty, uom, posDetails?.whole_number_uoms)) {
+      toast.error(`${uom} is sold in whole units only: ${qty} can't be used`);
+      return;
+    }
     updateUOM(itemId, uom, price, conversionFactor);
-  }, [updateUOM]);
+  }, [updateUOM, cartItems, posDetails?.whole_number_uoms]);
 
   const updateItemDiscount = (itemId: string, field: string, value: number | string) => {
     setItemDiscounts(prev => ({

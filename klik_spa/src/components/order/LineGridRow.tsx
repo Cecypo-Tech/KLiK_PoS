@@ -115,6 +115,8 @@ export default function LineGridRow({
   const commitRate = (n: number | undefined, text: string) => {
     if (n === undefined && text !== "") return;
     if (n === undefined) {
+      // Back to the cart list's price, so the line no longer claims the list it was switched to.
+      if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
       onCustomRateChange(item, undefined);
     } else {
       // ponytail: floor uses the list rate; CartItemRow also honours a line price-list pick fetched on expand.

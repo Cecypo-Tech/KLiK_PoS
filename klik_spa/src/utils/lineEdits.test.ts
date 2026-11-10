@@ -27,6 +27,7 @@ describe("fractionInWholeUnit: a UOM marked Must be Whole Number takes no fracti
   });
   it("allows a whole number, a fractional unit, or a till that sent no list", () => {
     expect(fractionInWholeUnit(3, "Nos", whole)).toBe(false);
+    expect(fractionInWholeUnit(0.7 * 10, "Nos", whole)).toBe(false); // 7.000000000000001 from a typed sum
     expect(fractionInWholeUnit(2.5, "Kg", whole)).toBe(false);
     expect(fractionInWholeUnit(2.5, "Nos", undefined)).toBe(false);
     expect(fractionInWholeUnit(2.5, undefined, whole)).toBe(false);

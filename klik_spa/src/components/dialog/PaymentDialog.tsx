@@ -573,7 +573,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Which box the cashier typed last decides what holds when the cart (and subtotal) moves.
   const orderDiscountByPercent = useRef(false);
   useEffect(() => {
-    if (!orderDiscountAmount && !orderDiscountPercentInput) return;
+    if (invoiceSubmitted || (!orderDiscountAmount && !orderDiscountPercentInput)) return;
     const next = rebaseOrderDiscount(
       { byPercent: orderDiscountByPercent.current, percent: orderDiscountPercentInput, amount: orderDiscountAmount },
       calculations.subtotal,
@@ -2160,7 +2160,16 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Leaving a completed sale any other way (the sidebar, a route change) still finishes it,
   // or its cart and customer come back on the till and can be sold twice.
   const finalizeOnLeave = useRef<(() => void) | null>(null);
-  finalizeOnLeave.current = invoiceSubmitted ? () => void finalizeCompletedOrderState() : null;
+  // Cart first and synchronously: the cashier may already be scanning the next sale.
+  finalizeOnLeave.current = invoiceSubmitted
+    ? () => {
+        finalized.current = true;
+        clearOrderState();
+        if (!rememberSalesperson) {
+          clearActiveSalesperson(true).catch((e) => console.error("Failed to clear salesperson session after completion:", e));
+        }
+      }
+    : null;
   useEffect(() => () => { if (!finalized.current) finalizeOnLeave.current?.(); }, []);
 
   const getActionButtonText = () => {

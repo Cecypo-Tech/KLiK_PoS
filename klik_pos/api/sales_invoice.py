@@ -634,11 +634,20 @@ def _finishes_the_sale(original_invoice, return_doc):
 	prior = frappe.get_all(
 		"Sales Invoice", filters={"is_return": 1, "docstatus": 1, "return_against": original_invoice.name}, pluck="name"
 	)
+	rows = (
+		frappe.get_all("Sales Invoice Item", filters={"parent": ["in", prior]}, fields=["sales_invoice_item", "item_code", "qty"])
+		if prior
+		else []
+	)
+	# By sale line; a note from before lines were linked counts by item code.
 	back = {}
-	rows = frappe.get_all("Sales Invoice Item", filters={"parent": ["in", prior]}, fields=["sales_invoice_item", "qty"]) if prior else []
 	for row in [*rows, *return_doc.items]:
-		back[row.sales_invoice_item] = back.get(row.sales_invoice_item, 0.0) + abs(flt(row.qty))
-	return all(flt(back.get(row.name)) >= abs(flt(row.qty)) for row in original_invoice.items)
+		key = row.sales_invoice_item or row.item_code
+		back[key] = back.get(key, 0.0) + abs(flt(row.qty))
+	# The delivery fee line is a charge, not goods: it never comes back on its own.
+	delivery = (frappe.db.get_value("POS Profile", original_invoice.pos_profile, "custom_delivery_charge_item") or "").strip() if original_invoice.pos_profile and frappe.get_meta("POS Profile").has_field("custom_delivery_charge_item") else ""
+	sold = [row for row in original_invoice.items if not delivery or row.item_code != delivery]
+	return all(flt(back.get(row.name)) + flt(back.get(row.item_code)) >= abs(flt(row.qty)) for row in sold)
 
 
 def _drop_actual_charges(return_doc):

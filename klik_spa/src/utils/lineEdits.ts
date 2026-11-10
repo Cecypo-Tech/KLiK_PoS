@@ -16,7 +16,7 @@ export function clampRateToFloor(rate: number, minimum: number | null): number {
 
 /** A fraction typed in a unit marked Must be Whole Number (ERPNext's UOM setting), which ERPNext refuses on save. */
 export function fractionInWholeUnit(qty: number, uom: string | undefined, wholeUoms: string[] | undefined): boolean {
-  return !Number.isInteger(qty) && !!uom && !!wholeUoms?.includes(uom);
+  return Math.abs(qty - Math.round(qty)) > 1e-7 && !!uom && !!wholeUoms?.includes(uom);
 }
 
 /** The invoice discount once the subtotal moves, as ERPNext's: given in %, the % holds and the

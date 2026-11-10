@@ -375,6 +375,8 @@ export const CartItemRow = ({
 
   const handleRateChange = (value?: number) => {
     if (value === undefined || value === null || Number.isNaN(value)) {
+      // Back to the cart list's price, so the line no longer claims the list it was switched to.
+      if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
       onCustomRateChange(item, undefined);
       onDiscountChange(item.id, "discountAmount", 0);
       setLocalDiscountPct(0);

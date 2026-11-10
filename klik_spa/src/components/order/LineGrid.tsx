@@ -72,7 +72,8 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     const p = pending.current;
     if (!p) return;
     if ("row" in p) {
-      focusCell(p.row, p.col); // one try only, on the render after the delete; never steal focus later
+      // One try only, on the render after the delete; never steal focus later. A row with one unit has no UOM stop.
+      void (focusCell(p.row, p.col) || (p.col === "uom" && focusCell(p.row, "qty")));
       pending.current = null;
       return;
     }
