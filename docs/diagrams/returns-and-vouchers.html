@@ -243,6 +243,26 @@
           <li>Need M-Pesa or bank money back as money? Accounts refunds it from the office, not the till.</li>
         </ul>
       </div>
+      <div class="card">
+        <h2>SOP for accounts: refunding M-Pesa, cheque or bank money</h2>
+        <p>Until it is refunded, a return's non-cash money is a voucher the customer can spend at the till.
+          The refund must close that voucher, or the customer can be paid twice.</p>
+        <ol>
+          <li><strong>Check the voucher first.</strong> At the till, <code>Check voucher</code> with the credit note no. and the original sale no.
+            If it shows <em>Nothing left</em>, it was already spent or refunded: do not refund.</li>
+          <li><strong>Make a Payment Entry</strong>, type <em>Pay</em>, party = the customer, paid from = the M-Pesa (or bank) account.</li>
+          <li><strong>In References, add the credit note</strong> (Sales Invoice) and allocate the refund to it.
+            That brings its balance to zero, and the till then shows the voucher as <em>Nothing left</em>.
+            Refunding part of it leaves the rest as voucher.</li>
+          <li><strong>Reference No.</strong> = the M-Pesa reversal / B2C transaction ID (or the cheque no.), with its date.</li>
+        </ol>
+        <p><strong>Never:</strong></p>
+        <ul>
+          <li>Cancel the original sale's M-Pesa Payment Entry or C2B receipt. The money was received; cancelling it
+            un-pays the sale and the M-Pesa statement no longer matches the books.</li>
+          <li>Refund with an unallocated Payment Entry or a Journal Entry. The voucher stays open, and the customer can still spend it.</li>
+        </ul>
+      </div>
     </div>
   </div>
 </body>
