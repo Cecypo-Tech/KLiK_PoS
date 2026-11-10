@@ -8,6 +8,8 @@ import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForIt
 import { roundCurrency } from "../../utils/currencyMath";
 import type { NumberKind } from "../../utils/numberInput";
 import { NumberField } from "../ui/NumberField";
+import { RatePriceField } from "./RatePriceField";
+import type { PricePopupPick } from "../../utils/priceOptions";
 import { useEffect, useState } from "react";
 import { switchUom, uomMaps, type UomMaps } from "../../utils/uomSwitch";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
@@ -123,6 +125,13 @@ export default function LineGridRow({
     }
     onDiscountChange(item.id, "discountAmount", 0);
   };
+  // '*' in Rate: a price list sets its rate and becomes the line's list, as the panel's picker does.
+  const pickPrice = (p: PricePopupPick) => {
+    if (!("priceList" in p)) return commitRate(p.rate, String(p.rate));
+    onDiscountChange(item.id, "selectedPriceList", p.priceList);
+    onCustomRateChange(item, p.rate, false);
+    onDiscountChange(item.id, "discountAmount", 0);
+  };
   const commitDisc = (n: number | undefined) => {
     if (n !== undefined) onDiscountChange(item.id, "discountAmount", discountAmountFromPct(preDiscountPrice, n));
   };
@@ -147,7 +156,22 @@ export default function LineGridRow({
       <td className="w-20 px-1"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></td>
       <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} customerId={customerId} onUOMChange={onUOMChange} /></td>
       <td className="w-28 px-1">
-        <NumCell row={row} col="rate" value={round2(editableRate)} readOnly={!Number(posDetails?.allow_rate_change)} onCommit={commitRate} />
+        <RatePriceField
+          data-row={row}
+          data-col="rate"
+          item={item}
+          warehouse={posDetails?.warehouse || ""}
+          allowRateChange={!!Number(posDetails?.allow_rate_change)}
+          allowPriceLists={!!Number(posDetails?.allow_price_list_switching)}
+          activeList={itemDiscount.selectedPriceList}
+          currencySymbol={currencySymbol}
+          value={round2(editableRate)}
+          readOnly={!Number(posDetails?.allow_rate_change)}
+          ownKeys={false}
+          className={CELL}
+          onCommit={commitRate}
+          onPick={pickPrice}
+        />
       </td>
       <td className="w-20 px-1">
         <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />

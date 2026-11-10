@@ -18,6 +18,7 @@ import { getCartNetWeight } from "../../utils/cartWeight";
 import { formatNumber } from "../../utils/numberInput";
 import { roundCurrency } from "../../utils/currencyMath";
 import { NumberField } from "../ui/NumberField";
+import { RatePriceField } from "./RatePriceField";
 
 // Line panel: compact edit row on top, then label-left / value-right ledger rows.
 const PANEL_LABEL = "block text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1 truncate";
@@ -812,8 +813,14 @@ export const CartItemRow = ({
               </div>
               <div className="min-w-0">
                 <label className={PANEL_LABEL}>Rate <span className="normal-case tracking-normal">{hasExclusiveTax ? "excl." : "incl."}</span></label>
-                <NumberField
-                  kind="money"
+                <RatePriceField
+                  item={item}
+                  warehouse={warehouse}
+                  allowRateChange={!!posDetails?.allow_rate_change}
+                  allowPriceLists={allowPriceListSwitching}
+                  activeList={itemDiscount.selectedPriceList}
+                  currencySymbol={currency_symbol || ""}
+                  onPick={(p) => ("priceList" in p ? handleLinePriceListChange(p.priceList) : commitPanelRate(p.rate, String(p.rate)))}
                   value={roundCurrency(panelRate)}
                   aria-label={hasExclusiveTax ? "Rate (Excl. Tax)" : "Rate (Incl. Tax)"}
                   readOnly={!posDetails?.allow_rate_change}
