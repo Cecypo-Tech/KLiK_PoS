@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, linePriceShown, resolveActivePriceList, seedCustomPrice, typeCustomPrice } from "./priceOptions";
+import { buildPriceOptions, computePricePopupPosition, cyclePriceOptionIndex, linePriceShown, openPricePopupState, pricePopupKey, resolveActivePriceList, seedCustomPrice, starOpensPricePopup, typeCustomPrice } from "./priceOptions";
 
 describe("buildPriceOptions", () => {
   it("maps each price list entry to an option", () => {
@@ -160,5 +160,57 @@ describe("linePriceShown", () => {
 
   it("a cleared rate (null, as a recalled order stores it) is no rate", () => {
     expect(linePriceShown(lists, undefined, null, "Cash Price").entry).toBe(lists[0]);
+  });
+});
+
+describe("Rate box '*': opens the price popup only as the first key", () => {
+  it("opens on '*' over a fully selected or empty box", () => {
+    expect(starOpensPricePopup("*", "450", 0, 3)).toBe(true);
+    expect(starOpensPricePopup("*", "", 0, 0)).toBe(true);
+  });
+  it("is multiply inside a sum, and ignores other keys", () => {
+    expect(starOpensPricePopup("*", "4", 1, 1)).toBe(false);
+    expect(starOpensPricePopup("+", "450", 0, 3)).toBe(false);
+  });
+});
+
+describe("pricePopupKey", () => {
+  const lists = [{ price_list: "Standard Selling", rate: 450 }, { price_list: "Wholesale", rate: 400 }];
+  const open = (active?: string) => openPricePopupState(lists, true, 450, active);
+
+  it("starts on the line's active list, else the first at the current rate, else the first", () => {
+    expect(open("Wholesale").selectedIndex).toBe(1);
+    expect(openPricePopupState(lists, true, 400).selectedIndex).toBe(1);
+    expect(openPricePopupState(lists, true, 999).selectedIndex).toBe(0);
+  });
+  it("arrows move and wrap", () => {
+    expect(pricePopupKey(open(), "ArrowDown").state?.selectedIndex).toBe(1);
+    expect(pricePopupKey(open(), "ArrowUp").state?.selectedIndex).toBe(2);
+  });
+  it("Enter on a list picks it", () => {
+    const r = pricePopupKey({ ...open(), selectedIndex: 1 }, "Enter");
+    expect(r.state).toBeNull();
+    expect(r.pick).toEqual({ priceList: "Wholesale", rate: 400 });
+  });
+  it("a digit jumps to Custom and replaces its seed; Enter picks the typed price", () => {
+    let s = pricePopupKey(open(), "3").state!;
+    s = pricePopupKey(s, "8").state!;
+    s = pricePopupKey(s, "0").state!;
+    expect(s.selectedIndex).toBe(2);
+    expect(s.customValue).toBe("380");
+    expect(pricePopupKey(s, "Enter").pick).toEqual({ rate: 380 });
+  });
+  it("Enter on an empty Custom changes nothing", () => {
+    const s = pricePopupKey(pricePopupKey(open(), "ArrowUp").state!, "Backspace").state!;
+    expect(pricePopupKey(s, "Enter")).toEqual({ state: null, handled: true });
+  });
+  it("Escape closes; Tab closes and lets the box move on", () => {
+    expect(pricePopupKey(open(), "Escape")).toEqual({ state: null, handled: true });
+    expect(pricePopupKey(open(), "Tab")).toEqual({ state: null, handled: false });
+  });
+  it("without rate changes there is no Custom row, and digits do nothing", () => {
+    const s = openPricePopupState(lists, false, 450);
+    expect(s.options).toHaveLength(2);
+    expect(pricePopupKey(s, "3").state).toEqual(s);
   });
 });

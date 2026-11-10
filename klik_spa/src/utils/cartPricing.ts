@@ -33,6 +33,7 @@ interface DiscountDataLike {
   discountAmount?: number;
   customRate?: number;
   customRateIncludesTax?: boolean;
+  selectedPriceList?: string;
 }
 
 export type DiscountMapLike = Record<string, DiscountDataLike | undefined>;

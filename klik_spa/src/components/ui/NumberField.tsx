@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
 import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber, type NumberKind } from "../../utils/numberInput";
 
 type NativeProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "defaultValue">;
@@ -39,6 +39,11 @@ export function NumberField({
   const edited = useRef(false);
   const shown = draft ?? (blankZero && !n ? "" : formatNumber(n, kind));
   const result = draft !== null && isExpression(draft) ? evaluateNumber(draft) : undefined;
+
+  // The value moved under a focused, untouched box (a price list picked, a pricing rule): show the new one.
+  useEffect(() => {
+    if (draft !== null && !edited.current && draft !== plain) { setDraft(plain); selectAll.current = true; }
+  }, [plain]); // eslint-disable-line react-hooks/exhaustive-deps -- only when the value itself moves
 
   const commit = () => {
     if (draft !== null && edited.current && !readOnly) onCommit(readNumber(draft, kind), draft.trim());

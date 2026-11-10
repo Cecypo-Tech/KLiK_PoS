@@ -107,3 +107,66 @@ export function linePriceShown<T extends { price_list: string; rate: number }>(
   if (priced && !active) return { entry: undefined, active: undefined, customRate: customRate as number };
   return { entry: active || lists.find((list) => list.price_list === cartList), active, customRate: null };
 }
+
+/** The Rate box's '*': the price popup, but only as the first key (the box empty or all
+ * selected). Inside a sum, '*' is multiply ("4*5"), and a sum never starts with one. */
+export function starOpensPricePopup(key: string, value: string, selectionStart: number | null, selectionEnd: number | null): boolean {
+  return key === "*" && (value === "" || (selectionStart === 0 && selectionEnd === value.length));
+}
+
+export interface PricePopupState {
+  options: PriceOption[];
+  selectedIndex: number;
+  customValue: string;
+  customSelected: boolean;
+}
+
+/** The popup over a line's Rate: its price lists (+ Custom when rates may change), on the active list. */
+export function openPricePopupState(
+  priceLists: { price_list: string; rate: number }[],
+  allowRateChange: boolean,
+  currentRate: number,
+  activeList?: string,
+): PricePopupState {
+  const options = buildPriceOptions(priceLists, allowRateChange, currentRate);
+  const seed = seedCustomPrice(currentRate);
+  return {
+    options,
+    selectedIndex: Math.max(0, [priceLists.findIndex((p) => p.price_list === activeList), priceLists.findIndex((p) => Number(p.rate) === currentRate)].find((i) => i >= 0) ?? 0),
+    customValue: seed.value,
+    customSelected: seed.selected,
+  };
+}
+
+export type PricePopupPick = { priceList: string; rate: number } | { rate: number };
+
+/** One key while the popup is open. `handled: false` lets the key carry on (Tab moves focus). */
+export function pricePopupKey(
+  s: PricePopupState,
+  key: string,
+): { state: PricePopupState | null; pick?: PricePopupPick; handled: boolean } {
+  const current = s.options[s.selectedIndex];
+  const customIndex = s.options.findIndex((o) => o.isCustom);
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    const selectedIndex = cyclePriceOptionIndex(s.selectedIndex, s.options.length, key === "ArrowDown" ? 1 : -1);
+    const option = s.options[selectedIndex];
+    const seed = option?.isCustom ? seedCustomPrice(option.rate) : null;
+    return { state: { ...s, selectedIndex, ...(seed ? { customValue: seed.value, customSelected: seed.selected } : {}) }, handled: true };
+  }
+  if (key === "Escape") return { state: null, handled: true };
+  if (key === "Tab") return { state: null, handled: false };
+  if (key === "Enter") {
+    if (!current) return { state: null, handled: true };
+    if (!current.isCustom) return { state: null, pick: { priceList: current.label, rate: current.rate }, handled: true };
+    const rate = parseFloat(s.customValue);
+    // Empty or 0 is "no price set", not free: the line keeps its rate.
+    return Number.isFinite(rate) && rate > 0 ? { state: null, pick: { rate }, handled: true } : { state: null, handled: true };
+  }
+  if ((/^[0-9.]$/.test(key) || key === "Backspace") && customIndex >= 0) {
+    // Typing starts a custom price from any row: the first digit replaces the seed.
+    const base = current?.isCustom ? s : { ...s, customValue: seedCustomPrice(s.options[customIndex]!.rate).value, customSelected: true };
+    const draft = typeCustomPrice({ value: base.customValue, selected: base.customSelected }, key);
+    return { state: { ...s, selectedIndex: customIndex, customValue: draft.value, customSelected: draft.selected }, handled: true };
+  }
+  return { state: s, handled: true }; // swallowed: the popup is modal while open
+}
