@@ -112,8 +112,6 @@ export default function LineGridRow({
   // As CartItemRow.handleRateChange: empty resets to the list rate; any rate change clears the line discount.
   const commitRate = (n: number | undefined, text: string) => {
     if (n === undefined && text !== "") return;
-    // A typed rate is no list's price: the line drops its list (the invoice records the list it was priced from).
-    if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
     if (n === undefined) {
       onCustomRateChange(item, undefined);
     } else {
