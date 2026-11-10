@@ -167,13 +167,18 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
       key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey,
       col, row, rowCount, entryRow,
       dropdownOpen: open && row === entryRow, rowEmpty: false,
-      editable: { rate: !!Number(posDetails?.allow_rate_change), disc: !!Number(posDetails?.allow_discount_change) },
+      editable: {
+        rate: !!Number(posDetails?.allow_rate_change),
+        disc: !!Number(posDetails?.allow_discount_change),
+        uom: !!tableRef.current?.querySelector(`[data-row="${row}"][data-col="uom"]`), // a picker only when the item has units to pick
+      },
     });
     if (action.type === "none") return;
     e.preventDefault();
     switch (action.type) {
-      case "focus": return void focusCell(action.row, action.col);
-      case "commit": return void focusCell(action.then.row, action.then.col); // the cell commits on blur
+      // A row with one unit has no UOM stop: up/down from a UOM lands on that row's qty.
+      case "focus": return void (focusCell(action.row, action.col) || (action.col === "uom" && focusCell(action.row, "qty")));
+      case "commit": return void (focusCell(action.then.row, action.then.col) || (action.then.col === "uom" && focusCell(action.then.row, "qty"))); // the cell commits on blur
       // Enter still tries an exact scan first (submitEntry falls back to the highlighted result); Tab picks.
       case "pickHighlighted": return void (e.key === "Enter" ? submitEntry() : pick(results[highlight]));
       case "moveHighlight": return setHighlight((h) => Math.min(results.length - 1, Math.max(0, h + action.delta)));
