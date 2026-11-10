@@ -160,18 +160,6 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "1",
         "module": "KLiK PoS",
     },
-    {
-        "fieldname": "custom_line_entry_grid",
-        "label": "Line Entry Grid",
-        "fieldtype": "Check",
-        "insert_after": "custom_allow_quotes",
-        "description": (
-            "Desktop till shows one keyboard-first grid of lines instead of the product list "
-            "and cart. Off: the usual layout."
-        ),
-        "default": "0",
-        "module": "KLiK PoS",
-    },
 ]
 
 
