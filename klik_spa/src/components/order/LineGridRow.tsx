@@ -84,13 +84,15 @@ interface LineGridRowProps {
   onRemoveItem: (id: string) => void;
   onUOMChange: (itemId: string, uom: string, price: number, conversionFactor?: number) => void;
   customerId?: string;
+  /** The list the cart sells on: a line on another list gets a chip by its rate. */
+  cartPriceList?: string;
   currencySymbol: string;
   posDetails: POSDetails | null;
 }
 
 export default function LineGridRow({
   item, row, itemDiscount, selected, onSelect, onUpdateQuantity, onCustomRateChange, onDiscountChange, onRemoveItem,
-  onUOMChange, customerId, currencySymbol, posDetails,
+  onUOMChange, customerId, cartPriceList, currencySymbol, posDetails,
 }: LineGridRowProps) {
   // Same pricing inputs as CartItemRow, so the grid and the cart show and commit identical numbers.
   const tip = posDetails?.is_tax_included_in_basic_rate;
@@ -112,6 +114,8 @@ export default function LineGridRow({
   // As CartItemRow.handleRateChange: empty resets to the list rate; any rate change clears the line discount.
   const commitRate = (n: number | undefined, text: string) => {
     if (n === undefined && text !== "") return;
+    // A typed rate is no list's price: the line drops its list (the invoice records the list it was priced from).
+    if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
     if (n === undefined) {
       onCustomRateChange(item, undefined);
     } else {
@@ -155,7 +159,8 @@ export default function LineGridRow({
       </td>
       <td className="w-20 px-1"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></td>
       <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} customerId={customerId} onUOMChange={onUOMChange} /></td>
-      <td className="w-28 px-1">
+      <td className="w-44 px-1">
+        <div className="flex items-center gap-1">
         <RatePriceField
           data-row={row}
           data-col="rate"
@@ -169,9 +174,18 @@ export default function LineGridRow({
           readOnly={!Number(posDetails?.allow_rate_change)}
           ownKeys={false}
           className={CELL}
+          wrapperClassName="flex-1 min-w-0"
           onCommit={commitRate}
           onPick={pickPrice}
         />
+          {itemDiscount.selectedPriceList && itemDiscount.selectedPriceList !== cartPriceList ? (
+            <span
+              data-price-chip={item.id}
+              title={`Price list: ${itemDiscount.selectedPriceList}`}
+              className="shrink-0 max-w-[5.5rem] truncate rounded-full bg-beveren-100 ring-1 ring-beveren-300 dark:bg-beveren-900/40 dark:ring-beveren-700 px-1.5 py-0.5 text-[11px] font-medium text-beveren-700 dark:text-beveren-300"
+            >{itemDiscount.selectedPriceList}</span>
+          ) : null}
+        </div>
       </td>
       <td className="w-20 px-1">
         <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />

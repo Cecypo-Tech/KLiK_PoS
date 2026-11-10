@@ -30,6 +30,7 @@ const render = (items: CartItem[], pos: Partial<POSDetails> = {}, itemDiscounts 
       onOpenDescription={() => {}}
       onPickItem={async () => null}
       currencySymbol="KES"
+      cartPriceList="Standard Selling"
       posDetails={{ name: "P", allow_rate_change: 1, allow_discount_change: 1, ...pos } as POSDetails}
     />,
   );
@@ -43,6 +44,13 @@ describe("LineGrid", () => {
   it("shows the line's unit in the UOM column (a picker appears once the item has more than one)", () => {
     const html = render([{ ...line("A", "Apple"), uom: "Box" }]);
     expect(html).toMatch(/data-uom-cell="A"[^>]*>[^<]*<span[^>]*>Box<\/span>/);
+  });
+
+  it("chips the line's own price list right of its rate, when it isn't the cart's", () => {
+    const chip = /data-price-chip="A"[^>]*>Elite</;
+    expect(render([line("A", "Apple")], {}, { A: { selectedPriceList: "Elite" } })).toMatch(chip);
+    expect(render([line("A", "Apple")], {}, { A: { selectedPriceList: "Standard Selling" } })).not.toContain("data-price-chip");
+    expect(render([line("A", "Apple")])).not.toContain("data-price-chip");
   });
 
   it("shows a description as an italic second line, and nothing when there is none", () => {
