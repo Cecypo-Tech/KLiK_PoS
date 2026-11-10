@@ -203,6 +203,20 @@ class TestPosProfileFormLayout(FrappeTestCase):
         )
         self.assertIn("custom_allow_credit_sales_as_pos", order[start + 1:end])
 
+    def test_pos_details_lists_whole_number_uoms(self):
+        """The till refuses a fraction in a unit marked Must be Whole Number, as ERPNext does on save."""
+        profiles = frappe.get_all("POS Profile", limit=1, pluck="name")
+        if not profiles:
+            self.skipTest("no POS Profile on this site")
+        pos = frappe.get_doc("POS Profile", profiles[0])
+        with patch("klik_pos.api.pos_profile.get_current_pos_opening_entry", return_value=None), \
+                patch("klik_pos.api.pos_profile.get_current_pos_profile", return_value=pos):
+            whole = set(get_pos_details()["whole_number_uoms"])
+        self.assertEqual(whole, set(frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name")))
+        fractional = frappe.get_all("UOM", filters={"must_be_whole_number": 0}, pluck="name", limit=1)
+        if fractional:
+            self.assertNotIn(fractional[0], whole)
+
     def test_pos_details_carries_allow_multiple_items(self):
         profiles = frappe.get_all("POS Profile", limit=1, pluck="name")
         if not profiles:

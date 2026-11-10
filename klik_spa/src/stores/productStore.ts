@@ -208,10 +208,11 @@ export const useProductStore = create<ProductStoreState>()(
         
         get().syncCustomerFromCart();
         
-        if (!posName && profileStore.isInitialized && profileStore.posDetails?.name) {
-          const profileName = profileStore.posDetails.name;
-          set({ posName: profileName });
-          get().initializePOS(profileName);
+        // The till open now wins over a name persisted from an earlier session (a till since left).
+        const live = profileStore.isInitialized ? profileStore.posDetails?.name : undefined;
+        if (live && live !== posName) {
+          set({ posName: live });
+          get().initializePOS(live);
         } else if (posName && !isInitialized && !isLoading) {
           get().initializePOS(posName);
         }

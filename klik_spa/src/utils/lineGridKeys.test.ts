@@ -27,6 +27,13 @@ describe("gridKeyAction", () => {
     expect(act({ col: "item", key: "Enter" })).toEqual({ type: "focus", row: 1, col: "qty" });
     expect(act({ col: "item", key: "Tab" })).toEqual({ type: "focus", row: 1, col: "qty" });
   });
+  it("a line with more than one unit stops on its UOM between qty and rate", () => {
+    const uom = { rate: true, disc: true, uom: true };
+    expect(act({ key: "Tab", editable: uom })).toEqual({ type: "commit", then: { row: 1, col: "uom" } });
+    expect(act({ key: "Enter", col: "uom", editable: uom })).toEqual({ type: "commit", then: { row: 1, col: "rate" } });
+    expect(act({ key: "Tab", shift: true, col: "rate", editable: uom })).toEqual({ type: "focus", row: 1, col: "uom" });
+    expect(act({ key: "ArrowDown", col: "uom", editable: uom })).toEqual({ type: "commit", then: { row: 2, col: "uom" } });
+  });
   it("qty -> rate, skipping non-editable cells", () => {
     expect(act({ key: "Enter" })).toEqual({ type: "commit", then: { row: 1, col: "rate" } });
     expect(act({ key: "Tab", editable: { rate: false, disc: true } })).toEqual({ type: "commit", then: { row: 1, col: "disc" } });

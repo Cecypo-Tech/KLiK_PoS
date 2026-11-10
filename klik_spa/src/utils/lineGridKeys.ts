@@ -1,11 +1,11 @@
-export type GridCol = "item" | "qty" | "rate" | "disc";
-export const GRID_COLS: GridCol[] = ["item", "qty", "rate", "disc"];
+export type GridCol = "item" | "qty" | "uom" | "rate" | "disc";
+export const GRID_COLS: GridCol[] = ["item", "qty", "uom", "rate", "disc"];
 export interface GridKeyCtx {
   key: string; shift: boolean; ctrl: boolean; alt: boolean;
   col: GridCol; row: number;          // row index in display order; entryRow = index of the empty entry row
   rowCount: number; entryRow: number;
   dropdownOpen: boolean; rowEmpty: boolean;
-  editable: { rate: boolean; disc: boolean };   // posDetails.allow_rate_change / allow_discount_change
+  editable: { rate: boolean; disc: boolean; uom?: boolean };   // allow_rate_change / allow_discount_change; uom: this line sells in more than one unit
 }
 export type GridAction =
   | { type: "focus"; row: number; col: GridCol }
@@ -21,7 +21,7 @@ const NONE: GridAction = { type: "none" };
 export function gridKeyAction(c: GridKeyCtx): GridAction {
   const { key, col, row, entryRow } = c;
   const isEntry = row === entryRow;
-  const cols = GRID_COLS.filter((x) => x === "item" || x === "qty" || c.editable[x as "rate" | "disc"]) as [GridCol, ...GridCol[]];
+  const cols = GRID_COLS.filter((x) => x === "item" || x === "qty" || !!c.editable[x as "uom" | "rate" | "disc"]) as [GridCol, ...GridCol[]];
   const i = cols.indexOf(col);
 
   if (c.dropdownOpen) {

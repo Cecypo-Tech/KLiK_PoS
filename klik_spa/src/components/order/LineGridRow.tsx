@@ -19,11 +19,11 @@ import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount } from "
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const CELL = "w-full bg-transparent px-1.5 py-1 text-right tabular-nums rounded focus:outline-none focus:ring-2 focus:ring-beveren-500 read-only:text-gray-500";
 
-const KIND: Record<Exclude<GridCol, "item">, NumberKind> = { qty: "qty", rate: "money", disc: "percent" };
+const KIND: Record<Exclude<GridCol, "item" | "uom">, NumberKind> = { qty: "qty", rate: "money", disc: "percent" };
 
 /** A number cell: formatted at rest, takes a sum ("4*5"), commits once on blur (Enter/Tab/arrows blur it by moving focus). */
 function NumCell({ row, col, value, readOnly, onCommit }: {
-  row: number; col: Exclude<GridCol, "item">; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
+  row: number; col: Exclude<GridCol, "item" | "uom">; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
 }) {
   return (
     <NumberField
@@ -40,8 +40,8 @@ function NumCell({ row, col, value, readOnly, onCommit }: {
 }
 
 /** The line's unit: plain text, or a picker once the item is sold in more than one. */
-function UomCell({ item, customerId, onUOMChange }: {
-  item: CartItem; customerId?: string; onUOMChange: LineGridRowProps["onUOMChange"];
+function UomCell({ item, row, customerId, onUOMChange }: {
+  item: CartItem; row: number; customerId?: string; onUOMChange: LineGridRowProps["onUOMChange"];
 }) {
   const [maps, setMaps] = useState<UomMaps | null>(null);
   const code = item.item_code || item.id;
@@ -59,6 +59,8 @@ function UomCell({ item, customerId, onUOMChange }: {
   if (!maps || maps.uoms.length < 2) return <span className="block truncate text-gray-600 dark:text-gray-300">{uom}</span>;
   return (
     <select
+      data-row={row}
+      data-col="uom"
       aria-label={`Unit for ${item.name}`}
       value={uom}
       onChange={(e) => {
@@ -112,9 +114,9 @@ export default function LineGridRow({
   // As CartItemRow.handleRateChange: empty resets to the list rate; any rate change clears the line discount.
   const commitRate = (n: number | undefined, text: string) => {
     if (n === undefined && text !== "") return;
-    // A typed rate is no list's price: the line drops its list (the invoice records the list it was priced from).
-    if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
     if (n === undefined) {
+      // Back to the cart list's price, so the line no longer claims the list it was switched to.
+      if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
       onCustomRateChange(item, undefined);
     } else {
       // ponytail: floor uses the list rate; CartItemRow also honours a line price-list pick fetched on expand.
@@ -168,7 +170,7 @@ export default function LineGridRow({
           <div className="w-12 shrink-0"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></div>
         </div>
       </td>
-      <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} customerId={customerId} onUOMChange={onUOMChange} /></td>
+      <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} row={row} customerId={customerId} onUOMChange={onUOMChange} /></td>
       <td className="w-28 px-1">
         <RatePriceField
           data-row={row}

@@ -338,6 +338,8 @@ def get_pos_details():
         "allow_multiple_items": cint(frappe.db.get_single_value("Selling Settings", "allow_multiple_items")),
         # The walk-in Tax ID field offers a KRA name lookup only when cecypo_pin_checker is usable.
         "pin_checker_available": int(pin_checker_available()),
+        # Units marked Must be Whole Number: the till refuses a fraction in them, as ERPNext does on save.
+        "whole_number_uoms": frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name"),
     })
 
     return details

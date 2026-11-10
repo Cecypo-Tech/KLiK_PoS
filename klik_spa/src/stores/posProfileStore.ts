@@ -51,6 +51,7 @@ export interface POSProfile {
   custom_show_item_code_in_product_list?: boolean | number;
   custom_use_item_code_as_display_name?: boolean | number;
   custom_enable_loss_of_sale?: boolean | number;
+  whole_number_uoms?: string[];
   custom_allow_quotes?: boolean | number;
   allow_multiple_items?: 0 | 1;
   custom_enhanced_search?: boolean | number;

@@ -116,7 +116,7 @@ export default function TotalsSection({
             )}
 
             <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Cash Received</span>
+              <span className="text-gray-600 dark:text-gray-400">Amount Received</span>
               <span className="font-medium text-blue-600 dark:text-blue-400">
                 {formatCurrencyWithSymbol(totalPaidAmount, displayCurrencySymbol)}
               </span>
