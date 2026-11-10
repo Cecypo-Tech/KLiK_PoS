@@ -45,6 +45,13 @@ describe("LineGrid", () => {
     expect(html).toMatch(/data-uom-cell="A"[^>]*>[^<]*<span[^>]*>Box<\/span>/);
   });
 
+  it("chips a line's Loss of Sale left of its qty, when the till records LoS", () => {
+    const los = { ...line("A", "Apple"), quantity: 4, los_qty: 6 } as CartItem;
+    expect(render([los], { custom_enable_loss_of_sale: 1 })).toMatch(/data-los-chip="A"[^>]*>LoS 6<\/span>.*data-col="qty"/);
+    expect(render([los])).not.toContain("data-los-chip");
+    expect(render([line("A", "Apple")], { custom_enable_loss_of_sale: 1 })).not.toContain("data-los-chip");
+  });
+
   it("shows a description as an italic second line, and nothing when there is none", () => {
     expect(render([line("A", "Apple", "Green ones")])).toMatch(/<[^>]*class="[^"]*italic[^"]*"[^>]*>Green ones</);
     expect(render([line("A", "Apple")])).not.toContain("italic");
