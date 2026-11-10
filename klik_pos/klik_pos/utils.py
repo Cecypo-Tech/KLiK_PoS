@@ -21,6 +21,9 @@ def _till_cache():
 def error_reason(error):
 	"""What went wrong, for the cashier. A bare PermissionError has no message of its own, so
 	"Failed to create POS Opening Entry: {0}" used to end in nothing."""
+	if isinstance(error, frappe.QueryTimeoutError | frappe.QueryDeadlockError):
+		# A raw "(1205, 'Lock wait timeout exceeded...')" means nothing at the counter.
+		return _("The system is busy with another update. Please try again in a moment.")
 	if str(error):
 		return str(error)
 	if isinstance(error, frappe.PermissionError):

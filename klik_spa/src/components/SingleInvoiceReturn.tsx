@@ -57,6 +57,8 @@ export default function SingleInvoiceReturn({
   // Cash ceiling from the backend: how much the customer actually handed over and we still hold.
   // 0 for a credit sale, in which case the whole return becomes a credit note.
   const [refundableCash, setRefundableCash] = useState<number>(0);
+  // What the customer still owes on the sale: a return of a credit sale comes off this first.
+  const [owedOnSale, setOwedOnSale] = useState<number>(0);
 
   // The voucher a return left, held on screen until the cashier presses Done. The return is
   // already made by then, so every way out of that view still tells the host (onSuccess) first.
@@ -134,6 +136,7 @@ export default function SingleInvoiceReturn({
     setReturnItems([]);
     setFixedCharges([]);
     setRefundableCash(0);
+    setOwedOnSale(0);
     setOriginalInvoicePaidAmount(0);
     setOriginalInvoiceGrandTotal(0);
     try {
@@ -151,6 +154,7 @@ export default function SingleInvoiceReturn({
         // who had paid nothing.
         setOriginalInvoicePaidAmount(Number(invoiceWithItems.refundable_cash ?? invoiceWithItems.paid_amount ?? 0));
         setRefundableCash(Number(invoiceWithItems.refundable_cash ?? 0));
+        setOwedOnSale(Math.max(0, Number(invoiceWithItems.outstanding_amount ?? 0)));
         setFixedCharges(
           (invoiceWithItems.fixed_charges || []).map((charge: FixedCharge) => ({ ...charge, amount: Number(charge.amount) || 0 }))
         );
@@ -643,8 +647,9 @@ export default function SingleInvoiceReturn({
                 </h3>
                 <p className="text-xs text-blue-800 dark:text-blue-300 mt-1">
                   No cash was kept from this sale, so there is nothing to hand back at the till.{" "}
-                  {formatCurrencyWithSymbol(totalReturnAmount, currency)} stays with the customer as credit. A credit
-                  sale's balance is reduced; card or M-Pesa money is refunded by accounts.
+                  {owedOnSale > 0 && totalReturnAmount <= owedOnSale
+                    ? `${formatCurrencyWithSymbol(totalReturnAmount, currency)} comes off the ${formatCurrencyWithSymbol(owedOnSale, currency)} the customer still owes on this sale.`
+                    : `${formatCurrencyWithSymbol(totalReturnAmount, currency)} stays with the customer as credit; card or M-Pesa money is refunded by accounts.`}
                 </p>
               </div>
             ) : (

@@ -14,7 +14,7 @@ from frappe.utils import cint, flt, fmt_money, getdate, nowdate, strip_html_tags
 
 from klik_pos.api.customer_credit import apply_customer_credit, validate_allocations
 from klik_pos.api.payment_rows import mode_label
-from klik_pos.klik_pos.utils import get_current_pos_profile, requested_warehouse
+from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile, requested_warehouse
 from klik_pos.overrides.loss_of_sale import PROFILE_FLAG as LOS_PROFILE_FLAG, split_cart_items
 
 from .item.item_price import get_price_list_with_customer_priority, is_allowed_price_list
@@ -353,7 +353,7 @@ def _abort_checkout(state, error):
 	frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
 
 	# 4. RESPOND
-	response = {"success": False, "message": str(error)}
+	response = {"success": False, "message": error_reason(error)}
 	if state.checkout_request_id:
 		response["checkout_request_id"] = state.checkout_request_id
 	if state.invoice_name:
@@ -627,6 +627,18 @@ def _returns_every_line(original_invoice, return_doc):
 	for row in return_doc.items:
 		returned[row.item_code] = returned.get(row.item_code, 0.0) + abs(flt(row.qty))
 	return all(flt(returned.get(code, 0.0)) >= qty for code, qty in sold.items())
+
+
+def _finishes_the_sale(original_invoice, return_doc):
+	"""True when this return, with the sale's earlier ones, brings back every quantity sold."""
+	prior = frappe.get_all(
+		"Sales Invoice", filters={"is_return": 1, "docstatus": 1, "return_against": original_invoice.name}, pluck="name"
+	)
+	back = {}
+	rows = frappe.get_all("Sales Invoice Item", filters={"parent": ["in", prior]}, fields=["sales_invoice_item", "qty"]) if prior else []
+	for row in [*rows, *return_doc.items]:
+		back[row.sales_invoice_item] = back.get(row.sales_invoice_item, 0.0) + abs(flt(row.qty))
+	return all(flt(back.get(row.name)) >= abs(flt(row.qty)) for row in original_invoice.items)
 
 
 def _drop_actual_charges(return_doc):
@@ -3509,10 +3521,25 @@ def build_sales_invoice_doc(
 			doc.due_date = due_date
 
 	_set_site_sale_type(doc, is_credit_sale)
+	_keep_line_discount_percentages(doc, items)
 
 	_assert_pos_rates_survived(doc, pos_line_prices, skip_item_code=delivery_item_code)
 
 	return doc
+
+
+def _keep_line_discount_percentages(doc, items):
+	"""Save the % a cashier gave a line, as ERPNext's form does, where the rate is exactly the
+	list rate less it - ERPNext's own sum, so its next calculation keeps the % rather than
+	resetting it. The till sends the discounted rate, which ERPNext records as an amount only."""
+	for row, item in zip(doc.items, items, strict=False):
+		pct = flt(item.get("discountPercentage"))
+		if pct <= 0 or flt(row.discount_percentage) or flt(row.margin_rate_or_amount):
+			continue
+		amount = flt(flt(row.price_list_rate) * pct / 100, row.precision("discount_amount"))
+		if flt(flt(row.price_list_rate) - amount, row.precision("rate")) == flt(row.rate, row.precision("rate")):
+			row.discount_percentage = pct
+			row.discount_amount = amount
 
 
 SITE_SALE_TYPE_FIELD = "custom_sale_type"
@@ -5778,6 +5805,12 @@ def create_partial_return(
 
 		# Clear existing payments
 		return_doc.payments = []
+
+		# A partial note credits exactly what came back (the 617.50 the dialog showed); only the
+		# return that finishes the sale rounds. Rounded one by one, a sale's notes added up past
+		# what was paid (2899 back on 2898).
+		if not _finishes_the_sale(original_invoice, return_doc):
+			return_doc.disable_rounded_total = 1
 
 		# Calculate total returned amount (baseline expected refund)
 		# Prefer client-provided expected amount; fallback to the credit note's own total, which

@@ -27,7 +27,9 @@ class TestReturnReversesOrderDiscount(FrappeTestCase):
 		invoice.discount_amount = discount
 		invoice.set("payments", [])
 		invoice.insert(ignore_permissions=True)
-		invoice.append("payments", {"mode_of_payment": "Cash", "amount": invoice.grand_total})
+		# The rounded total is what is due: paying 1,199.70 of 1,200 is a partial payment, which
+		# a POS sale refuses.
+		invoice.append("payments", {"mode_of_payment": "Cash", "amount": invoice.rounded_total or invoice.grand_total})
 		invoice.save(ignore_permissions=True)
 		invoice.submit()
 		self.assertEqual(flt(invoice.grand_total), rate * qty - discount)
@@ -63,9 +65,10 @@ class TestReturnReversesOrderDiscount(FrappeTestCase):
 		self.assertEqual(flt(first.grand_total), -75.0)
 		self.assertEqual(flt(first.grand_total) + flt(second.grand_total), -150.0)
 
-	def test_the_tills_unrounded_refund_settles_a_rounded_credit_note(self):
+	def test_the_tills_unrounded_refund_settles_a_partial_credit_note(self):
 		# POS-01926 on dev: 3 x 430 less 90.30 is 1,199.70 (rounded 1,200). Returning one, the
-		# till offers 399.90 but the note rounds to 400 - refunding 399.90 left a 0.10 voucher.
+		# till offers 399.90; the note used to round to 400, and refunding 399.90 left a 0.10
+		# voucher. A partial note now credits its exact value, so the two agree.
 		invoice = self._sale(qty=3, rate=430, discount=90.3)
 		item = invoice.items[0].item_code
 
@@ -75,6 +78,6 @@ class TestReturnReversesOrderDiscount(FrappeTestCase):
 			)
 		)
 
-		self.assertEqual(flt(credit.rounded_total), -400.0)
-		self.assertEqual(sum(flt(p.amount) for p in credit.payments), -400.0)
+		self.assertEqual(flt(credit.grand_total), -399.9)
+		self.assertEqual(sum(flt(p.amount) for p in credit.payments), -399.9)
 		self.assertEqual(flt(credit.outstanding_amount), 0.0)

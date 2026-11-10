@@ -13,6 +13,7 @@ import { usePaymentModes } from "../../hooks/usePaymentModes";
 import { useSalesTaxCharges } from "../../hooks/useSalesTaxCharges";
 import { useShippingRules } from "../../hooks/useShippingRules";
 import { selectAllOnFocus } from "../../utils/selectAllOnFocus";
+import { rebaseOrderDiscount } from "../../utils/lineEdits";
 import { formatCartWeight, getCartNetWeight } from "../../utils/cartWeight";
 import {
   createSalesInvoice,
@@ -569,7 +570,20 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     }
   }, [allowDiscountChange]);
 
+  // Which box the cashier typed last decides what holds when the cart (and subtotal) moves.
+  const orderDiscountByPercent = useRef(false);
+  useEffect(() => {
+    if (!orderDiscountAmount && !orderDiscountPercentInput) return;
+    const next = rebaseOrderDiscount(
+      { byPercent: orderDiscountByPercent.current, percent: orderDiscountPercentInput, amount: orderDiscountAmount },
+      calculations.subtotal,
+    );
+    setOrderDiscountPercentInput(next.percent);
+    setOrderDiscountAmount(next.amount);
+  }, [calculations.subtotal]); // eslint-disable-line react-hooks/exhaustive-deps -- only when the subtotal moves
+
   const handleOrderDiscountAmountChange = (value: number) => {
+    orderDiscountByPercent.current = false;
     const amt = Math.max(0, value || 0);
     setOrderDiscountAmount(amt);
     setOrderDiscountPercentInput(
@@ -578,6 +592,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   };
 
   const handleOrderDiscountPercentChange = (value: number) => {
+    orderDiscountByPercent.current = true;
     const pct = Math.min(100, Math.max(0, value || 0));
     const amt = roundCurrency((calculations.subtotal * pct) / 100);
     setOrderDiscountPercentInput(pct);
@@ -2127,7 +2142,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     clearCart();
   };
 
+  const finalized = useRef(false);
   const finalizeCompletedOrderState = async (afterClear?: () => void) => {
+    finalized.current = true;
     if (invoiceSubmitted && !rememberSalesperson) {
       try {
         await clearActiveSalesperson(true);
@@ -2139,6 +2156,12 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     clearOrderState();
     afterClear?.();
   };
+
+  // Leaving a completed sale any other way (the sidebar, a route change) still finishes it,
+  // or its cart and customer come back on the till and can be sold twice.
+  const finalizeOnLeave = useRef<(() => void) | null>(null);
+  finalizeOnLeave.current = invoiceSubmitted ? () => void finalizeCompletedOrderState() : null;
+  useEffect(() => () => { if (!finalized.current) finalizeOnLeave.current?.(); }, []);
 
   const getActionButtonText = () => {
     if (isProcessingPayment) return isB2B ? "Submitting Invoice..." : "Processing Payment...";
