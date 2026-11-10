@@ -724,12 +724,12 @@ export const CartItemRow = ({
 
             {/* Qty: - qty UOM + */}
             <div className="flex items-center justify-center">
-              <div className="flex items-center border border-gray-200 dark:border-gray-600 rounded-full overflow-hidden">
+              <div className="flex items-center border border-gray-200 dark:border-gray-600 rounded-full">
               <button
                 onClick={(e) => { e.stopPropagation(); adjustQuantity(item.id, -1); }}
                 className={`${
                   isMobile ? "w-7 h-7" : "w-6 h-6"
-                } flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 dark:hover:text-red-400 transition-colors`}
+                } rounded-full flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 dark:hover:text-red-400 transition-colors`}
                 aria-label="Decrease quantity"
               >
                 <Minus size={isMobile ? 12 : 10} />
@@ -738,9 +738,9 @@ export const CartItemRow = ({
                 kind="qty"
                 value={item.quantity}
                 aria-label="Quantity"
-                onCommit={(typed) => commitLineQty(typed ?? 0)}
+                onCommit={(typed) => { if (typed !== undefined) commitLineQty(typed); }}
                 wrapperClassName="border-l border-gray-200 dark:border-gray-600"
-                className="w-9 text-center font-semibold text-gray-900 dark:text-white text-sm py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700"
+                className="w-11 text-center font-semibold text-gray-900 dark:text-white text-sm py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700"
               />
               {/* Clicking the unit flips to the next one; the full UOM picker is in the expanded panel. */}
               <button
@@ -755,7 +755,7 @@ export const CartItemRow = ({
                 onClick={(e) => { e.stopPropagation(); adjustQuantity(item.id, 1); }}
                 className={`${
                   isMobile ? "w-7 h-7" : "w-6 h-6"
-                } flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400 transition-colors`}
+                } rounded-full flex items-center justify-center text-gray-400 dark:text-gray-500 hover:bg-green-50 dark:hover:bg-green-900/30 hover:text-green-600 dark:hover:text-green-400 transition-colors`}
                 aria-label="Increase quantity"
               >
                 <Plus size={isMobile ? 12 : 10} />
@@ -818,7 +818,7 @@ export const CartItemRow = ({
                   aria-label={hasExclusiveTax ? "Rate (Excl. Tax)" : "Rate (Incl. Tax)"}
                   readOnly={!posDetails?.allow_rate_change}
                   onCommit={commitPanelRate}
-                  className={`${PANEL_INPUT} ${isNegativeMargin && !restrictCostVisibility ? "border-red-400 dark:border-red-600" : ""}`}
+                  className={`${PANEL_INPUT} ${showNegativeMarginWarning ? "border-red-400 dark:border-red-600" : ""}`}
                 />
               </div>
               <div className="min-w-0">
@@ -830,7 +830,7 @@ export const CartItemRow = ({
                   placeholder="0.00"
                   aria-label="Discount (%)"
                   readOnly={!posDetails?.allow_discount_change}
-                  onCommit={(n) => handleDiscountPercentageChange(n ?? 0)}
+                  onCommit={(n, text) => { if (n !== undefined || text === "") handleDiscountPercentageChange(n ?? 0); }}
                   className={PANEL_INPUT}
                 />
               </div>
@@ -853,7 +853,7 @@ export const CartItemRow = ({
                     placeholder="0.00"
                     aria-label="Discount Amount"
                     readOnly={!posDetails?.allow_discount_change}
-                    onCommit={(n) => handleDiscountAmountChange(n ?? 0)}
+                    onCommit={(n, text) => { if (n !== undefined || text === "") handleDiscountAmountChange(n ?? 0); }}
                     wrapperClassName="w-28"
                     className={PANEL_INPUT}
                   />

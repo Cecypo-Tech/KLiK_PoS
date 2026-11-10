@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
-import { evaluateNumber, formatNumber, isExpression, type NumberKind } from "../../utils/numberInput";
+import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber, type NumberKind } from "../../utils/numberInput";
 
 type NativeProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "defaultValue">;
 
@@ -33,16 +33,16 @@ export function NumberField({
     selectAll.current = false;
   });
   const n = Number(value ?? 0);
-  const plain = blankZero && !n ? "" : String(Number.isFinite(n) ? n : 0);
+  const plain = blankZero && !n ? "" : plainNumber(n);
+  // Commit only what the cashier typed: a box merely visited (or reverted with Esc) sends nothing, even
+  // if the line's price moved meanwhile; a number retyped as-is still sends (it clears Loss of Sale).
+  const edited = useRef(false);
   const shown = draft ?? (blankZero && !n ? "" : formatNumber(n, kind));
   const result = draft !== null && isExpression(draft) ? evaluateNumber(draft) : undefined;
 
   const commit = () => {
-    if (draft !== null && !readOnly && draft.trim() !== plain) {
-      const n = evaluateNumber(draft) ?? parseLoose(draft);
-      // Money keeps currency precision, as ERPNext rounds a currency field ("100/3" is 33.33).
-      onCommit(n !== undefined && kind === "money" ? Math.round(n * 100) / 100 : n, draft.trim());
-    }
+    if (draft !== null && edited.current && !readOnly) onCommit(readNumber(draft, kind), draft.trim());
+    edited.current = false;
     setDraft(null);
   };
 
@@ -57,9 +57,10 @@ export function NumberField({
         readOnly={readOnly}
         className={`tabular-nums ${className}`}
         value={shown}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => { edited.current = true; setDraft(e.target.value); }}
         onFocus={(e) => {
           setDraft(plain);
+          edited.current = false;
           justFocused.current = true;
           selectAll.current = true;
           e.currentTarget.select();
@@ -76,7 +77,7 @@ export function NumberField({
           onKeyDown?.(e);
           if (!ownKeys || e.defaultPrevented) return;
           if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") { setDraft(plain); e.currentTarget.select(); }
+          if (e.key === "Escape") { edited.current = false; setDraft(plain); selectAll.current = true; }
         }}
       />
       {result !== undefined ? (
@@ -89,10 +90,4 @@ export function NumberField({
       ) : null}
     </div>
   );
-}
-
-/** A box left as "12abc": its leading number, as the boxes always read it. */
-function parseLoose(text: string): number | undefined {
-  const n = parseFloat(text.replace(/,/g, "").trim());
-  return Number.isNaN(n) ? undefined : n;
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateNumber, formatNumber, isExpression } from "./numberInput";
-import { parseDecimalInput } from "./lineEdits";
+import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber } from "./numberInput";
 
 describe("evaluateNumber: a number field takes a sum, like ERPNext's", () => {
   it.each([
@@ -54,10 +53,23 @@ describe("formatNumber", () => {
   });
 });
 
-describe("parseDecimalInput evaluates sums for every caller", () => {
-  it("works out a sum and still reads plain numbers", () => {
-    expect(parseDecimalInput("4*5")).toBe(20);
-    expect(parseDecimalInput("1,250.5")).toBe(1250.5);
-    expect(parseDecimalInput("abc")).toBeUndefined();
+describe("readNumber: what a box commits when the cashier leaves it", () => {
+  it("works out a sum and reads plain numbers", () => {
+    expect(readNumber("4*5", "qty")).toBe(20);
+    expect(readNumber("1,250.5", "qty")).toBe(1250.5);
+  });
+  it("is nothing for an unfinished or broken sum, never its leading number", () => {
+    for (const t of ["2*", "4/0", "(5", "1e3", "abc", ""]) expect(readNumber(t, "qty")).toBeUndefined();
+  });
+  it("rounds money to currency precision", () => {
+    expect(readNumber("100/3", "money")).toBe(33.33);
+    expect(readNumber("100/3", "qty")).toBeCloseTo(33.3333333333, 9);
+  });
+});
+
+describe("plainNumber: what a box shows while editing", () => {
+  it("drops float noise", () => {
+    expect(plainNumber(0.1 + 0.2)).toBe("0.3");
+    expect(plainNumber(1250)).toBe("1250");
   });
 });

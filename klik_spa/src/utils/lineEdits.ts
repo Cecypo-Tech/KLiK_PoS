@@ -1,4 +1,3 @@
-import { evaluateNumber } from "./numberInput";
 /** Rate/discount rules shared by the cart row and the line-entry grid. */
 
 export function discountAmountFromPct(price: number, pct: number): number {
@@ -13,13 +12,4 @@ export function discountPctFromAmount(price: number, amount: number): number {
 /** Lifts a rate under the till's minimum (see rateBoxMinimum) to it; null = no floor. */
 export function clampRateToFloor(rate: number, minimum: number | null): number {
   return minimum !== null && rate < minimum ? minimum : rate;
-}
-
-/** "1,250.5" -> 1250.5; empty or non-numeric -> undefined. */
-export function parseDecimalInput(text: string): number | undefined {
-  // A sum works it out, like ERPNext's number fields ("4*5" is 20).
-  const sum = evaluateNumber(text);
-  if (sum !== undefined) return sum;
-  const n = parseFloat(text.replace(/,/g, "").trim());
-  return Number.isNaN(n) ? undefined : n;
 }

@@ -76,3 +76,15 @@ const FORMATS: Record<NumberKind, Intl.NumberFormatOptions> = {
 export function formatNumber(value: number, kind: NumberKind): string {
   return Number(value || 0).toLocaleString("en-US", FORMATS[kind]);
 }
+
+/** What a box commits: its number or sum, else nothing (so "2*" or "12abc" changes nothing).
+ * Money keeps currency precision, as ERPNext rounds a currency field ("100/3" is 33.33). */
+export function readNumber(text: string, kind: NumberKind): number | undefined {
+  const n = evaluateNumber(text);
+  return n !== undefined && kind === "money" ? Math.round(n * 100) / 100 : n;
+}
+
+/** What a box shows while editing: the plain number, without float noise (0.1+0.2 shows 0.3). */
+export function plainNumber(value: number): string {
+  return String(Number.isFinite(value) ? Number(value.toFixed(10)) : 0);
+}

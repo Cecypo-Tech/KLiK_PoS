@@ -17,6 +17,9 @@ export interface LineGridProps {
   onCustomRateChange: (item: CartItem, rate?: number, includesTax?: boolean) => void;
   onDiscountChange: (itemId: string, field: string, value: number | string) => void;
   onRemoveItem: (id: string) => void;
+  onUOMChange: (itemId: string, uom: string, price: number, conversionFactor?: number) => void;
+  /** Customer-specific unit prices in the UOM picker. */
+  customerId?: string;
   onOpenDescription: (id: string) => void;
   /** OrderSummary routes variants/templates to the existing picker; null = no line was made. */
   onPickItem: (item: MenuItem) => Promise<string | null>;
@@ -188,7 +191,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
 
   const entry = (
     <tr data-entry-row="" className="border-b border-gray-100 dark:border-gray-800">
-      <td className="relative px-2 py-1" colSpan={6}>
+      <td className="relative px-2 py-1" colSpan={7}>
         <input
           type="text"
           data-row={entryRow}
@@ -235,6 +238,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
         <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
           <th className="px-2 py-1 text-left font-medium">Item</th>
           <th className="w-20 px-2 py-1 text-right font-medium">Qty</th>
+          <th className="w-24 px-2 py-1 text-left font-medium">UOM</th>
           <th className="w-28 px-2 py-1 text-right font-medium">Rate</th>
           <th className="w-20 px-2 py-1 text-right font-medium">Disc %</th>
           <th className="w-28 px-2 py-1 text-right font-medium">Total</th>
@@ -255,6 +259,8 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             onCustomRateChange={props.onCustomRateChange}
             onDiscountChange={props.onDiscountChange}
             onRemoveItem={onRemoveItem}
+            onUOMChange={props.onUOMChange}
+            customerId={props.customerId}
             currencySymbol={currencySymbol}
             posDetails={posDetails}
           />

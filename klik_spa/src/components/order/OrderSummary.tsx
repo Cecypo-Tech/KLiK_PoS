@@ -842,6 +842,8 @@ export default function OrderSummary({
               onCustomRateChange={handleCustomRateChange}
               onDiscountChange={updateItemDiscount}
               onRemoveItem={handleRemoveItem}
+              onUOMChange={handleUOMChange}
+              customerId={selectedCustomer?.id}
               onOpenDescription={setDescriptionFor}
               onPickItem={pickGridItem}
               currencySymbol={currency_symbol || ""}

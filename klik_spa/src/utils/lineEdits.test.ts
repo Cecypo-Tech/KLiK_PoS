@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "./lineEdits";
+import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount } from "./lineEdits";
 
 describe("lineEdits", () => {
   it("clamps discount pct to 0..100", () => {
@@ -17,10 +17,5 @@ describe("lineEdits", () => {
     expect(clampRateToFloor(5, 8)).toBe(8);
     expect(clampRateToFloor(9, 8)).toBe(9);
     expect(clampRateToFloor(5, null)).toBe(5);
-  });
-  it("parses decimal input", () => {
-    expect(parseDecimalInput("1,250.5")).toBe(1250.5);
-    expect(parseDecimalInput("")).toBeUndefined();
-    expect(parseDecimalInput("abc")).toBeUndefined();
   });
 });
