@@ -1,11 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { CartItem, MenuItem } from "../../../types";
 import type { POSDetails } from "../../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import type { DiscountMapLike } from "../../utils/cartPricing";
 import { gridKeyAction, type GridCol } from "../../utils/lineGridKeys";
 import { toast } from "react-toastify";
-import { exactCodeMatch, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
+import { exactCodeMatch, highlightRanges, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
 import LineGridRow from "./LineGridRow";
 
 export interface LineGridProps {
@@ -32,9 +32,14 @@ export interface LineGridHandle {
 type PendingFocus = { row: number; col: GridCol } | { id: string; col: GridCol };
 
 function Highlight({ text, query }: { text: string; query: string }) {
-  const i = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
-  if (i < 0) return <>{text}</>;
-  return <>{text.slice(0, i)}<mark className="bg-yellow-200 dark:bg-yellow-700/60 text-inherit">{text.slice(i, i + query.length)}</mark>{text.slice(i + query.length)}</>;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const [a, b] of highlightRanges(text, query)) {
+    parts.push(text.slice(at, a), <mark key={a} className="bg-yellow-200 dark:bg-yellow-700/60 text-inherit">{text.slice(a, b)}</mark>);
+    at = b;
+  }
+  parts.push(text.slice(at));
+  return <>{parts}</>;
 }
 
 const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(props, ref) {

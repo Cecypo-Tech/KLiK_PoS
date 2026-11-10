@@ -3,7 +3,7 @@ import { toast } from "react-toastify";
 import { useCartStore } from "../stores/cartStore";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useProductStore } from "../stores/productStore";
-import { exactCodeMatch, latestOnly, scanAdd, searchGridItems, STALE } from "./lineGridSearch";
+import { exactCodeMatch, highlightRanges, latestOnly, scanAdd, searchGridItems, STALE } from "./lineGridSearch";
 
 vi.mock("react-toastify", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
 
@@ -152,5 +152,35 @@ describe("searchGridItems", () => {
     expect(fetchProductsFromAPI).toHaveBeenCalledWith(8, 0, "pe", "all", "C1", "Retail");
     expect(useProductStore.getState().products).toBe(before);
     expect(useProductStore.getState().searchQuery).toBe("");
+  });
+});
+
+describe("highlightRanges: each typed word is marked on its own", () => {
+  const marked = (text: string, query: string) => highlightRanges(text, query).map(([a, b]) => text.slice(a, b));
+
+  it("marks every word of the query, wherever it sits", () => {
+    expect(marked("Halogen Headlight Bulb H4 12V", "head 12")).toEqual(["Head", "12"]);
+  });
+
+  it("is case-insensitive and keeps the name's own casing", () => {
+    expect(marked("Halogen Headlight Bulb H4 12V", "HEAD")).toEqual(["Head"]);
+  });
+
+  it("marks every occurrence of a word", () => {
+    expect(marked("Oil Filter - Oil Pump", "oil")).toEqual(["Oil", "Oil"]);
+  });
+
+  it("merges words that overlap or touch into one mark", () => {
+    expect(marked("Headlight", "head light")).toEqual(["Headlight"]);
+    expect(marked("Headlight", "headl light")).toEqual(["Headlight"]);
+  });
+
+  it("marks nothing for an empty or unmatched query", () => {
+    expect(highlightRanges("Headlight", "  ")).toEqual([]);
+    expect(highlightRanges("Headlight", "bulb")).toEqual([]);
+  });
+
+  it("treats regex characters as plain text", () => {
+    expect(marked("Pipe 1/2 (PVC)", "(pvc) 1/2")).toEqual(["1/2", "(PVC)"]);
   });
 });

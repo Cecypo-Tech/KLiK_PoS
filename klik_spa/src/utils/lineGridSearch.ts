@@ -63,3 +63,21 @@ export function scanAdd(code: string, { quiet = false } = {}): Promise<ScanResul
   scanTail = result.catch(() => undefined); // a failed scan must not break the chain
   return result;
 }
+
+/** Where each word of the query appears in `text` (case-insensitive), as merged [start, end) spans:
+ * "head 12" marks "Head" and "12" in "Halogen Headlight Bulb H4 12V". */
+export function highlightRanges(text: string, query: string): [number, number][] {
+  const lower = text.toLowerCase();
+  const spans: [number, number][] = [];
+  for (const word of query.toLowerCase().split(/\s+/).filter(Boolean)) {
+    for (let i = lower.indexOf(word); i >= 0; i = lower.indexOf(word, i + 1)) spans.push([i, i + word.length]);
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
