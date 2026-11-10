@@ -5037,7 +5037,8 @@ def return_sales_invoice(invoice_name):
 				},
 				"Sales Invoice Item": {
 					"doctype": "Sales Invoice Item",
-					"field_map": {"name": "prevdoc_detail_docname"},
+					# ERPNext's return check finds the sold line (and what is already back) by this.
+					"field_map": {"name": "sales_invoice_item"},
 				},
 			},
 		)
@@ -5728,7 +5729,8 @@ def create_partial_return(
 				},
 				"Sales Invoice Item": {
 					"doctype": "Sales Invoice Item",
-					"field_map": {"name": "prevdoc_detail_docname"},
+					# ERPNext's return check finds the sold line (and what is already back) by this.
+					"field_map": {"name": "sales_invoice_item"},
 				},
 			},
 		)
@@ -5752,8 +5754,11 @@ def create_partial_return(
 		filtered_items = []
 		for return_item in return_items:
 			if return_item.get("return_qty", 0) > 0:
+				# The sale's line by its row name when the till sends it: one item may sit on two
+				# lines at two prices. Item code alone is an older till's request.
+				line = return_item.get("name")
 				for item in return_doc.items:
-					if item.item_code == return_item["item_code"]:
+					if (item.sales_invoice_item == line) if line else (item.item_code == return_item["item_code"]):
 						item.qty = -abs(return_item["return_qty"])
 						filtered_items.append(item)
 						break
