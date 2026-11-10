@@ -55,8 +55,8 @@ describe("lineInUom", () => {
 
 describe("uomLabel", () => {
   it("names the factor off the stock unit, to four places", () => {
-    expect(uomLabel("kg(s)", "Roll(s)", 1 / 15)).toBe("UOM - Factor 0.0667");
-    expect(uomLabel("kg(s)", "Nos", 0.022)).toBe("UOM - Factor 0.022");
+    expect(uomLabel("kg(s)", "Roll(s)", 1 / 15)).toBe("UOM ×0.0667");
+    expect(uomLabel("kg(s)", "Nos", 0.022)).toBe("UOM ×0.022");
   });
 
   it("is plain UOM in the stock unit or before the units load", () => {

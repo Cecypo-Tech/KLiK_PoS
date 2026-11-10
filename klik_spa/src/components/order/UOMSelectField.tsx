@@ -10,6 +10,8 @@ interface UOMSelectFieldProps {
   isMobile?: boolean;
   selectedCustomer?: { id: string } | null;
   labelClassName?: string;
+  /** Replaces the trigger's size classes (the line panel's compact row). */
+  buttonClassName?: string;
 }
 
 interface UOMDataRow {
@@ -29,6 +31,7 @@ export const UOMSelectField = ({
   isMobile,
   selectedCustomer,
   labelClassName = "block text-sm mb-2",
+  buttonClassName,
 }: UOMSelectFieldProps) => {
   const [availableUOMs, setAvailableUOMs] = useState<string[]>(
     item.uom ? [item.uom] : []
@@ -154,10 +157,10 @@ export const UOMSelectField = ({
         type="button"
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className={`w-full ${
-          isMobile ? "text-sm" : "text-sm"
-        } px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-left flex items-center justify-between`}
+          buttonClassName ?? `${isMobile ? "text-sm" : "text-sm"} px-3 py-4`
+        } border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-left flex items-center justify-between`}
       >
-        <span>{selectedUOM || "Select UOM"}</span>
+        <span className="truncate">{selectedUOM || "Select UOM"}</span>
         <svg
           className={`w-4 h-4 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`}
           fill="none"

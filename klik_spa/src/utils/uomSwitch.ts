@@ -55,5 +55,5 @@ export function switchUom({ prices, factors }: Pick<UomMaps, "prices" | "factors
 export function uomLabel(selectedUom: string, stockUom: string, factor: number) {
   if (!selectedUom || !stockUom || selectedUom === stockUom) return "UOM";
   const formatted = new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(factor);
-  return `UOM - Factor ${formatted}`;
+  return `UOM ×${formatted}`;
 }

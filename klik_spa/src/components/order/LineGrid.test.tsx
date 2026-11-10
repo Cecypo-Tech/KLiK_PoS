@@ -26,6 +26,7 @@ const render = (items: CartItem[], pos: Partial<POSDetails> = {}, itemDiscounts 
       onCustomRateChange={() => {}}
       onDiscountChange={() => {}}
       onRemoveItem={() => {}}
+      onUOMChange={() => {}}
       onOpenDescription={() => {}}
       onPickItem={async () => null}
       currencySymbol="KES"
@@ -34,10 +35,14 @@ const render = (items: CartItem[], pos: Partial<POSDetails> = {}, itemDiscounts 
   );
 
 describe("LineGrid", () => {
-  it("renders Item, Qty, Rate, Disc %, Total headers and no UOM", () => {
+  it("renders Item, Qty, UOM, Rate, Disc %, Total headers", () => {
     const html = render([line("A", "Apple")]);
-    for (const h of ["Item", "Qty", "Rate", "Disc %", "Total"]) expect(html).toContain(`>${h}</th>`);
-    expect(html).not.toContain("UOM");
+    for (const h of ["Item", "Qty", "UOM", "Rate", "Disc %", "Total"]) expect(html).toContain(`>${h}</th>`);
+  });
+
+  it("shows the line's unit in the UOM column (a picker appears once the item has more than one)", () => {
+    const html = render([{ ...line("A", "Apple"), uom: "Box" }]);
+    expect(html).toMatch(/data-uom-cell="A"[^>]*>[^<]*<span[^>]*>Box<\/span>/);
   });
 
   it("shows a description as an italic second line, and nothing when there is none", () => {
@@ -67,8 +72,8 @@ describe("LineGrid", () => {
     const html = render([line("A", "Apple")], {}, { A: { customRate: 80, discountAmount: 4 } });
     const val = (col: string) => html.match(new RegExp(`<input[^>]*data-col="${col}"[^>]*value="([^"]*)"`))?.[1]
       ?? html.match(new RegExp(`<input[^>]*value="([^"]*)"[^>]*data-col="${col}"`))![1];
-    expect(val("rate")).toBe("80");
-    expect(val("disc")).toBe("5");
+    expect(val("rate")).toBe("80.00");
+    expect(val("disc")).toBe("5.00");
     expect(html).toContain("76.00");
   });
 });

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "react-toastify";
 import type { CartItem } from "../../../types";
@@ -7,34 +6,67 @@ import type { GridCol } from "../../utils/lineGridKeys";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getPreDiscountRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
+import type { NumberKind } from "../../utils/numberInput";
+import { NumberField } from "../ui/NumberField";
+import { useEffect, useState } from "react";
+import { switchUom, uomMaps, type UomMaps } from "../../utils/uomSwitch";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { rateBoxMinimum } from "../../utils/priceFloor";
-import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
+import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount } from "../../utils/lineEdits";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const CELL = "w-full bg-transparent px-1.5 py-1 text-right tabular-nums rounded focus:outline-none focus:ring-2 focus:ring-beveren-500 read-only:text-gray-500";
 
-/** A number cell: shows `value`, edits as text, commits once on blur (Enter/Tab/arrows blur it by moving focus). */
+const KIND: Record<Exclude<GridCol, "item">, NumberKind> = { qty: "qty", rate: "money", disc: "percent" };
+
+/** A number cell: formatted at rest, takes a sum ("4*5"), commits once on blur (Enter/Tab/arrows blur it by moving focus). */
 function NumCell({ row, col, value, readOnly, onCommit }: {
-  row: number; col: GridCol; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
+  row: number; col: Exclude<GridCol, "item">; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
   return (
-    <input
-      type="text"
-      inputMode="decimal"
+    <NumberField
       data-row={row}
       data-col={col}
+      kind={KIND[col]}
+      value={value}
       readOnly={readOnly}
+      ownKeys={false}
       className={CELL}
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={(e) => { setDraft(String(value)); e.currentTarget.select(); }}
-      onBlur={() => {
-        if (draft !== null && !readOnly && draft !== String(value)) onCommit(parseDecimalInput(draft), draft.trim());
-        setDraft(null);
-      }}
+      onCommit={onCommit}
     />
+  );
+}
+
+/** The line's unit: plain text, or a picker once the item is sold in more than one. */
+function UomCell({ item, customerId, onUOMChange }: {
+  item: CartItem; customerId?: string; onUOMChange: LineGridRowProps["onUOMChange"];
+}) {
+  const [maps, setMaps] = useState<UomMaps | null>(null);
+  const code = item.item_code || item.id;
+  useEffect(() => {
+    let live = true;
+    const customer = customerId ? `&customer=${encodeURIComponent(customerId)}` : "";
+    fetch(`/api/method/klik_pos.api.item.item_details.get_item_uoms_and_prices?item_code=${encodeURIComponent(code)}${customer}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => { if (live) setMaps(uomMaps(d?.message || {})); })
+      .catch(() => {}); // no list: the cell stays plain text
+    return () => { live = false; };
+  }, [code, customerId]);
+
+  const uom = item.uom || "";
+  if (!maps || maps.uoms.length < 2) return <span className="block truncate text-gray-600 dark:text-gray-300">{uom}</span>;
+  return (
+    <select
+      aria-label={`Unit for ${item.name}`}
+      value={uom}
+      onChange={(e) => {
+        const next = switchUom(maps, uom, item.price, e.target.value);
+        onUOMChange(item.id, next.uom, next.price, next.conversionFactor);
+      }}
+      className="w-full h-7 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1 text-[13px] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
+    >
+      {(maps.uoms.includes(uom) ? maps.uoms : [uom, ...maps.uoms]).map((u) => <option key={u} value={u}>{u}</option>)}
+    </select>
   );
 }
 
@@ -48,13 +80,15 @@ interface LineGridRowProps {
   onCustomRateChange: (item: CartItem, rate?: number, includesTax?: boolean) => void;
   onDiscountChange: (itemId: string, field: string, value: number | string) => void;
   onRemoveItem: (id: string) => void;
+  onUOMChange: (itemId: string, uom: string, price: number, conversionFactor?: number) => void;
+  customerId?: string;
   currencySymbol: string;
   posDetails: POSDetails | null;
 }
 
 export default function LineGridRow({
   item, row, itemDiscount, selected, onSelect, onUpdateQuantity, onCustomRateChange, onDiscountChange, onRemoveItem,
-  currencySymbol, posDetails,
+  onUOMChange, customerId, currencySymbol, posDetails,
 }: LineGridRowProps) {
   // Same pricing inputs as CartItemRow, so the grid and the cart show and commit identical numbers.
   const tip = posDetails?.is_tax_included_in_basic_rate;
@@ -111,6 +145,7 @@ export default function LineGridRow({
         </div>
       </td>
       <td className="w-20 px-1"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></td>
+      <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} customerId={customerId} onUOMChange={onUOMChange} /></td>
       <td className="w-28 px-1">
         <NumCell row={row} col="rate" value={round2(editableRate)} readOnly={!Number(posDetails?.allow_rate_change)} onCommit={commitRate} />
       </td>

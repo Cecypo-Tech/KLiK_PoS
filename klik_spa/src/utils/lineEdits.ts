@@ -13,9 +13,3 @@ export function discountPctFromAmount(price: number, amount: number): number {
 export function clampRateToFloor(rate: number, minimum: number | null): number {
   return minimum !== null && rate < minimum ? minimum : rate;
 }
-
-/** "1,250.5" -> 1250.5; empty or non-numeric -> undefined. */
-export function parseDecimalInput(text: string): number | undefined {
-  const n = parseFloat(text.replace(/,/g, "").trim());
-  return Number.isNaN(n) ? undefined : n;
-}
