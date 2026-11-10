@@ -42,7 +42,7 @@
 
     .eyebrow {
       font-family: var(--font-mono);
-      font-size: 0.66rem;
+      font-size: 0.6875rem;
       font-weight: 500;
       letter-spacing: 0.18em;
       text-transform: uppercase;
@@ -67,22 +67,27 @@
     }
 
     svg .nm { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--ink); }
-    svg .sb { font-family: var(--font-mono); font-size: 9px; fill: var(--muted); }
-    svg .al { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--muted); }
-    svg .ey { font-family: var(--font-mono); font-size: 8px; font-weight: 500; letter-spacing: 0.18em; fill: var(--muted); }
+    svg .sb { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+    svg .al { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; fill: var(--muted); }
+    svg .ey { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.18em; fill: var(--muted); }
     svg .co { font-family: var(--font-sans); font-size: 13px; font-style: italic; fill: var(--muted); }
-    svg .lg { font-family: var(--font-sans); font-size: 9px; fill: var(--muted); }
+    svg .lg { font-family: var(--font-sans); font-size: 11px; fill: var(--muted); }
 
     .rules { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 1rem; margin-top: 2rem; }
     @media (max-width: 760px) { .rules { grid-template-columns: 1fr; } }
     .card { min-width: 0; background: var(--node); border: 1px solid var(--rule); border-radius: 6px; padding: 1.25rem; }
     .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; }
     table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    th { text-align: left; font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.12em;
+    th { text-align: left; font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.12em;
          text-transform: uppercase; color: var(--muted); padding: 0 0.5rem 0.5rem 0; }
     td { padding: 0.5rem 0.5rem 0.5rem 0; border-top: 1px solid var(--rule); vertical-align: top; }
     td.ok { color: var(--accent); font-weight: 600; }
-    ul { list-style: none; font-size: 0.875rem; line-height: 1.45; }
+    ul, ol { list-style: none; font-size: 0.875rem; line-height: 1.45; }
+    ol { counter-reset: step; }
+    ol li { counter-increment: step; }
+    ol li::before { content: counter(step) ". "; font-weight: 700; }
+    .card p { font-size: 0.875rem; line-height: 1.45; margin-bottom: 0.75rem; }
+    .card ol + p { margin-top: 1rem; margin-bottom: 0.25rem; }
     li { padding: 0.5rem 0; border-top: 1px solid var(--rule); }
     li:first-child { border-top: 0; padding-top: 0; }
     code { font-family: var(--font-mono); font-size: 0.8em; background: var(--paper-2); padding: 0 0.25em; border-radius: 2px; }
@@ -136,19 +141,19 @@
         <rect x="530" y="124" width="60" height="12" rx="2" style="fill:var(--paper)"/>
         <text x="560" y="133" class="al" text-anchor="middle">NON-CASH</text>
 
-        <rect x="408" y="206" width="60" height="12" rx="2" style="fill:var(--paper)"/>
+        <rect x="400" y="205" width="76" height="14" rx="2" style="fill:var(--paper)"/>
         <text x="438" y="215" class="al" text-anchor="middle">ON CREDIT</text>
 
-        <rect x="656" y="284" width="66" height="12" rx="2" style="fill:var(--paper)"/>
+        <rect x="648" y="283" width="82" height="14" rx="2" style="fill:var(--paper)"/>
         <text x="689" y="293" class="al" text-anchor="middle">NEXT VISIT</text>
 
         <rect x="738" y="480" width="44" height="12" rx="2" style="fill:var(--paper)"/>
         <text x="760" y="489" class="al" text-anchor="middle">APPLY</text>
 
-        <rect x="524" y="520" width="72" height="12" rx="2" style="fill:var(--paper)"/>
+        <rect x="515" y="519" width="90" height="14" rx="2" style="fill:var(--paper)"/>
         <text x="560" y="529" class="al" text-anchor="middle">STILL OWING</text>
 
-        <rect x="908" y="240" width="80" height="12" rx="2" style="fill:var(--paper)"/>
+        <rect x="899" y="239" width="98" height="14" rx="2" style="fill:var(--paper)"/>
         <text x="948" y="249" class="al" text-anchor="middle" style="fill:var(--accent)">BALANCE LEFT</text>
 
         <!-- 1. Start: customer returns items -->
@@ -170,8 +175,8 @@
         <rect x="620" y="112" width="220" height="64" rx="6" style="fill:var(--paper)"/>
         <rect x="620" y="112" width="220" height="64" rx="6" stroke-width="1.2" style="fill:var(--accent-tint);stroke:var(--accent)"/>
         <text x="730" y="135" class="nm" text-anchor="middle">Store-credit voucher</text>
-        <text x="730" y="151" class="sb" text-anchor="middle">it is the credit note itself</text>
-        <text x="730" y="164" class="sb" text-anchor="middle">use: note no. + original sale no.</text>
+        <text x="730" y="150" class="sb" text-anchor="middle">it is the credit note itself</text>
+        <text x="730" y="166" class="sb" text-anchor="middle">use: note no. + sale no.</text>
 
         <!-- 5. End: off what they owe -->
         <rect x="300" y="232" width="200" height="48" rx="20" stroke-width="1" style="fill:var(--oval);stroke:var(--oval-line)"/>
@@ -186,7 +191,7 @@
         <!-- 6. Step: vouchers at checkout -->
         <rect x="620" y="404" width="220" height="56" rx="6" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
         <text x="730" y="428" class="nm" text-anchor="middle">Checkout → Vouchers</text>
-        <text x="730" y="444" class="sb" text-anchor="middle">enter both numbers · Check voucher</text>
+        <text x="730" y="444" class="sb" text-anchor="middle">both numbers · Check voucher</text>
 
         <!-- 7. Step: voucher pays the sale -->
         <rect x="620" y="512" width="220" height="56" rx="6" stroke-width="1" style="fill:var(--node);stroke:var(--ink)"/>
@@ -243,7 +248,7 @@
           <li>Need M-Pesa or bank money back as money? Accounts refunds it from the office, not the till.</li>
         </ul>
       </div>
-      <div class="card">
+      <div class="card" style="grid-column: 1 / -1">
         <h2>SOP for accounts: refunding M-Pesa, cheque or bank money</h2>
         <p>Until it is refunded, a return's non-cash money is a voucher the customer can spend at the till.
           The refund must close that voucher, or the customer can be paid twice.</p>
