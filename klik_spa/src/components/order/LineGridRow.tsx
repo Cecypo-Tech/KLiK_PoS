@@ -6,7 +6,7 @@ import type { GridCol } from "../../utils/lineGridKeys";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getPreDiscountRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
-import type { NumberKind } from "../../utils/numberInput";
+import { formatNumber, type NumberKind } from "../../utils/numberInput";
 import { NumberField } from "../ui/NumberField";
 import { RatePriceField } from "./RatePriceField";
 import type { PricePopupPick } from "../../utils/priceOptions";
@@ -155,7 +155,19 @@ export default function LineGridRow({
           ) : null}
         </div>
       </td>
-      <td className="w-20 px-1"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></td>
+      <td className="px-1">
+        <div className="flex items-center justify-end gap-1">
+          {/* Asked for beyond stock: the Loss of Sale part rides beside the qty sold. */}
+          {Number(posDetails?.custom_enable_loss_of_sale) && (item.los_qty ?? 0) > 0 ? (
+            <span
+              data-los-chip={item.id}
+              title="Asked for but not in stock: recorded as Loss of Sale"
+              className="shrink-0 whitespace-nowrap rounded bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+            >LoS {formatNumber(Number(item.los_qty), "qty")}</span>
+          ) : null}
+          <div className="w-12 shrink-0"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></div>
+        </div>
+      </td>
       <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} customerId={customerId} onUOMChange={onUOMChange} /></td>
       <td className="w-28 px-1">
         <RatePriceField

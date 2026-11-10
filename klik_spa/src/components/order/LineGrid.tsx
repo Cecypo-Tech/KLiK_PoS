@@ -237,7 +237,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
       <thead>
         <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
           <th className="px-2 py-1 text-left font-medium">Item</th>
-          <th className="w-20 px-2 py-1 text-right font-medium">Qty</th>
+          <th className={`${Number(posDetails?.custom_enable_loss_of_sale) ? "w-32" : "w-20"} px-2 py-1 text-right font-medium`}>Qty</th>
           <th className="w-24 px-2 py-1 text-left font-medium">UOM</th>
           <th className="w-28 px-2 py-1 text-right font-medium">Rate</th>
           <th className="w-20 px-2 py-1 text-right font-medium">Disc %</th>
