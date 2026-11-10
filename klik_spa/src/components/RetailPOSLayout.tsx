@@ -67,7 +67,7 @@ export default function RetailPOSLayout() {
     searchProducts(query);
   }, [searchProducts]);
 
-  const isGrid = !!posDetails?.custom_line_entry_grid && !isMobile;
+  const isGrid = posDetails?.custom_default_view === "Line Entry View" && !isMobile;
 
   const handleBarcodeDetected = useCallback((barcode: string) => {
     setShowScanner(false);

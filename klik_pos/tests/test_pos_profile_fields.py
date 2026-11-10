@@ -203,13 +203,6 @@ class TestPosProfileFormLayout(FrappeTestCase):
         )
         self.assertIn("custom_allow_credit_sales_as_pos", order[start + 1:end])
 
-    def test_spec_includes_line_entry_grid_toggle(self):
-        names = [f["fieldname"] for f in POS_PROFILE_FEATURE_FIELDS]
-        f = next(x for x in POS_PROFILE_FEATURE_FIELDS if x["fieldname"] == "custom_line_entry_grid")
-        self.assertEqual((f["fieldtype"], f["default"], f["module"]), ("Check", "0", "KLiK PoS"))
-        self.assertEqual(f["insert_after"], "custom_allow_quotes")
-        self.assertLess(names.index("custom_allow_quotes"), names.index("custom_line_entry_grid"))
-
     def test_pos_details_carries_allow_multiple_items(self):
         profiles = frappe.get_all("POS Profile", limit=1, pluck="name")
         if not profiles:
