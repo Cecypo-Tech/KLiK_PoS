@@ -67,8 +67,8 @@ describe("LineGrid", () => {
     const html = render([line("A", "Apple")], {}, { A: { customRate: 80, discountAmount: 4 } });
     const val = (col: string) => html.match(new RegExp(`<input[^>]*data-col="${col}"[^>]*value="([^"]*)"`))?.[1]
       ?? html.match(new RegExp(`<input[^>]*value="([^"]*)"[^>]*data-col="${col}"`))![1];
-    expect(val("rate")).toBe("80");
-    expect(val("disc")).toBe("5");
+    expect(val("rate")).toBe("80.00");
+    expect(val("disc")).toBe("5.00");
     expect(html).toContain("76.00");
   });
 });

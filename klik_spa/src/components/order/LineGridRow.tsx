@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "react-toastify";
 import type { CartItem } from "../../../types";
@@ -7,33 +6,31 @@ import type { GridCol } from "../../utils/lineGridKeys";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getPreDiscountRate, type DiscountMapLike } from "../../utils/cartPricing";
 import { roundCurrency } from "../../utils/currencyMath";
+import type { NumberKind } from "../../utils/numberInput";
+import { NumberField } from "../ui/NumberField";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { rateBoxMinimum } from "../../utils/priceFloor";
-import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
+import { clampRateToFloor, discountAmountFromPct, discountPctFromAmount } from "../../utils/lineEdits";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const CELL = "w-full bg-transparent px-1.5 py-1 text-right tabular-nums rounded focus:outline-none focus:ring-2 focus:ring-beveren-500 read-only:text-gray-500";
 
-/** A number cell: shows `value`, edits as text, commits once on blur (Enter/Tab/arrows blur it by moving focus). */
+const KIND: Record<Exclude<GridCol, "item">, NumberKind> = { qty: "qty", rate: "money", disc: "percent" };
+
+/** A number cell: formatted at rest, takes a sum ("4*5"), commits once on blur (Enter/Tab/arrows blur it by moving focus). */
 function NumCell({ row, col, value, readOnly, onCommit }: {
-  row: number; col: GridCol; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
+  row: number; col: Exclude<GridCol, "item">; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
   return (
-    <input
-      type="text"
-      inputMode="decimal"
+    <NumberField
       data-row={row}
       data-col={col}
+      kind={KIND[col]}
+      value={value}
       readOnly={readOnly}
+      ownKeys={false}
       className={CELL}
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={(e) => { setDraft(String(value)); e.currentTarget.select(); }}
-      onBlur={() => {
-        if (draft !== null && !readOnly && draft !== String(value)) onCommit(parseDecimalInput(draft), draft.trim());
-        setDraft(null);
-      }}
+      onCommit={onCommit}
     />
   );
 }

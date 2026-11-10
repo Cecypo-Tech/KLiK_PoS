@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye, Pencil } from "lucide-react";
 import { toast } from "react-toastify";
 import type { BundleEntry, CartItem, ItemTaxInfo } from "../../../types";
-import { QuantityInput } from "./QuantityInput";
 import { formatCurrencyWithSymbol } from "../../utils/currency";
 import { UOMSelectField } from "./UOMSelectField";
 import { nextUom, switchUom, uomMaps } from "../../utils/uomSwitch";
@@ -14,9 +13,17 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import ProductDetailsModal from "../ProductDetailsModal";
 import DescriptionDialog from "./DescriptionDialog";
 import { CART_ROW_GRID } from "./cartTableLayout";
-import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getCartRowPctBasis } from "../../utils/cartPricing";
+import { getEffectiveDisplayRate, getEffectiveItemRate, getExclusiveTaxRateForItem, getCartRowPctBasis, getPreDiscountRate } from "../../utils/cartPricing";
+import { getCartNetWeight } from "../../utils/cartWeight";
+import { formatNumber } from "../../utils/numberInput";
 import { roundCurrency } from "../../utils/currencyMath";
-import { qtyToSend } from "../../utils/lossOfSale";
+import { NumberField } from "../ui/NumberField";
+
+// Line panel: compact edit row on top, then label-left / value-right ledger rows.
+const PANEL_LABEL = "block text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1 truncate";
+const PANEL_INPUT = "w-full h-9 px-2 text-sm text-right border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white read-only:bg-gray-100 dark:read-only:bg-gray-700";
+const LEDGER_ROW = "flex items-center justify-between gap-3 min-h-[1.5rem]";
+const LEDGER_LABEL = "text-gray-500 dark:text-gray-400 shrink-0";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { getCostMargin, getInclusiveTaxRate } from "../../utils/costMargin";
 import PriceListPopup from "../PriceListPopup";
@@ -29,7 +36,7 @@ import {
   type PricePopupPosition,
 } from "../../utils/priceOptions";
 import { rateBoxMinimum } from "../../utils/priceFloor";
-import { discountAmountFromPct, discountPctFromAmount, parseDecimalInput } from "../../utils/lineEdits";
+import { discountAmountFromPct, discountPctFromAmount } from "../../utils/lineEdits";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -164,16 +171,9 @@ export const CartItemRow = ({
   const [isFetchingBundleData, setIsFetchingBundleData] = useState(false);
   const [modalEntries, setModalEntries] = useState<BundleEntry[]>([]);
   const [modalQty, setModalQty] = useState(item.quantity);
-  const [localQty, setLocalQty] = useState(item.quantity);
-  const qtyEdited = useRef(false);
   const [linePricePopup, setLinePricePopup] = useState<{ selectedIndex: number; position: PricePopupPosition } | null>(null);
   const priceTriggerRef = useRef<HTMLButtonElement>(null);
-  const [isRateEditing, setIsRateEditing] = useState(false);
-  const [rateInputValue, setRateInputValue] = useState("");
 
-  useEffect(() => {
-    setLocalQty(item.quantity);
-  }, [item.quantity, item.los_qty]);
   // The % is of the custom rate on a custom-rate line, else of the list price.
   const isTaxIncludedInBasicRate = posDetails?.is_tax_included_in_basic_rate === 1
     || posDetails?.is_tax_included_in_basic_rate === "1"
@@ -507,8 +507,6 @@ export const CartItemRow = ({
   // ERPNext convention: line displays the price-list (net) rate; tax shows in totals.
   const discountedTotal = roundCurrency(discountedPrice * item.quantity);
   const amount = discountedTotal;
-  const editableRate = hasExclusiveTax ? discountedPrice : displayRateInclTax;
-  const displayRate = editableRate > 0 ? editableRate : "";
 
   const hasBundleEntries = bundleEntries.length > 0;
 
@@ -565,6 +563,45 @@ export const CartItemRow = ({
   const showNegativeMarginWarning = !restrictCostVisibility && hasValidValuationRate && isNegativeMargin && discountedPrice > 0;
   const showStockWarning = item.quantity > availableStock && availableStock > 0;
   const showNoStockWarning = availableStock === 0;
+
+  // The panel's Rate is the rate before its discount, as in the grid; changing it clears the discount.
+  const panelRate = hasExclusiveTax
+    ? getPreDiscountRate(item, { itemDiscounts: { [item.id]: itemDiscount }, isTaxIncludedInBasicRate })
+    : getEffectiveDisplayRate(item, { itemDiscounts: { [item.id]: { ...itemDiscount, discountAmount: 0 } }, isTaxIncludedInBasicRate });
+  const commitPanelRate = (n: number | undefined, text: string) => {
+    if (n === undefined && text !== "") return;
+    if (n === undefined) return handleRateChange(undefined);
+    // Discount off on a list-floor till: the rate cannot go under the line's list.
+    const minimum = rateBoxMinimum(
+      posDetails,
+      itemDiscount.selectedPriceList && shownLinePriceList ? Number(shownLinePriceList.rate || 0) : listRate,
+    );
+    const rate = Math.max(0, n);
+    if (minimum !== null && rate < minimum) {
+      handleRateChange(minimum);
+      toast.warning(`${item.name}: can't sell below ${formatCurrencyWithSymbol(minimum, currency_symbol)}. Rate reset to the minimum.`);
+      return;
+    }
+    handleRateChange(rate);
+  };
+  const lineWeight = getCartNetWeight([item]);
+  // Margin bar: both on one scale, the larger of rate and cost plus headroom.
+  const barScale = Math.max(discountedPrice, valuationRateInclTax) * 1.15 || 1;
+  const marginBar = {
+    rate: Math.min(100, (Math.max(0, discountedPrice) / barScale) * 100),
+    cost: Math.min(100, (valuationRateInclTax / barScale) * 100),
+  };
+
+  // The line's quantity box: more than is in stock is capped unless the till allows it.
+  const commitLineQty = (typed: number) => {
+    const available = item.available ?? 0;
+    if (!quoteMode && !(posDetails?.custom_enable_loss_of_sale && !item.has_serial_no && !item.has_batch_no) && available > 0 && typed > available && !item.allow_negative_stock) {
+      onUpdateQuantity(item.id, available);
+      toast.warning(`Only ${available} units available. Quantity set to ${available}.`);
+    } else {
+      onUpdateQuantity(item.id, typed);
+    }
+  };
 
   return (
     <>
@@ -697,32 +734,13 @@ export const CartItemRow = ({
               >
                 <Minus size={isMobile ? 12 : 10} />
               </button>
-              <input
-                type="number"
-                min="0"
-                value={localQty}
-                onFocus={() => { qtyEdited.current = false; }}
-                onChange={(e) => { qtyEdited.current = true; setLocalQty(parseInt(e.target.value, 10) || 0); }}
-                onBlur={() => {
-                  const typed = qtyToSend(qtyEdited.current, localQty);
-                  qtyEdited.current = false;
-                  if (typed === null) {
-                    setLocalQty(item.quantity);
-                    return;
-                  }
-                  const available = item.available;
-                  if (!quoteMode && !(posDetails?.custom_enable_loss_of_sale && !item.has_serial_no && !item.has_batch_no) && available > 0 && typed > available && !item.allow_negative_stock) {
-                    setLocalQty(available);
-                    onUpdateQuantity(item.id, available);
-                    toast.warning(`Only ${available} units available. Quantity set to ${available}.`);
-                  } else {
-                    onUpdateQuantity(item.id, typed);
-                    setLocalQty(item.quantity);
-                  }
-                }}
-                onKeyDown={(e) => { if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); } }}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-                className={`w-7 text-center font-semibold text-gray-900 dark:text-white text-sm border-l border-gray-200 dark:border-gray-600 py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+              <NumberField
+                kind="qty"
+                value={item.quantity}
+                aria-label="Quantity"
+                onCommit={(typed) => commitLineQty(typed ?? 0)}
+                wrapperClassName="border-l border-gray-200 dark:border-gray-600"
+                className="w-9 text-center font-semibold text-gray-900 dark:text-white text-sm py-0.5 bg-transparent focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-700"
               />
               {/* Clicking the unit flips to the next one; the full UOM picker is in the expanded panel. */}
               <button
@@ -769,134 +787,89 @@ export const CartItemRow = ({
         </div>
 
         {isExpanded ? (
-          <div
-            className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-gray-50 dark:bg-gray-900/30"
-          >
-            <div className="w-full">
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    Quantity
-                  </label>
-                  <QuantityInput
-                    item={item}
-                    onUpdateQuantity={onUpdateQuantity}
-                    isMobile={isMobile}
-                  />
-                </div>
-                <div>
-                  <UOMSelectField
-                    labelClassName="block text-gray-700 dark:text-gray-300 font-medium text-sm mb-2"
-                    item={item}
-                    onUOMChange={onUOMChange}
-                    isMobile={isMobile}
-                    selectedCustomer={selectedCustomer}
+          <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-3 bg-gray-50 dark:bg-gray-900/30 flex flex-col gap-3 text-sm">
+            {/* Compact edit row: the four things a cashier changes most. */}
+            <div className="grid grid-cols-[1fr_1.15fr_1.35fr_1fr] gap-1.5">
+              <div className="min-w-0">
+                <label className={PANEL_LABEL}>Qty</label>
+                <NumberField
+                  kind="qty"
+                  value={item.quantity}
+                  aria-label="Quantity"
+                  onCommit={(n) => { if (n !== undefined) onUpdateQuantity(item.id, Math.max(0, n)); }}
+                  className={PANEL_INPUT}
+                />
+              </div>
+              <div className="min-w-0">
+                <UOMSelectField
+                  labelClassName={PANEL_LABEL}
+                  buttonClassName="h-9 px-2 text-sm"
+                  item={item}
+                  onUOMChange={onUOMChange}
+                  isMobile={isMobile}
+                  selectedCustomer={selectedCustomer}
+                />
+              </div>
+              <div className="min-w-0">
+                <label className={PANEL_LABEL}>Rate <span className="normal-case tracking-normal">{hasExclusiveTax ? "excl." : "incl."}</span></label>
+                <NumberField
+                  kind="money"
+                  value={roundCurrency(panelRate)}
+                  aria-label={hasExclusiveTax ? "Rate (Excl. Tax)" : "Rate (Incl. Tax)"}
+                  readOnly={!posDetails?.allow_rate_change}
+                  onCommit={commitPanelRate}
+                  className={`${PANEL_INPUT} ${isNegativeMargin && !restrictCostVisibility ? "border-red-400 dark:border-red-600" : ""}`}
+                />
+              </div>
+              <div className="min-w-0">
+                <label className={PANEL_LABEL}>Disc %</label>
+                <NumberField
+                  kind="percent"
+                  value={localDiscountPct}
+                  blankZero
+                  placeholder="0.00"
+                  aria-label="Discount (%)"
+                  readOnly={!posDetails?.allow_discount_change}
+                  onCommit={(n) => handleDiscountPercentageChange(n ?? 0)}
+                  className={PANEL_INPUT}
+                />
+              </div>
+            </div>
+
+            {/* Ledger: label left, value right, so long numbers have room. */}
+            <div className="flex flex-col gap-2">
+              <div className={LEDGER_ROW}>
+                <span className={LEDGER_LABEL}>Discount each</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  {itemDiscount.discountAmount > 0 ? (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                      = {formatNumber(itemDiscount.discountAmount * item.quantity, "money")} on line
+                    </span>
+                  ) : null}
+                  <NumberField
+                    kind="money"
+                    value={itemDiscount.discountAmount}
+                    blankZero
+                    placeholder="0.00"
+                    aria-label="Discount Amount"
+                    readOnly={!posDetails?.allow_discount_change}
+                    onCommit={(n) => handleDiscountAmountChange(n ?? 0)}
+                    wrapperClassName="w-28"
+                    className={PANEL_INPUT}
                   />
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    {hasExclusiveTax ? "Rate (Excl. Tax)" : "Rate (Incl. Tax)"}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={isRateEditing ? rateInputValue : displayRate}
-                    onFocus={() => {
-                      setIsRateEditing(true);
-                      setRateInputValue(String(displayRate));
-                    }}
-                    onBlur={() => {
-                      setIsRateEditing(false);
-                      setRateInputValue("");
-                      // Discount off on a list-floor till: the rate cannot go under the line's list.
-                      const minimum = rateBoxMinimum(
-                        posDetails,
-                        itemDiscount.selectedPriceList && shownLinePriceList ? Number(shownLinePriceList.rate || 0) : listRate,
-                      );
-                      if (minimum !== null && editableRate < minimum) {
-                        handleRateChange(minimum);
-                        toast.warning(`${item.name}: can't sell below ${formatCurrencyWithSymbol(minimum, currency_symbol)}. Rate reset to the minimum.`);
-                      }
-                    }}
-                    onChange={(e) => {
-                      const value = e.target.value.trim();
-                      setRateInputValue(value);
-
-                      if (value === "") {
-                        handleRateChange(undefined);
-                        return;
-                      }
-
-                      handleRateChange(parseDecimalInput(value));
-                    }}
-                    readOnly={!posDetails?.allow_rate_change}
-                    placeholder="0"
-                    className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${
-                      showNegativeMarginWarning ? "border-red-300 dark:border-red-600" : showPositiveMarginWarning ? "border-blue-300 dark:border-blue-600" : ""
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    {hasExclusiveTax ? "Amount (Excl. Tax)" : "Amount (Incl. Tax)"}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={amount}
-                    readOnly
-                    className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white cursor-not-allowed`}
-                  />
-                </div>
-              </div>
-
-              {totalTaxRate > 0 && (
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                      Tax Rate
-                    </label>
-                    <input
-                      type="text"
-                      value={`${totalTaxRate.toFixed(2)}%`}
-                      readOnly
-                      className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white cursor-not-allowed`}
-                    />
-                  </div>
-                  <div>
-                    <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                      {hasExclusiveTax ? "Rate (Incl. Tax)" : "Base Rate"}
-                    </label>
-                    <input
-                      type="text"
-                      value={formatCurrencyWithSymbol(hasExclusiveTax ? displayRateInclTax : discountedPrice, currency_symbol)}
-                      readOnly
-                      className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white cursor-not-allowed`}
-                    />
-                  </div>
-                  {hasExclusiveTax && taxAmountPerUnit > 0 && (
-                    <div className="col-span-2 text-xs text-gray-500 dark:text-gray-400">
-                      Tax per unit: {formatCurrencyWithSymbol(taxAmountPerUnit, currency_symbol)}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* With quick-switch pills on, the pills under the row are the price list selector. */}
               {allowPriceListSwitching && !quickSwitchPrice && fullItemData?.price_lists?.length ? (
-                <div className="mb-4">
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    Item Price List
-                  </label>
+                <div className={LEDGER_ROW}>
+                  <label htmlFor={`line-price-list-${itemId}`} className={LEDGER_LABEL}>Price list</label>
                   <select
+                    id={`line-price-list-${itemId}`}
                     value={itemDiscount.selectedPriceList || ""}
                     onChange={(event) => handleLinePriceListChange(event.target.value)}
                     disabled={!posDetails?.allow_rate_change}
-                    className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-3 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-60`}
+                    className="h-9 min-w-0 max-w-[60%] px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-60"
                   >
                     <option value="">Use order price list</option>
                     {fullItemData.price_lists
@@ -910,68 +883,43 @@ export const CartItemRow = ({
                 </div>
               ) : null}
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    Discount Amount
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={itemDiscount.discountAmount || ""}
-                    onChange={(e) => handleDiscountAmountChange(parseFloat(e.target.value) || 0)}
-                    readOnly={!posDetails?.allow_discount_change}
-                    placeholder="0.00"
-                    className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white`}
-                  />
+              {totalTaxRate > 0 ? (
+                <div className={LEDGER_ROW}>
+                  <span className={LEDGER_LABEL}>Tax</span>
+                  <span className="tabular-nums text-gray-900 dark:text-white text-right">
+                    {formatNumber(totalTaxRate, "percent")}%
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {hasExclusiveTax
+                        ? ` · +${formatNumber(taxAmountPerUnit, "money")} each`
+                        : ` · ${formatNumber(discountedPrice, "money")} before tax`}
+                    </span>
+                  </span>
                 </div>
-                <div>
-                  <label className={`block text-gray-700 dark:text-gray-300 font-medium ${isMobile ? "text-sm" : "text-sm"} mb-2`}>
-                    Discount (%)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    value={localDiscountPct || ""}
-                    onChange={(e) => handleDiscountPercentageChange(parseFloat(e.target.value) || 0)}
-                    readOnly={!posDetails?.allow_discount_change}
-                    placeholder="0.0"
-                    className={`w-full ${isMobile ? "text-sm" : "text-sm"} px-3 py-4 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-beveren-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white`}
-                  />
-                </div>
-              </div>
+              ) : null}
 
               {hasSerialOrBatch ? (
-                <div className="mb-4">
-                  <button
-                    onClick={handleOpenModal}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-4 rounded-md border ${
-                      hasBundleEntries
-                        ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30"
-                        : "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-                    } transition-colors ${isMobile ? "text-sm" : "text-sm"} font-medium`}
-                  >
-                    <Package size={isMobile ? 16 : 14} />
-                    {hasBundleEntries ? "Update Serial/Batch" : "Add Serial/Batch"}
-                  </button>
-                </div>
-              ) : (
-                <></>
-              )}
+                <button
+                  type="button"
+                  onClick={handleOpenModal}
+                  className={`w-full flex items-center justify-center gap-2 h-9 rounded-md border text-sm font-medium transition-colors ${
+                    hasBundleEntries
+                      ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30"
+                      : "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                  }`}
+                >
+                  <Package size={14} />
+                  {hasBundleEntries ? "Update Serial/Batch" : "Add Serial/Batch"}
+                </button>
+              ) : null}
 
               {hasBundleEntries ? (
-                <div className="mt-3 rounded-md border border-blue-200 dark:border-blue-800 overflow-hidden">
+                <div className="rounded-md border border-blue-200 dark:border-blue-800 overflow-hidden">
                   <button
                     type="button"
                     onClick={() => setIsBundleDetailsOpen(!isBundleDetailsOpen)}
                     className="w-full flex items-center justify-between p-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
                   >
-                    <span className="text-xs text-blue-800 dark:text-blue-300 font-medium">
-                      Batch/Serial Details:
-                    </span>
+                    <span className="text-xs text-blue-800 dark:text-blue-300 font-medium">Batch/Serial Details:</span>
                     {isBundleDetailsOpen ? (
                       <ChevronUp size={14} className="text-blue-800 dark:text-blue-300" />
                     ) : (
@@ -982,114 +930,104 @@ export const CartItemRow = ({
                     <div className="p-2 pt-0 bg-blue-50 dark:bg-blue-900/20 space-y-1">
                       {bundleEntries.map((entry, idx) => (
                         <div key={idx} className="text-xs text-blue-700 dark:text-blue-400">
-                          {entry.serial_no ? <span>Serial: {entry.serial_no} </span> : <></>}
-                          {entry.batch_no ? <span>Batch: {entry.batch_no} </span> : <></>}
-                          {entry.qty ? <span>Qty: {entry.qty}</span> : <></>}
+                          {entry.serial_no ? <span>Serial: {entry.serial_no} </span> : null}
+                          {entry.batch_no ? <span>Batch: {entry.batch_no} </span> : null}
+                          {entry.qty ? <span>Qty: {entry.qty}</span> : null}
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <></>
-                  )}
+                  ) : null}
                 </div>
-              ) : (
-                <></>
-              )}
+              ) : null}
+            </div>
 
+            {/* Line total and what the customer saves against the list. */}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex flex-col gap-0.5">
+              <div className={LEDGER_ROW}>
+                <span className={LEDGER_LABEL}>Line total</span>
+                <span className="text-lg font-semibold tabular-nums text-gray-900 dark:text-white">
+                  {formatCurrencyWithSymbol(amount, currency_symbol)}
+                </span>
+              </div>
+              {originalTotal - discountedTotal > 0 ? (
+                <div className="flex justify-between gap-3 text-xs tabular-nums">
+                  <span className="text-gray-400 line-through">{formatNumber(originalTotal, "money")}</span>
+                  <span className="text-green-700 dark:text-green-400">
+                    You save {formatNumber(originalTotal - discountedTotal, "money")}
+                    {localDiscountPct > 0 ? ` · ${formatNumber(localDiscountPct, "percent")}% off` : ""}
+                  </span>
+                </div>
+              ) : null}
+            </div>
 
+            {/* Facts: stock, weight, cost, margin. */}
             {isLoadingFullData ? (
-              <div className="flex items-center justify-center py-4 mt-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-2 border-beveren-500 border-t-transparent" />
-                <span className="ml-2 text-xs text-gray-500">Loading details...</span>
+              <div className="flex items-center gap-2 py-1 text-xs text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-beveren-500 border-t-transparent" />
+                Loading stock and cost…
               </div>
             ) : (
-              <div className="space-y-3 mt-3">
-                {showNoStockWarning ? (
-                  <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800 flex items-center gap-2">
-                    <AlertTriangle size={16} className="text-red-600 dark:text-red-400" />
-                    <span className="text-xs text-red-700 dark:text-red-300">
-                      No stock available in {warehouse}
-                    </span>
-                  </div>
-                ) : showStockWarning ? (
-                  <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800 flex items-center gap-2">
-                    <AlertTriangle size={16} className="text-yellow-600 dark:text-yellow-400" />
-                    <span className="text-xs text-yellow-700 dark:text-yellow-300">
-                      Only {availableStockLabel} {item.uom || "units"} available in {warehouse}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex flex-col gap-1.5">
+                {currentWarehouseStock || showNoStockWarning ? (
+                  <div className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>In stock</span>
+                    <span className={`text-right tabular-nums ${showNoStockWarning ? "text-red-600 dark:text-red-400" : showStockWarning ? "text-amber-600 dark:text-amber-400" : "text-gray-900 dark:text-white"}`}>
+                      {(showNoStockWarning || showStockWarning) ? <AlertTriangle size={12} className="inline mr-1 -mt-0.5" /> : null}
+                      {availableStockLabel} {item.uom || fullItemData?.uom}
+                      <span className="text-xs text-gray-500 dark:text-gray-400"> · {warehouse}</span>
                     </span>
                   </div>
                 ) : null}
 
-                {currentWarehouseStock && (
-                  <div className={`grid gap-2 ${(showPositiveMarginWarning || showNegativeMarginWarning) ? "grid-cols-3" : "grid-cols-2"}`}>
-                    <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
-                      <p className="text-[10px] text-gray-400 uppercase font-semibold">Stock Balance</p>
-                      <p className="text-base font-bold text-gray-900 dark:text-white">
-                        {availableStockLabel} {item.uom || fullItemData?.uom}
-                      </p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">in {warehouse}</p>
-                    </div>
-                    {!restrictCostVisibility && (
-                      <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md px-3 pt-2 pb-1.5 border border-gray-200 dark:border-gray-600">
-                        <p className="text-[10px] text-gray-400 uppercase font-semibold">Valuation Rate</p>
-                        <p className="whitespace-nowrap text-base font-bold text-gray-900 dark:text-white">
-                          {formatCurrencyWithSymbol(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate * uomFactor, currency_symbol)}
-                          {isInclusiveTax && <span className="ml-1 text-[9px] font-medium text-gray-500">(incl. VAT)</span>}
-                        </p>
-                        <p className="text-[10px] text-gray-500 mt-0.5">
-                          {isInclusiveTax
-                            ? `${formatCurrencyWithSymbol(currentWarehouseStock.val_rate * uomFactor, currency_symbol)} (excl. VAT)`
-                            : `per ${item.uom || fullItemData?.uom}`}
-                        </p>
-                      </div>
-                    )}
-                    {showPositiveMarginWarning && (
-                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-md px-3 pt-2 pb-1.5 border border-blue-200 dark:border-blue-800">
-                        <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase font-semibold">Margin</p>
-                        <p className="text-base font-bold text-green-600 dark:text-green-400">
-                          +{formatCurrencyWithSymbol(marginAmount, currency_symbol)}
-                        </p>
-                        <p className="text-[10px] text-green-600 dark:text-green-400 mt-0.5">{marginPercentage.toFixed(1)}%</p>
-                      </div>
-                    )}
-                    {showNegativeMarginWarning && (
-                      <div className="bg-red-50 dark:bg-red-900/20 rounded-md px-3 pt-2 pb-1.5 border border-red-200 dark:border-red-800">
-                        <p className="text-[10px] text-red-500 dark:text-red-400 uppercase font-semibold flex items-center gap-1">
-                          <AlertTriangle size={9} />
-                          Margin
-                        </p>
-                        <p className="text-base font-bold text-red-600 dark:text-red-400">
-                          {formatCurrencyWithSymbol(marginAmount, currency_symbol)}
-                        </p>
-                        <p className="text-[10px] text-red-500 dark:text-red-400 mt-0.5">{marginPercentage.toFixed(1)}% · below cost</p>
-                      </div>
-                    )}
+                {lineWeight.total > 0 ? (
+                  <div className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>Weight</span>
+                    <span className="text-right tabular-nums text-gray-900 dark:text-white">
+                      {formatNumber(lineWeight.total, "qty")} {lineWeight.uom}
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {" "}· {formatNumber(Number(item.weight_per_unit), "qty")} / {item.base_uom || item.uom}
+                      </span>
+                    </span>
                   </div>
-                )}
+                ) : null}
+
+                {!restrictCostVisibility && currentWarehouseStock ? (
+                  <div className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>Cost</span>
+                    <span className="text-right tabular-nums text-gray-900 dark:text-white">
+                      {formatNumber(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate * uomFactor, "money")}
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {isInclusiveTax
+                          ? ` incl. VAT · ${formatNumber(currentWarehouseStock.val_rate * uomFactor, "money")} excl.`
+                          : ` / ${item.uom || fullItemData?.uom}`}
+                      </span>
+                    </span>
+                  </div>
+                ) : null}
+
+                {(showPositiveMarginWarning || showNegativeMarginWarning) ? (
+                  <>
+                    <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>Margin</span>
+                      <span className={`text-right tabular-nums font-semibold ${isNegativeMargin ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>
+                        {isNegativeMargin ? "" : "+"}{formatNumber(marginAmount, "money")}
+                        <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] ${isNegativeMargin ? "bg-red-100 dark:bg-red-900/40" : "bg-green-100 dark:bg-green-900/40"}`}>
+                          {marginPercentage > 0 ? "+" : ""}{marginPercentage.toFixed(1)}%
+                        </span>
+                      </span>
+                    </div>
+                    {/* Rate against cost: the bar is the rate, the dark tick is cost. */}
+                    <div className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700" aria-hidden="true">
+                      <div
+                        className={`absolute inset-y-0 left-0 rounded-full ${isNegativeMargin ? "bg-red-500" : "bg-green-500"}`}
+                        style={{ width: `${marginBar.rate}%` }}
+                      />
+                      <div className="absolute -top-1 -bottom-1 w-0.5 bg-gray-900 dark:bg-white" style={{ left: `${marginBar.cost}%` }} />
+                    </div>
+                  </>
+                ) : null}
               </div>
             )}
-
-            {(itemDiscount.discountAmount > 0) ? (
-              <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800">
-                <div className="text-xs text-green-800 dark:text-green-300 font-medium">
-                  Discount Applied:
-                </div>
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-xs text-green-700 dark:text-green-400">
-                    {localDiscountPct > 0 ? `${localDiscountPct.toFixed(1)}% off` : ""}
-                    {localDiscountPct > 0 ? " · " : ""}
-                    {formatCurrencyWithSymbol(itemDiscount.discountAmount, currency_symbol)}
-                  </span>
-                  <span className="text-xs font-semibold text-green-800 dark:text-green-300">
-                    Save {formatCurrencyWithSymbol(originalTotal - discountedTotal, currency_symbol)}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <></>
-            )}
-
-            </div>
           </div>
         ) : (
           <></>
