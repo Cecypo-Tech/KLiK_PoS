@@ -20,7 +20,6 @@ export interface LineGridProps {
   onUOMChange: (itemId: string, uom: string, price: number, conversionFactor?: number) => void;
   /** Customer-specific unit prices in the UOM picker. */
   customerId?: string;
-  cartPriceList?: string;
   onOpenDescription: (id: string) => void;
   /** OrderSummary routes variants/templates to the existing picker; null = no line was made. */
   onPickItem: (item: MenuItem) => Promise<string | null>;
@@ -240,7 +239,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
           <th className="px-2 py-1 text-left font-medium">Item</th>
           <th className="w-20 px-2 py-1 text-right font-medium">Qty</th>
           <th className="w-24 px-2 py-1 text-left font-medium">UOM</th>
-          <th className="w-44 px-2 py-1 text-right font-medium">Rate</th>
+          <th className="w-28 px-2 py-1 text-right font-medium">Rate</th>
           <th className="w-20 px-2 py-1 text-right font-medium">Disc %</th>
           <th className="w-28 px-2 py-1 text-right font-medium">Total</th>
           <th className="w-8" />
@@ -262,7 +261,6 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             onRemoveItem={onRemoveItem}
             onUOMChange={props.onUOMChange}
             customerId={props.customerId}
-            cartPriceList={props.cartPriceList}
             currencySymbol={currencySymbol}
             posDetails={posDetails}
           />
