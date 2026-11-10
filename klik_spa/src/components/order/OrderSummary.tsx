@@ -1,5 +1,6 @@
 "use client";
 
+import { resolveActivePriceList } from "../../utils/priceOptions";
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { mergesSameItem, useCartStore } from "../../stores/cartStore";
 import { useProductStore } from "../../stores/productStore";
@@ -844,6 +845,11 @@ export default function OrderSummary({
               onRemoveItem={handleRemoveItem}
               onUOMChange={handleUOMChange}
               customerId={selectedCustomer?.id}
+              cartPriceList={resolveActivePriceList(
+                selectedPriceList,
+                (selectedCustomer as { sellingPriceList?: string } | null | undefined)?.sellingPriceList,
+                posDetails?.selling_price_list as string | undefined,
+              )}
               onOpenDescription={setDescriptionFor}
               onPickItem={pickGridItem}
               currencySymbol={currency_symbol || ""}

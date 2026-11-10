@@ -374,6 +374,8 @@ export const CartItemRow = ({
   };
 
   const handleRateChange = (value?: number) => {
+    // A typed (or reset) rate is no list's price: the line drops its list, as the grid's Rate does.
+    if (itemDiscount.selectedPriceList) onDiscountChange(item.id, "selectedPriceList", "");
     if (value === undefined || value === null || Number.isNaN(value)) {
       onCustomRateChange(item, undefined);
       onDiscountChange(item.id, "discountAmount", 0);
