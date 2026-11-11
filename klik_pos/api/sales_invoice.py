@@ -1070,6 +1070,12 @@ def _stock_reservation_enabled():
 	return bool(frappe.get_cached_value("Stock Settings", None, "enable_stock_reservation"))
 
 
+def negative_stock_allowed(item_flag=0):
+	"""ERPNext's rule (stock_ledger.is_negative_stock_allowed): the Stock Settings switch
+	allows negative stock for every item; otherwise only items with their own flag."""
+	return bool(cint(item_flag) or cint(frappe.get_cached_value("Stock Settings", None, "allow_negative_stock")))
+
+
 def _should_reserve_stock(doc):
 	return bool(getattr(doc, "reserve_stock", 0))
 
@@ -1107,7 +1113,7 @@ def _reserve_stock_for_queued_invoice(doc):
 		if not item_meta or not int(item_meta.is_stock_item or 0):
 			continue
 		# Items allowed to go negative are exempt from reservation — nothing to reserve.
-		if int(item_meta.allow_negative_stock or 0):
+		if negative_stock_allowed(item_meta.allow_negative_stock):
 			continue
 
 		required_qty = flt(abs(getattr(row, "stock_qty", 0) or 0))
@@ -1239,7 +1245,7 @@ def _validate_reserved_stock_for_items(doc, exclude_invoice=None):
 		# Skip non-stock items and items allowed to go negative (no reservation enforced).
 		if item_meta and not int(item_meta.is_stock_item or 0):
 			continue
-		if item_meta and int(item_meta.allow_negative_stock or 0):
+		if item_meta and negative_stock_allowed(item_meta.allow_negative_stock):
 			continue
 
 		required_qty = flt(abs(getattr(row, "stock_qty", 0) or 0))
@@ -5271,7 +5277,7 @@ class CustomSalesInvoice(SalesInvoice):
 			# Skip non-stock items and items allowed to go negative (no reservation enforced).
 			if item_meta and not int(item_meta.is_stock_item or 0):
 				continue
-			if item_meta and int(item_meta.allow_negative_stock or 0):
+			if item_meta and negative_stock_allowed(item_meta.allow_negative_stock):
 				continue
 
 			required_qty = flt(abs(getattr(row, "stock_qty", 0) or 0))

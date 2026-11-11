@@ -141,3 +141,21 @@ class TestListingIndexes(FrappeTestCase):
 			["new_item_code", "disabled"],
 		)
 		self.assertTrue(frappe.db.has_index("tabItem", "klik_pos_item_group_name"))
+
+
+class TestSiteWideNegativeStock(ListingQueryCase):
+	"""The Stock Settings switch allows negative stock for every item, as ERPNext reads it."""
+
+	def setUp(self):
+		previous = frappe.db.get_single_value("Stock Settings", "allow_negative_stock")
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
+		self.addCleanup(frappe.db.set_single_value, "Stock Settings", "allow_negative_stock", previous)
+
+	def test_every_item_is_sent_as_allowed_to_go_negative(self):
+		result, _codes = self._codes(hide_unavailable=False)
+		self.assertTrue(all(item["allow_negative_stock"] for item in result["items"]))
+
+	def test_hide_unavailable_keeps_items_with_nothing_on_hand(self):
+		_result, codes = self._codes(hide_unavailable=True, stock=0)
+		self.assertIn(fx.EMPTY, codes)
+		self.assertIn(fx.ELSEWHERE, codes)

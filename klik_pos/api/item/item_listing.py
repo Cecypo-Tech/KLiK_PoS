@@ -14,6 +14,7 @@ from ..sql_builder import (
     reset_denied_doctypes,
 )
 from .item_price import checked_price_list, fetch_item_price, get_price_list_with_customer_priority
+from ..sales_invoice import negative_stock_allowed
 from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balance
 from .search_utils import build_item_search_conditions
 
@@ -256,6 +257,7 @@ def get_items(
 
         enriched_items = []
         price_by_item = {}
+        site_allows_negative_stock = negative_stock_allowed()
 
         for item in items:
             item_code = item["name"]
@@ -263,7 +265,7 @@ def get_items(
             is_stock_item = int(item.get("is_stock_item") or 0) == 1
             is_product_bundle = item_code in bundle_codes
             is_variant_template = int(item.get("has_variants") or 0) == 1
-            allow_negative_stock = int(item.get("allow_negative_stock") or 0) == 1
+            allow_negative_stock = site_allows_negative_stock or int(item.get("allow_negative_stock") or 0) == 1
             bundle_items = product_bundle_map.get(item_code, [])
             variant_count = variant_count_map.get(item_code, 0)
 
@@ -1074,6 +1076,9 @@ def _listing_where(pos_doc, warehouse, hide_unavailable, include_service_items, 
     first FROM and the first WHERE in the text as the query's own.
     """
     bundle = _BUNDLE_EXISTS
+    if negative_stock_allowed():
+        # The Stock Settings switch lets every item go negative, so none is unavailable.
+        hide_unavailable = False
     conditions = ["i.disabled = 0", "IFNULL(i.is_sales_item, 1) = 1"]
     params = []
 

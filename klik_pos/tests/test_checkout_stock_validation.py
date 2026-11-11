@@ -98,3 +98,12 @@ class TestCheckoutStockValidation(FrappeTestCase):
 
 	def test_an_empty_cart_is_not_an_error(self):
 		_validate_reserved_stock_for_items(SimpleNamespace(items=[]))
+
+	def test_an_oversell_passes_when_the_site_allows_negative_stock(self):
+		# ERPNext's rule: the Stock Settings switch allows it for every item, not only
+		# items with their own flag (stock_ledger.is_negative_stock_allowed).
+		previous = frappe.db.get_single_value("Stock Settings", "allow_negative_stock")
+		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1)
+		self.addCleanup(frappe.db.set_single_value, "Stock Settings", "allow_negative_stock", previous)
+
+		_validate_reserved_stock_for_items(self._doc(qty=50))
