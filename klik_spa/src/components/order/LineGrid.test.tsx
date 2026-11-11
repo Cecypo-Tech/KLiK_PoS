@@ -108,10 +108,21 @@ describe("LineGrid", () => {
 
 describe("ItemResults (the entry row's search dropdown)", () => {
   const pen = { id: "PEN", item_code: "PEN", name: "Blue Pen", price: 120, available: 5, cost_price: 80 } as MenuItem;
-  const html = (showCost: boolean, results = [pen]) =>
+  const html = (showCost: boolean, results = [pen], showCode = false) =>
     renderToStaticMarkup(
-      <ItemResults results={results} highlight={0} query="pen" currencySymbol="KES" showCost={showCost} onPick={() => {}} onHover={() => {}} />,
+      <ItemResults results={results} highlight={0} query="pen" currencySymbol="KES" showCost={showCost} showCode={showCode} onPick={() => {}} onHover={() => {}} />,
     );
+
+  it("puts cost before the selling price", () => {
+    const out = html(true);
+    expect(out.indexOf(">Cost</span>")).toBeLessThan(out.indexOf(">Price</span>"));
+    expect(out.indexOf(formatCurrencyWithSymbol(80, "KES"))).toBeLessThan(out.indexOf(formatCurrencyWithSymbol(120, "KES")));
+  });
+
+  it("shows the item code only when the profile shows codes in the product list", () => {
+    expect(html(false, [pen], true)).toContain(">PEN</span>");
+    expect(html(false, [pen], false)).not.toContain(">PEN</span>");
+  });
 
   it("shows a Cost column only when the till shows cost", () => {
     expect(html(true)).toContain(">Cost</span>");
