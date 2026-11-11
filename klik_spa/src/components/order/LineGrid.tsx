@@ -48,12 +48,13 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 /** The entry row's search dropdown: ten rows, the rest scroll; the highlighted one stays in view. */
-export function ItemResults({ results, highlight, query, currencySymbol, showCost, onPick, onHover }: {
+export function ItemResults({ results, highlight, query, currencySymbol, showCost, showCode, onPick, onHover }: {
   results: MenuItem[];
   highlight: number;
   query: string;
   currencySymbol: string;
   showCost: boolean;
+  showCode?: boolean;
   onPick: (r: MenuItem) => void;
   onHover: (i: number) => void;
 }) {
@@ -69,8 +70,8 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
     <div ref={box} className="@container absolute left-2 right-2 z-30 mt-1 max-w-[44rem] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
       <div className="flex h-6 items-center gap-2 border-b border-gray-100 dark:border-gray-700 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
         <span className="min-w-0 flex-1">Item</span>
-        <span className={money}>Price</span>
         {showCost ? <span className={money}>Cost</span> : null}
+        <span className={money}>Price</span>
         <span className="w-12 shrink-0 text-right">Stock</span>
       </div>
       <ul ref={list} role="listbox" className="max-h-[17.5rem] overflow-y-auto">
@@ -87,11 +88,13 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
               className={`flex h-7 items-center gap-2 px-2 cursor-pointer ${i === highlight ? "bg-beveren-50 dark:bg-beveren-900/30" : ""}`}
             >
               <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query} /></span>
-              <span className="@max-[36rem]:hidden max-w-[9rem] shrink truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
-              <span className={`${money} text-gray-700 dark:text-gray-300`}>{formatCurrencyWithSymbol(r.price, currencySymbol)}</span>
+              {showCode ? (
+                <span className="@max-[36rem]:hidden max-w-[9rem] shrink truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
+              ) : null}
               {showCost ? (
                 <span className={`${money} text-gray-500 dark:text-gray-400`}>{cost > 0 ? formatCurrencyWithSymbol(cost, currencySymbol) : "—"}</span>
               ) : null}
+              <span className={`${money} text-gray-700 dark:text-gray-300`}>{formatCurrencyWithSymbol(r.price, currencySymbol)}</span>
               <span className={`w-12 shrink-0 text-right tabular-nums ${r.available > 0 ? "text-green-600" : "text-red-600"}`}>{r.available}</span>
             </li>
           );
@@ -283,6 +286,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             currencySymbol={currencySymbol}
             // As the line panel: cost shows unless the profile hides it (the server also blanks it then).
             showCost={!(posDetails?.restrict_cost_visibility_in_tooltip ?? true)}
+            showCode={!!posDetails?.custom_show_item_code_in_product_list}
             onPick={(r) => void pick(r)}
             onHover={setHighlight}
           />
