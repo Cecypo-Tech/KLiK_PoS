@@ -9,6 +9,7 @@ from klik_pos.klik_pos.utils import get_current_pos_profile_lite
 # every scan.
 _SCAN_POS_PROFILE_FIELDS = ["warehouse", "selling_price_list", "custom_enable_service_items"]
 
+from ..sales_invoice import negative_stock_allowed
 from ..sql_builder import apply_sql_permissions
 from .item_price import fetch_item_price, get_price_list_with_customer_priority
 from .item_stock import fetch_item_balance
@@ -88,7 +89,7 @@ def get_item_by_barcode(barcode: str):
         item_data = frappe.db.get_value(
             "Item",
             item_code,
-            ["item_name", "description", "item_group", "image", "disabled", "is_sales_item", "is_stock_item", "has_variants", "variant_of", "variant_based_on"],
+            ["item_name", "description", "item_group", "image", "disabled", "is_sales_item", "is_stock_item", "has_variants", "variant_of", "variant_based_on", "allow_negative_stock"],
             as_dict=True,
         )
 
@@ -127,6 +128,7 @@ def get_item_by_barcode(barcode: str):
             "currency_symbol": price_info["currency_symbol"],
             "available": balance,
             "is_stock_item": False if is_variant_template else True if is_product_bundle else is_stock_item,
+            "allow_negative_stock": negative_stock_allowed(item_data.get("allow_negative_stock")),
             "is_product_bundle": is_product_bundle,
             "bundle_items": bundle_items,
             "is_variant_template": is_variant_template,
@@ -247,7 +249,7 @@ def get_item_by_identifier(code: str):
         item_data = frappe.db.get_value(
             "Item",
             item_code,
-            ["item_name", "description", "item_group", "image", "disabled", "is_sales_item", "is_stock_item", "has_variants", "variant_of", "variant_based_on"],
+            ["item_name", "description", "item_group", "image", "disabled", "is_sales_item", "is_stock_item", "has_variants", "variant_of", "variant_based_on", "allow_negative_stock"],
             as_dict=True,
         )
 
@@ -286,6 +288,7 @@ def get_item_by_identifier(code: str):
             "currency_symbol": price_info["currency_symbol"],
             "available": balance,
             "is_stock_item": False if is_variant_template else True if is_product_bundle else is_stock_item,
+            "allow_negative_stock": negative_stock_allowed(item_data.get("allow_negative_stock")),
             "is_product_bundle": is_product_bundle,
             "bundle_items": bundle_items,
             "is_variant_template": is_variant_template,

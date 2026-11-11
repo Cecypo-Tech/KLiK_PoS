@@ -92,7 +92,9 @@ export default function VariantPickerModal({
     (matchingVariants.length === 1 ? matchingVariants[0] : null);
 
   const isOutOfStock =
-    selectedVariant?.is_stock_item !== false && (selectedVariant?.available ?? 0) <= 0;
+    selectedVariant?.is_stock_item !== false &&
+    (selectedVariant?.available ?? 0) <= 0 &&
+    !selectedVariant?.allow_negative_stock;
 
   const handleSelect = (attribute: string, value: string) => {
     setSelected((current) => ({
@@ -204,7 +206,8 @@ export default function VariantPickerModal({
                 <div className="grid gap-2">
                   {matchingVariants.map((variant) => {
                     const active = selectedVariant?.id === variant.id;
-                    const disabled = variant.is_stock_item !== false && variant.available <= 0;
+                    const disabled =
+                      variant.is_stock_item !== false && variant.available <= 0 && !variant.allow_negative_stock;
                     return (
                       <button
                         key={variant.id}

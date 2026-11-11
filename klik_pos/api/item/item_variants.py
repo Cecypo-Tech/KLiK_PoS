@@ -4,6 +4,7 @@ from frappe.utils import cint, flt
 
 from klik_pos.klik_pos.utils import get_current_pos_profile
 
+from ..sales_invoice import negative_stock_allowed
 from ..sql_builder import apply_sql_permissions
 from .item_listing import _fetch_batch_stock
 from .item_price import fetch_item_price, get_price_list_with_customer_priority
@@ -66,6 +67,7 @@ def get_template_variants(template_item_code: str, customer: str | None = None):
                 "currency_symbol": price_info.get("currency_symbol"),
                 "available": flt(stock_map.get(item_code, 0)) if is_stock_item else 0,
                 "is_stock_item": is_stock_item,
+                "allow_negative_stock": negative_stock_allowed(variant.allow_negative_stock),
                 "image": variant.image or template.image,
                 "sold": 0,
                 "uom": item_uom,
@@ -112,6 +114,7 @@ def _get_template_variant_rows(template_item_code):
             i.stock_uom,
             i.sales_uom,
             i.is_stock_item,
+            i.allow_negative_stock,
             i.has_batch_no,
             i.has_serial_no,
             (

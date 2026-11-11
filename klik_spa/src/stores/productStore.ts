@@ -671,6 +671,7 @@ export const useProductStore = create<ProductStoreState>()(
             image: message.image || '',
             available: message.available || 0,
             is_stock_item: message.is_stock_item,
+            allow_negative_stock: !!message.allow_negative_stock,
             sold: 0,
             description: message.description || '',
             currency_symbol: message.currency_symbol,
