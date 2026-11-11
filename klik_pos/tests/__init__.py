@@ -25,3 +25,7 @@ def mute_workflow_emails():
 # keep their emails.
 if frappe.in_test:
 	mute_workflow_emails()
+
+	from klik_pos.testing import keep_site_settings
+
+	keep_site_settings()
