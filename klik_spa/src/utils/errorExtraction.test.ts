@@ -11,3 +11,15 @@ describe("extractErrorMessage", () => {
     );
   });
 });
+
+describe("server messages carry HTML entities", () => {
+  it("decodes them after stripping tags (cecypo_powerpack's price floor)", () => {
+    const msg = "Row #1 (FITCH &amp; LEEDES CLASSIC GINGER BEER300ML): Net selling rate should be at least <strong>521.28</strong>.";
+    expect(extractErrorMessage({ message: msg })).toBe(
+      "Row #1 (FITCH & LEEDES CLASSIC GINGER BEER300ML): Net selling rate should be at least 521.28.",
+    );
+  });
+  it("decodes quotes, angle brackets, numeric entities and nbsp, once only", () => {
+    expect(extractErrorMessage({ message: "&quot;A&quot; &#39;B&#x27; &lt;5&gt;&nbsp;x &amp;amp;" })).toBe(`"A" 'B' <5> x &amp;`);
+  });
+});

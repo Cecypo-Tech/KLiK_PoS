@@ -4,6 +4,8 @@
 /**
  * Clean HTML formatting from error messages to make them readable
  */
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
 function cleanHtmlFromErrorMessage(message: string): string {
   if (!message || typeof message !== 'string') {
     return message;
@@ -22,6 +24,10 @@ function cleanHtmlFromErrorMessage(message: string): string {
     .replace(/<a[^>]*>(.*?)<\/a>/gi, '$1')
     // Remove other common HTML tags
     .replace(/<[^>]*>/g, '')
+    // Then decode entities (frappe escapes names: "FITCH &amp; LEEDES"), in one pass so "&amp;lt;"
+    // reads "&lt;", and after the tag strip so a decoded "<5>" stays text.
+    .replace(/&(?:#(\d+)|#x([0-9a-f]+)|(amp|lt|gt|quot|apos|nbsp));/gi, (_: string, dec?: string, hex?: string, name?: string): string =>
+      dec ? String.fromCodePoint(+dec) : hex ? String.fromCodePoint(parseInt(hex, 16)) : ENTITIES[(name ?? '').toLowerCase()] ?? _)
     .trim()
     .replace(/([.:!?])?\s*\n\s*/g, (_, mark) => (mark ? `${mark} ` : '. '))
     // Clean up extra whitespace
