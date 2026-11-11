@@ -149,7 +149,7 @@ describe("searchGridItems", () => {
     useProductStore.setState({ fetchProductsFromAPI: fetchProductsFromAPI as never, products: before, searchQuery: "" });
     useCartStore.setState({ selectedCustomer: { id: "C1", sellingPriceList: "Retail" } as never });
     expect(await searchGridItems("pe")).toEqual([pen]);
-    expect(fetchProductsFromAPI).toHaveBeenCalledWith(8, 0, "pe", "all", "C1", "Retail");
+    expect(fetchProductsFromAPI).toHaveBeenCalledWith(20, 0, "pe", "all", "C1", "Retail");
     expect(useProductStore.getState().products).toBe(before);
     expect(useProductStore.getState().searchQuery).toBe("");
   });
