@@ -864,7 +864,7 @@ export default function OrderSummary({
             />
           </div>
         </div>
-        <div className="w-[380px] shrink-0 flex flex-col border-l border-gray-200 dark:border-gray-700 shadow-lg">
+        <div className="@container w-[300px] xl:w-[380px] shrink-0 flex flex-col border-l border-gray-200 dark:border-gray-700 shadow-lg">
           {customerHeader}
           <div
             id="pos-line-panel"

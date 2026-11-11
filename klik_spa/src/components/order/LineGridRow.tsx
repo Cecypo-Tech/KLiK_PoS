@@ -79,6 +79,8 @@ interface LineGridRowProps {
   row: number;
   itemDiscount: NonNullable<DiscountMapLike[string]>;
   selected: boolean;
+  /** Under 1024 px: no Disc % or remove cells (LineGrid drops their columns). */
+  compact?: boolean;
   onSelect: (id: string) => void;
   onUpdateQuantity: (id: string, qty: number) => void;
   onCustomRateChange: (item: CartItem, rate?: number, includesTax?: boolean) => void;
@@ -91,7 +93,7 @@ interface LineGridRowProps {
 }
 
 export default function LineGridRow({
-  item, row, itemDiscount, selected, onSelect, onUpdateQuantity, onCustomRateChange, onDiscountChange, onRemoveItem,
+  item, row, itemDiscount, selected, compact, onSelect, onUpdateQuantity, onCustomRateChange, onDiscountChange, onRemoveItem,
   onUOMChange, customerId, currencySymbol, posDetails,
 }: LineGridRowProps) {
   // Same pricing inputs as CartItemRow, so the grid and the cart show and commit identical numbers.
@@ -140,6 +142,16 @@ export default function LineGridRow({
     if (n !== undefined) onDiscountChange(item.id, "discountAmount", discountAmountFromPct(preDiscountPrice, n));
   };
 
+  const los = !!Number(posDetails?.custom_enable_loss_of_sale) && (item.los_qty ?? 0) > 0;
+  // Beside the qty from 1280 px; under the item name below that, where the qty column is narrow.
+  const losChip = ({ className = "", ...rest }: { className?: string; "data-los-chip"?: string } = {}) => (
+    <span
+      {...rest}
+      title="Asked for but not in stock: recorded as Loss of Sale"
+      className={`${className} shrink-0 whitespace-nowrap rounded bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300`}
+    >LoS {formatNumber(Number(item.los_qty), "qty")}</span>
+  );
+
   return (
     <tr
       data-line-id={item.id}
@@ -152,6 +164,7 @@ export default function LineGridRow({
           <div className="truncate text-gray-900 dark:text-white" title={item.name}>
             {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
           </div>
+          {los ? <div className="xl:hidden">{losChip()}</div> : null}
           {item.description ? (
             <div className="truncate text-xs italic text-gray-500 dark:text-gray-400">{item.description}</div>
           ) : null}
@@ -160,18 +173,12 @@ export default function LineGridRow({
       <td className="px-1">
         <div className="flex items-center justify-end gap-1">
           {/* Asked for beyond stock: the Loss of Sale part rides beside the qty sold. */}
-          {Number(posDetails?.custom_enable_loss_of_sale) && (item.los_qty ?? 0) > 0 ? (
-            <span
-              data-los-chip={item.id}
-              title="Asked for but not in stock: recorded as Loss of Sale"
-              className="shrink-0 whitespace-nowrap rounded bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-            >LoS {formatNumber(Number(item.los_qty), "qty")}</span>
-          ) : null}
+          {los ? losChip({ "data-los-chip": item.id, className: "hidden xl:inline" }) : null}
           <div className="w-12 shrink-0"><NumCell row={row} col="qty" value={item.quantity} onCommit={commitQty} /></div>
         </div>
       </td>
-      <td className="w-24 px-1" data-uom-cell={item.id}><UomCell item={item} row={row} customerId={customerId} onUOMChange={onUOMChange} /></td>
-      <td className="w-28 px-1">
+      <td className="px-1" data-uom-cell={item.id}><UomCell item={item} row={row} customerId={customerId} onUOMChange={onUOMChange} /></td>
+      <td className="px-1">
         <RatePriceField
           data-row={row}
           data-col="rate"
@@ -189,13 +196,13 @@ export default function LineGridRow({
           onPick={pickPrice}
         />
       </td>
-      <td className="w-20 px-1">
+{compact ? null : (      <td className="px-1">
         <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />
-      </td>
-      <td className="w-28 px-2 text-right font-semibold tabular-nums whitespace-nowrap text-beveren-600 dark:text-beveren-400">
+      </td>)}
+      <td className="px-2 text-right font-semibold tabular-nums whitespace-nowrap text-beveren-600 dark:text-beveren-400">
         {formatCurrencyWithSymbol(total, currencySymbol)}
       </td>
-      <td className="w-8 text-center">
+{compact ? null : (      <td className="text-center">
         <button
           type="button"
           tabIndex={-1}
@@ -205,7 +212,7 @@ export default function LineGridRow({
         >
           <X size={14} />
         </button>
-      </td>
+      </td>)}
     </tr>
   );
 }

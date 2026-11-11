@@ -610,7 +610,7 @@ export const CustomerSearchSection = ({
   return (
     <div className={containerClass}>
       <div className="flex items-center gap-2">
-        <div ref={containerRef} className="flex-1 relative">
+        <div ref={containerRef} className="flex-1 min-w-0 relative">
           <div
             id="pos-customer-btn"
             ref={buttonRef}

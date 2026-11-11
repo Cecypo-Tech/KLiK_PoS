@@ -103,7 +103,7 @@ export const OrderSummaryFooter = ({
             ? isValidating ? "Saving quote..." : `Save Quote ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`
             : isValidating
             ? "Checking cart..."
-            : `Checkout ${formatCurrencyWithSymbol(total, currency_symbol)}${taxExclusive ? " +" : ""}`}
+            : <>Checkout <span className="whitespace-nowrap">{formatCurrencyWithSymbol(total, currency_symbol)}{taxExclusive ? " +" : ""}</span></>}
         </button>
       </div>
     </div>

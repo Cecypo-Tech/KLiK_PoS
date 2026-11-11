@@ -767,7 +767,7 @@ export const CartItemRow = ({
             </div>
 
             {/* Rate */}
-            <p className="text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+            <p className="@max-[20rem]:hidden text-right text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
               {formatCurrencyWithSymbol(discountedPrice, currency_symbol)}
             </p>
 

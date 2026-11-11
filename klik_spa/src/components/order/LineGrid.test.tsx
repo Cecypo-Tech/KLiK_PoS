@@ -4,6 +4,9 @@ import type { CartItem } from "../../../types";
 import type { POSDetails } from "../../stores/posProfileStore";
 import LineGrid from "./LineGrid";
 
+const screen = vi.hoisted(() => ({ compact: false }));
+vi.mock("../../hooks/useMediaQuery", () => ({ useMediaQuery: () => screen.compact }));
+
 vi.mock("react-toastify", () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
 vi.mock("../../utils/lineGridSearch", () => ({
   latestOnly: () => (p: Promise<unknown>) => p,
@@ -50,6 +53,21 @@ describe("LineGrid", () => {
     expect(render([los], { custom_enable_loss_of_sale: 1 })).toMatch(/data-los-chip="A"[^>]*>LoS 6<\/span>.*data-col="qty"/);
     expect(render([los])).not.toContain("data-los-chip");
     expect(render([line("A", "Apple")], { custom_enable_loss_of_sale: 1 })).not.toContain("data-los-chip");
+  });
+
+  it("under 1024 px, drops Disc % and the remove button and chips LoS under the name", () => {
+    const los = { ...line("A", "Apple"), quantity: 4, los_qty: 6 } as CartItem;
+    screen.compact = true;
+    try {
+      const html = render([los], { custom_enable_loss_of_sale: 1 });
+      expect(html).not.toContain(">Disc %</th>");
+      expect(html).not.toContain('aria-label="Remove line"');
+      expect(html).toContain('colSpan="5"');
+      expect(html).toMatch(/Apple<\/div><div class="xl:hidden"><span[^>]*>LoS 6<\/span>/);
+    } finally {
+      screen.compact = false;
+    }
+    expect(render([los], { custom_enable_loss_of_sale: 1 })).toContain(">Disc %</th>");
   });
 
   it("shows a description as an italic second line, and nothing when there is none", () => {

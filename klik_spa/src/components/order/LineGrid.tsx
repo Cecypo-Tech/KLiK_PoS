@@ -7,6 +7,7 @@ import { gridKeyAction, type GridCol } from "../../utils/lineGridKeys";
 import { toast } from "react-toastify";
 import { exactCodeMatch, highlightRanges, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
 import LineGridRow from "./LineGridRow";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 export interface LineGridProps {
   items: CartItem[];
@@ -57,6 +58,10 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   const [open, setOpen] = useState(false);
 
   const top = posDetails?.custom_cart_item_insertion_position === "Top";
+  // Under 1024 px (an 800x600 counter) Disc % and the remove button leave the row: both are in the
+  // side panel, and Shift+Delete still deletes. Rendered or not, never CSS-hidden: the entry row's
+  // colSpan would keep hidden columns alive and they would split the item name's width.
+  const compact = useMediaQuery("(max-width: 1023px)");
   const entryRow = top ? 0 : items.length;
   const rowCount = items.length + 1;
   const lineAt = (row: number) => items[top ? row - 1 : row];
@@ -170,7 +175,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
       dropdownOpen: open && row === entryRow, rowEmpty: false,
       editable: {
         rate: !!Number(posDetails?.allow_rate_change),
-        disc: !!Number(posDetails?.allow_discount_change),
+        disc: !!Number(posDetails?.allow_discount_change) && !compact,
         uom: !!tableRef.current?.querySelector(`[data-row="${row}"][data-col="uom"]`), // a picker only when the item has units to pick
       },
     });
@@ -197,7 +202,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
 
   const entry = (
     <tr data-entry-row="" className="border-b border-gray-100 dark:border-gray-800">
-      <td className="relative px-2 py-1" colSpan={7}>
+      <td className="relative px-2 py-1" colSpan={compact ? 5 : 7}>
         <input
           type="text"
           data-row={entryRow}
@@ -243,12 +248,14 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
       <thead>
         <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
           <th className="px-2 py-1 text-left font-medium">Item</th>
-          <th className={`${Number(posDetails?.custom_enable_loss_of_sale) ? "w-32" : "w-20"} px-2 py-1 text-right font-medium`}>Qty</th>
-          <th className="w-24 px-2 py-1 text-left font-medium">UOM</th>
-          <th className="w-28 px-2 py-1 text-right font-medium">Rate</th>
-          <th className="w-20 px-2 py-1 text-right font-medium">Disc %</th>
-          <th className="w-28 px-2 py-1 text-right font-medium">Total</th>
-          <th className="w-8" />
+          {/* Below 1280 px the side panel narrows and these columns tighten, so the item name keeps
+              its room; the LoS chip moves under the name. */}
+          <th className={`w-14 ${Number(posDetails?.custom_enable_loss_of_sale) ? "xl:w-32" : "xl:w-20"} px-2 py-1 text-right font-medium`}>Qty</th>
+          <th className="w-16 xl:w-24 px-2 py-1 text-left font-medium">UOM</th>
+          <th className="w-20 xl:w-28 px-2 py-1 text-right font-medium">Rate</th>
+          {compact ? null : <th className="w-16 xl:w-20 px-2 py-1 text-right font-medium">Disc %</th>}
+          <th className="w-[88px] xl:w-28 px-2 py-1 text-right font-medium">Total</th>
+          {compact ? null : <th className="w-8" />}
         </tr>
       </thead>
       <tbody>
@@ -260,6 +267,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             row={rowOf(index)}
             itemDiscount={itemDiscounts[item.id] || {}}
             selected={item.id === selectedId}
+            compact={compact}
             onSelect={onSelect}
             onUpdateQuantity={props.onUpdateQuantity}
             onCustomRateChange={props.onCustomRateChange}
