@@ -90,21 +90,33 @@ const csrfToken = window.csrf_token;
   return result.message;
 }
 
+/** The connection dropped, or the reply was cut off or not JSON (a server restart, a proxy error page). */
+export const CHECKOUT_LOST_CONTACT =
+  "Lost contact with the server before the sale was confirmed. Submit again: the same sale won't be recorded twice.";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function createSalesInvoice(data: any) {
   const csrfToken = window.csrf_token;
 
-  const response = await fetch('/api/method/klik_pos.api.sales_invoice.create_and_submit_invoice', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Frappe-CSRF-Token': csrfToken
-    },
-    body: JSON.stringify({ data }),
-    credentials: 'include'
-  });
-
-  const result = await response.json();
+  // Either failure below throws without checkoutResponseReceived: the payment dialog then keeps the
+  // checkout request id, so the retry the message asks for replays this sale instead of ringing it twice.
+  let response: Response;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let result: any;
+  try {
+    response = await fetch('/api/method/klik_pos.api.sales_invoice.create_and_submit_invoice', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': csrfToken
+      },
+      body: JSON.stringify({ data }),
+      credentials: 'include'
+    });
+    result = await response.json();
+  } catch {
+    throw new Error(CHECKOUT_LOST_CONTACT);
+  }
 
 
   if (!response.ok || !result.message || result.message.success === false) {
