@@ -17,6 +17,8 @@ export default function RetailPOSLayout() {
   const [showScanner, setShowScanner] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const isMobile = useMediaQuery("(max-width: 1024px)");
+  // Grid tills keep the grid down to 768 px (an 800x600 counter screen); below that, the phone layout.
+  const isPhone = useMediaQuery("(max-width: 767px)");
   
   const {
     error: productError,
@@ -67,7 +69,7 @@ export default function RetailPOSLayout() {
     searchProducts(query);
   }, [searchProducts]);
 
-  const isGrid = posDetails?.custom_default_view === "Line Entry View" && !isMobile;
+  const isGrid = posDetails?.custom_default_view === "Line Entry View" && !isPhone;
 
   const handleBarcodeDetected = useCallback((barcode: string) => {
     setShowScanner(false);
@@ -128,7 +130,7 @@ export default function RetailPOSLayout() {
     );
   }
 
-  if (isMobile) {
+  if (isMobile && !isGrid) {
     return (
       <>
         <MobilePOSLayout

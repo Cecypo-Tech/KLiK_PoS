@@ -40,8 +40,11 @@ export default function RetailSidebar() {
     navigate(item.path)
   }
 
+  // The grid till runs down to 768 px (RetailPOSLayout), so its POS page needs the nav there too.
+  const shownFrom = posDetails?.custom_default_view === "Line Entry View" && location.pathname.startsWith("/pos") ? "md:flex" : "lg:flex";
+
   if (!posDetails) return (
-    <div className="hidden lg:flex fixed h-screen w-20 top-0 left-0 bg-white dark:bg-gray-800 shadow-lg flex-col border-r border-gray-200 dark:border-gray-700 z-50">
+    <div className={`hidden ${shownFrom} fixed h-screen w-20 top-0 left-0 bg-white dark:bg-gray-800 shadow-lg flex-col border-r border-gray-200 dark:border-gray-700 z-50`}>
       <div
           className="h-20 flex items-center justify-center border-gray-100 dark:border-gray-700 cursor-pointer active:scale-90 transition-transform duration-150"
           onClick={() => navigate("/")}
@@ -56,7 +59,7 @@ export default function RetailSidebar() {
   )
 
   return (
-<div className="hidden lg:flex fixed h-screen w-20 top-0 left-0 bg-white dark:bg-gray-800 shadow-lg flex-col border-r border-gray-200 dark:border-gray-700 z-50">
+<div className={`hidden ${shownFrom} fixed h-screen w-20 top-0 left-0 bg-white dark:bg-gray-800 shadow-lg flex-col border-r border-gray-200 dark:border-gray-700 z-50`}>
       {/* Logo Section - Fixed height to match other sections */}
       <div
           className="h-20 flex items-center justify-center border-gray-100 dark:border-gray-700 cursor-pointer active:scale-90 transition-transform duration-150"
