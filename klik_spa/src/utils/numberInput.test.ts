@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber } from "./numberInput";
+import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber, idleCommitNumber } from "./numberInput";
 
 describe("evaluateNumber: a number field takes a sum, like ERPNext's", () => {
   it.each([
@@ -71,5 +71,21 @@ describe("plainNumber: what a box shows while editing", () => {
   it("drops float noise", () => {
     expect(plainNumber(0.1 + 0.2)).toBe("0.3");
     expect(plainNumber(1250)).toBe("1250");
+  });
+});
+
+describe("idleCommitNumber: what a grid box sends after the cashier pauses typing", () => {
+  it("sends a finished number or sum", () => {
+    expect(idleCommitNumber("1062", "money", null)).toBe(1062);
+    expect(idleCommitNumber("4*5", "qty", null)).toBe(20);
+  });
+  it("waits on a half-typed sum or an empty box", () => {
+    expect(idleCommitNumber("4*", "qty", null)).toBeUndefined();
+    expect(idleCommitNumber("", "money", null)).toBeUndefined();
+    expect(idleCommitNumber("  ", "money", null)).toBeUndefined();
+  });
+  it("does not send the same text twice in one edit", () => {
+    expect(idleCommitNumber("1062", "money", "1062")).toBeUndefined();
+    expect(idleCommitNumber("1063", "money", "1062")).toBe(1063);
   });
 });
