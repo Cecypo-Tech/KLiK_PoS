@@ -18,7 +18,8 @@ export function latestOnly<T>() {
 /** Item dropdown search for the grid. Calls the API directly so productStore state is never touched. */
 export async function searchGridItems(query: string): Promise<MenuItem[]> {
   const ps = useProductStore.getState();
-  const { items } = await ps.fetchProductsFromAPI(8, 0, query, "all", ps.getEffectiveCustomer()?.id || "", ps.getEffectivePriceList());
+  // 20: the dropdown shows 10 and scrolls the rest.
+  const { items } = await ps.fetchProductsFromAPI(20, 0, query, "all", ps.getEffectiveCustomer()?.id || "", ps.getEffectivePriceList());
   return items;
 }
 

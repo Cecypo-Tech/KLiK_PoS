@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CartItem } from "../../../types";
 import type { POSDetails } from "../../stores/posProfileStore";
-import LineGrid from "./LineGrid";
+import LineGrid, { ItemResults } from "./LineGrid";
+import type { MenuItem } from "../../../types";
+import { formatCurrencyWithSymbol } from "../../utils/currency";
 
 const screen = vi.hoisted(() => ({ compact: false }));
 vi.mock("../../hooks/useMediaQuery", () => ({ useMediaQuery: () => screen.compact }));
 
 vi.mock("react-toastify", () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
-vi.mock("../../utils/lineGridSearch", () => ({
+vi.mock("../../utils/lineGridSearch", async (importOriginal) => ({
+  highlightRanges: (await importOriginal<typeof import("../../utils/lineGridSearch")>()).highlightRanges,
   latestOnly: () => (p: Promise<unknown>) => p,
   STALE: Symbol("stale"),
   searchGridItems: vi.fn(async () => []),
@@ -100,5 +103,27 @@ describe("LineGrid", () => {
     expect(val("rate")).toBe("80.00");
     expect(val("disc")).toBe("5.00");
     expect(html).toContain("76.00");
+  });
+});
+
+describe("ItemResults (the entry row's search dropdown)", () => {
+  const pen = { id: "PEN", item_code: "PEN", name: "Blue Pen", price: 120, available: 5, cost_price: 80 } as MenuItem;
+  const html = (showCost: boolean, results = [pen]) =>
+    renderToStaticMarkup(
+      <ItemResults results={results} highlight={0} query="pen" currencySymbol="KES" showCost={showCost} onPick={() => {}} onHover={() => {}} />,
+    );
+
+  it("shows a Cost column only when the till shows cost", () => {
+    expect(html(true)).toContain(">Cost</span>");
+    expect(html(true)).toContain(formatCurrencyWithSymbol(80, "KES"));
+    expect(html(false)).not.toContain(">Cost</span>");
+    expect(html(false)).not.toContain(formatCurrencyWithSymbol(80, "KES"));
+  });
+
+  it("shows ten rows and scrolls the rest", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ ...pen, id: `P${i}`, item_code: `P${i}` }));
+    const out = html(false, many);
+    expect(out.match(/role="option"/g)).toHaveLength(20);
+    expect(out).toMatch(/role="listbox"[^>]*class="[^"]*max-h-\[17\.5rem\][^"]*overflow-y-auto/);
   });
 });

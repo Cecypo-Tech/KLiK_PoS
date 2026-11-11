@@ -8,6 +8,7 @@ import { toast } from "react-toastify";
 import { exactCodeMatch, highlightRanges, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
 import LineGridRow from "./LineGridRow";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { getDisplayCost, getInclusiveTaxRate } from "../../utils/costMargin";
 
 export interface LineGridProps {
   items: CartItem[];
@@ -44,6 +45,60 @@ function Highlight({ text, query }: { text: string; query: string }) {
   }
   parts.push(text.slice(at));
   return <>{parts}</>;
+}
+
+/** The entry row's search dropdown: ten rows, the rest scroll; the highlighted one stays in view. */
+export function ItemResults({ results, highlight, query, currencySymbol, showCost, onPick, onHover }: {
+  results: MenuItem[];
+  highlight: number;
+  query: string;
+  currencySymbol: string;
+  showCost: boolean;
+  onPick: (r: MenuItem) => void;
+  onHover: (i: number) => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  // A full cart puts the entry row at the bottom of a short (800x600) screen: bring the list into view.
+  useEffect(() => { box.current?.scrollIntoView?.({ block: "nearest" }); }, []);
+  useEffect(() => {
+    (list.current?.children[highlight] as HTMLElement | undefined)?.scrollIntoView?.({ block: "nearest" });
+  }, [highlight]);
+  const money = "w-24 shrink-0 text-right tabular-nums";
+  return (
+    <div ref={box} className="@container absolute left-2 right-2 z-30 mt-1 max-w-[44rem] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+      <div className="flex h-6 items-center gap-2 border-b border-gray-100 dark:border-gray-700 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        <span className="min-w-0 flex-1">Item</span>
+        <span className={money}>Price</span>
+        {showCost ? <span className={money}>Cost</span> : null}
+        <span className="w-12 shrink-0 text-right">Stock</span>
+      </div>
+      <ul ref={list} role="listbox" className="max-h-[17.5rem] overflow-y-auto">
+        {results.map((r, i) => {
+          const cost = getDisplayCost(Number(r.cost_price || 0), getInclusiveTaxRate(r.tax_info));
+          return (
+            <li
+              key={r.id}
+              role="option"
+              aria-selected={i === highlight}
+              onMouseDown={(e) => { e.preventDefault(); onPick(r); }}
+              // Move, not enter: a list opening under a resting pointer must not move the highlight Enter picks.
+              onMouseMove={() => i !== highlight && onHover(i)}
+              className={`flex h-7 items-center gap-2 px-2 cursor-pointer ${i === highlight ? "bg-beveren-50 dark:bg-beveren-900/30" : ""}`}
+            >
+              <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query} /></span>
+              <span className="@max-[36rem]:hidden max-w-[9rem] shrink truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
+              <span className={`${money} text-gray-700 dark:text-gray-300`}>{formatCurrencyWithSymbol(r.price, currencySymbol)}</span>
+              {showCost ? (
+                <span className={`${money} text-gray-500 dark:text-gray-400`}>{cost > 0 ? formatCurrencyWithSymbol(cost, currencySymbol) : "—"}</span>
+              ) : null}
+              <span className={`w-12 shrink-0 text-right tabular-nums ${r.available > 0 ? "text-green-600" : "text-red-600"}`}>{r.available}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(props, ref) {
@@ -221,23 +276,16 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
           className="w-full rounded px-1.5 py-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-beveren-500"
         />
         {open ? (
-          <ul role="listbox" className="absolute left-2 z-30 mt-1 w-[28rem] max-w-[90vw] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
-            {results.map((r, i) => (
-              <li
-                key={r.id}
-                role="option"
-                aria-selected={i === highlight}
-                onMouseDown={(e) => { e.preventDefault(); void pick(r); }}
-                onMouseEnter={() => setHighlight(i)}
-                className={`flex h-7 items-center gap-2 px-2 cursor-pointer ${i === highlight ? "bg-beveren-50 dark:bg-beveren-900/30" : ""}`}
-              >
-                <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query.trim()} /></span>
-                <span className="truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
-                <span className="tabular-nums text-gray-700 dark:text-gray-300">{formatCurrencyWithSymbol(r.price, currencySymbol)}</span>
-                <span className={`w-12 text-right tabular-nums ${r.available > 0 ? "text-green-600" : "text-red-600"}`}>{r.available}</span>
-              </li>
-            ))}
-          </ul>
+          <ItemResults
+            results={results}
+            highlight={highlight}
+            query={query.trim()}
+            currencySymbol={currencySymbol}
+            // As the line panel: cost shows unless the profile hides it (the server also blanks it then).
+            showCost={!(posDetails?.restrict_cost_visibility_in_tooltip ?? true)}
+            onPick={(r) => void pick(r)}
+            onHover={setHighlight}
+          />
         ) : null}
       </td>
     </tr>
