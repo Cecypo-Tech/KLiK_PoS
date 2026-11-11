@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
-import { evaluateNumber, formatNumber, isExpression, plainNumber, readNumber, type NumberKind } from "../../utils/numberInput";
+import { evaluateNumber, formatNumber, idleCommitNumber, isExpression, plainNumber, readNumber, type NumberKind } from "../../utils/numberInput";
 
 type NativeProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "defaultValue">;
 
@@ -13,6 +13,10 @@ export interface NumberFieldProps extends NativeProps {
   /** Enter commits and Escape reverts. Off where a parent (the line grid) owns those keys. */
   ownKeys?: boolean;
   wrapperClassName?: string;
+  /** Also commit this long after the last keystroke, so what depends on the value (the line panel's
+   * margin) follows without leaving the box. Leaving still commits, unless that text was already sent.
+   * Only where Escape does not revert (the grid): a revert cannot undo a commit already sent. */
+  commitAfterIdleMs?: number;
 }
 
 /**
@@ -20,7 +24,7 @@ export interface NumberFieldProps extends NativeProps {
  * At rest it shows the number formatted (14,500.00); while editing, the plain number.
  */
 export function NumberField({
-  value, kind, onCommit, blankZero, ownKeys = true, wrapperClassName = "", className = "", onFocus, onBlur, onKeyDown, onMouseUp, readOnly, ...rest
+  value, kind, onCommit, blankZero, ownKeys = true, wrapperClassName = "", commitAfterIdleMs, className = "", onFocus, onBlur, onKeyDown, onMouseUp, readOnly, ...rest
 }: NumberFieldProps) {
   const [draft, setDraft] = useState<string | null>(null);
   // A click focuses, then its mouseup drops the selection: skip that one mouseup so typing replaces the number.
@@ -45,8 +49,28 @@ export function NumberField({
     if (draft !== null && !edited.current && draft !== plain) { setDraft(plain); selectAll.current = true; }
   }, [plain]); // eslint-disable-line react-hooks/exhaustive-deps -- only when the value itself moves
 
+  // The idle commit: the latest onCommit (its line may have re-rendered meanwhile), the pending timer,
+  // and the text it sent this edit, so leaving the box does not send the same text again.
+  const latestCommit = useRef(onCommit);
+  latestCommit.current = onCommit;
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const idleSent = useRef<string | null>(null);
+  useEffect(() => () => clearTimeout(idleTimer.current), []);
+  const scheduleIdleCommit = (text: string) => {
+    if (!commitAfterIdleMs || readOnly) return;
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => {
+      const n = idleCommitNumber(text, kind, idleSent.current);
+      if (n === undefined) return;
+      idleSent.current = text.trim();
+      latestCommit.current(n, text.trim());
+    }, commitAfterIdleMs);
+  };
+
   const commit = () => {
-    if (draft !== null && edited.current && !readOnly) onCommit(readNumber(draft, kind), draft.trim());
+    clearTimeout(idleTimer.current);
+    if (draft !== null && edited.current && !readOnly && draft.trim() !== idleSent.current) onCommit(readNumber(draft, kind), draft.trim());
+    idleSent.current = null;
     edited.current = false;
     setDraft(null);
   };
@@ -62,7 +86,7 @@ export function NumberField({
         readOnly={readOnly}
         className={`tabular-nums ${className}`}
         value={shown}
-        onChange={(e) => { edited.current = true; setDraft(e.target.value); }}
+        onChange={(e) => { edited.current = true; setDraft(e.target.value); scheduleIdleCommit(e.target.value); }}
         onFocus={(e) => {
           setDraft(plain);
           edited.current = false;

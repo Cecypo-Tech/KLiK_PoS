@@ -22,8 +22,12 @@ const CELL = "w-full bg-transparent px-1.5 py-1 text-right tabular-nums rounded 
 const KIND: Record<Exclude<GridCol, "item" | "uom">, NumberKind> = { qty: "qty", rate: "money", disc: "percent" };
 
 /** A number cell: formatted at rest, takes a sum ("4*5"), commits once on blur (Enter/Tab/arrows blur it by moving focus). */
-function NumCell({ row, col, value, readOnly, onCommit }: {
+// Rate and Disc % commit a moment after the cashier stops typing, so the line panel's margin follows.
+const LIVE_COMMIT_MS = 1000;
+
+function NumCell({ row, col, value, readOnly, onCommit, commitAfterIdleMs }: {
   row: number; col: Exclude<GridCol, "item" | "uom">; value: number; readOnly?: boolean; onCommit: (n: number | undefined, text: string) => void;
+  commitAfterIdleMs?: number;
 }) {
   return (
     <NumberField
@@ -35,6 +39,7 @@ function NumCell({ row, col, value, readOnly, onCommit }: {
       ownKeys={false}
       className={CELL}
       onCommit={onCommit}
+      commitAfterIdleMs={commitAfterIdleMs}
     />
   );
 }
@@ -193,11 +198,12 @@ export default function LineGridRow({
           ownKeys={false}
           className={CELL}
           onCommit={commitRate}
+          commitAfterIdleMs={LIVE_COMMIT_MS}
           onPick={pickPrice}
         />
       </td>
 {compact ? null : (      <td className="px-1">
-        <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} />
+        <NumCell row={row} col="disc" value={round2(discPct)} readOnly={!Number(posDetails?.allow_discount_change)} onCommit={commitDisc} commitAfterIdleMs={LIVE_COMMIT_MS} />
       </td>)}
       <td className="px-2 text-right font-semibold tabular-nums whitespace-nowrap text-beveren-600 dark:text-beveren-400">
         {formatCurrencyWithSymbol(total, currencySymbol)}

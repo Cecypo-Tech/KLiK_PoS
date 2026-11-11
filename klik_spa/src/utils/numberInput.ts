@@ -84,6 +84,16 @@ export function readNumber(text: string, kind: NumberKind): number | undefined {
   return n !== undefined && kind === "money" ? Math.round(n * 100) / 100 : n;
 }
 
+/**
+ * What a box sends when the cashier pauses typing (NumberField's commitAfterIdleMs): a finished
+ * number or sum, not an empty box or a half-typed sum, and not the text it already sent this edit.
+ */
+export function idleCommitNumber(text: string, kind: NumberKind, alreadySent: string | null): number | undefined {
+  const t = text.trim();
+  if (!t || t === alreadySent) return undefined;
+  return readNumber(t, kind);
+}
+
 /** What a box shows while editing: the plain number, without float noise (0.1+0.2 shows 0.3). */
 export function plainNumber(value: number): string {
   return String(Number.isFinite(value) ? Number(value.toFixed(10)) : 0);
