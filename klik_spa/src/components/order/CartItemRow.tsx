@@ -27,6 +27,7 @@ const LEDGER_ROW = "flex items-center justify-between gap-3 min-h-[1.5rem]";
 const LEDGER_LABEL = "text-gray-500 dark:text-gray-400 shrink-0";
 import { getItemDisplayName } from "../../utils/itemDisplayName";
 import { getCostMargin, getInclusiveTaxRate } from "../../utils/costMargin";
+import { costMode, pickCost } from "../../utils/costDisplay";
 import PriceListPopup from "../PriceListPopup";
 import {
   buildPriceOptions,
@@ -96,6 +97,9 @@ interface ItemFullData {
   item_code: string;
   standard_rate: number;
   valuation_rate: number;
+  /** Per stock UOM; absent when the till's Cost Display is Hidden. */
+  last_purchase_rate?: number;
+  last_purchase_date?: string | null;
   price_lists: PriceListEntry[];
   batches: BatchData[];
   serials: SerialData[];
@@ -192,7 +196,8 @@ export const CartItemRow = ({
   const hasSerialOrBatch = item.has_serial_no || item.has_batch_no;
   const pickedWarehouse = usePOSProfileStore((s) => s.warehouse);
   const warehouse = pickedWarehouse || posDetails?.warehouse || "";
-  const restrictCostVisibility = posDetails?.restrict_cost_visibility_in_tooltip ?? true;
+  const costDisplayMode = costMode(posDetails);
+  const restrictCostVisibility = costDisplayMode === "Hidden";
   const allowPriceListSwitching = !!posDetails?.allow_price_list_switching;
   const quickSwitchPrice = !!posDetails?.custom_quick_switch_price;
 
@@ -551,13 +556,21 @@ export const CartItemRow = ({
     ? getInclusiveTaxRate(listTaxInfo)
     : !hasExclusiveTax ? totalTaxRate : 0;
   const isInclusiveTax = inclusiveTaxRate > 0;
-  const hasValidValuationRate = valuationRate !== null && valuationRate > 0;
-  const { costInclTax: valuationRateInclTax, margin: lineMargin } = getCostMargin({
+  // The till's Cost Display picks the cost the margin is worked from; the other is shown beside it.
+  const { shown: costRate, other: otherCostRate, otherLabel } = pickCost(
+    costDisplayMode, valuationRate, fullItemData?.last_purchase_rate,
+  );
+  const costLabel = otherLabel === "Valuation" ? "Last purchase" : "Valuation";
+  const hasValidValuationRate = costRate > 0;
+  const inclTax = (perStockUom: number) => getCostMargin({
     sellPrice: discountedPrice,
-    costPerStockUom: valuationRate ?? 0,
+    costPerStockUom: perStockUom,
     inclusiveTaxRate,
     conversionFactor: item.conversion_factor,
   });
+  const { costInclTax: valuationRateInclTax, margin: lineMargin } = inclTax(costRate);
+  const otherCostInclTax = inclTax(otherCostRate).costInclTax;
+  const lastPurchaseDate = fullItemData?.last_purchase_date;
   const isNegativeMargin = hasValidValuationRate ? lineMargin < 0 : false;
   const marginAmount = hasValidValuationRate ? lineMargin : 0;
   const marginPercentage = hasValidValuationRate ? (marginAmount / valuationRateInclTax) * 100 : 0;
@@ -589,10 +602,11 @@ export const CartItemRow = ({
   };
   const lineWeight = getCartNetWeight([item]);
   // Margin bar: both on one scale, the larger of rate and cost plus headroom.
-  const barScale = Math.max(discountedPrice, valuationRateInclTax) * 1.15 || 1;
+  const barScale = Math.max(discountedPrice, valuationRateInclTax, otherCostInclTax) * 1.15 || 1;
   const marginBar = {
     rate: Math.min(100, (Math.max(0, discountedPrice) / barScale) * 100),
     cost: Math.min(100, (valuationRateInclTax / barScale) * 100),
+    other: Math.min(100, (otherCostInclTax / barScale) * 100),
   };
 
   // The line's quantity box: more than is in stock is capped unless the till allows it.
@@ -1001,17 +1015,29 @@ export const CartItemRow = ({
                 ) : null}
 
                 {!restrictCostVisibility && currentWarehouseStock ? (
-                  <div className={LEDGER_ROW}>
-                    <span className={LEDGER_LABEL}>Cost</span>
-                    <span className="text-right tabular-nums text-gray-900 dark:text-white">
-                      {formatNumber(hasValidValuationRate ? valuationRateInclTax : currentWarehouseStock.val_rate * uomFactor, "money")}
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {isInclusiveTax
-                          ? ` incl. VAT · ${formatNumber(currentWarehouseStock.val_rate * uomFactor, "money")} excl.`
-                          : ` / ${item.uom || fullItemData?.uom}`}
+                  <>
+                    <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>{costLabel}</span>
+                      <span className="text-right tabular-nums text-gray-900 dark:text-white">
+                        {hasValidValuationRate ? formatNumber(valuationRateInclTax, "money") : "—"}
+                        {hasValidValuationRate ? (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {isInclusiveTax
+                              ? ` incl. VAT · ${formatNumber(costRate * uomFactor, "money")} excl.`
+                              : ` / ${item.uom || fullItemData?.uom}`}
+                          </span>
+                        ) : null}
                       </span>
-                    </span>
-                  </div>
+                    </div>
+                    <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>{otherLabel}</span>
+                      <span className="text-right tabular-nums text-gray-500 dark:text-gray-400">
+                        {otherCostRate > 0
+                          ? `${formatNumber(otherCostInclTax, "money")}${otherLabel === "Last purchase" && lastPurchaseDate ? ` · ${lastPurchaseDate}` : ""}`
+                          : otherLabel === "Last purchase" ? "no purchase invoice" : "—"}
+                      </span>
+                    </div>
+                  </>
                 ) : null}
 
                 {(showPositiveMarginWarning || showNegativeMarginWarning) ? (
@@ -1025,14 +1051,24 @@ export const CartItemRow = ({
                         </span>
                       </span>
                     </div>
-                    {/* Rate against cost: the bar is the rate, the dark tick is cost. */}
+                    {/* Rate against cost: the bar is the rate, the solid tick the cost the margin
+                        is worked from, the dashed tick the other cost. */}
                     <div className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700" aria-hidden="true">
                       <div
                         className={`absolute inset-y-0 left-0 rounded-full ${isNegativeMargin ? "bg-red-500" : "bg-green-500"}`}
                         style={{ width: `${marginBar.rate}%` }}
                       />
-                      <div className="absolute -top-1 -bottom-1 w-0.5 bg-gray-900 dark:bg-white" style={{ left: `${marginBar.cost}%` }} />
+                      <div title={costLabel} className="absolute -top-1 -bottom-1 w-0.5 bg-gray-900 dark:bg-white" style={{ left: `${marginBar.cost}%` }} />
+                      {otherCostRate > 0 ? (
+                        <div title={otherLabel} className="absolute -top-1 -bottom-1 border-l-2 border-dashed border-gray-500 dark:border-gray-300" style={{ left: `${marginBar.other}%` }} />
+                      ) : null}
                     </div>
+                    {otherCostRate > 0 ? (
+                      <p className="flex gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+                        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-0.5 bg-gray-900 dark:bg-white" />{costLabel}</span>
+                        <span className="flex items-center gap-1"><span className="inline-block h-2.5 border-l-2 border-dashed border-gray-500 dark:border-gray-300" />{otherLabel}</span>
+                      </p>
+                    ) : null}
                   </>
                 ) : null}
               </div>

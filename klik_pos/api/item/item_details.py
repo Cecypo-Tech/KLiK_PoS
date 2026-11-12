@@ -6,6 +6,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from klik_pos.klik_pos.utils import get_current_pos_profile, get_current_pos_profile_lite
 
 from ..sql_builder import apply_sql_permissions
+from .cost import COST_FIELD, HIDDEN, LAST_PURCHASE, VALUATION, cost_mode, last_purchase_rates
 from .item_price import allowed_price_list_sql, fetch_item_price, get_price_list_with_customer_priority
 
 
@@ -566,24 +567,35 @@ def get_full_pricing_and_batch_details(
             if v["bal_qty"] != 0
         ],
     }
-    # 'Hide Cost Price' on the till: hidden on screen is not enough when the response
-    # carries it.
-    return _without_cost(details) if _till_hides_cost() else details
+    return _with_cost_display(item_code, details)
 
 
-COST_HIDDEN_FIELD = "restrict_cost_visibility_in_tooltip"
+def _with_cost_display(item_code, details):
+    """details as the till's Cost Display allows: stripped when Hidden (hidden on screen is
+    not enough when the response carries it), else with the last purchase cost added."""
+    mode, company = _till_cost_mode()
+    if mode == HIDDEN:
+        return _without_cost(details)
+    rate, date = last_purchase_rates([item_code], company).get(item_code, (0, None))
+    details.update(cost_display=mode, last_purchase_rate=rate, last_purchase_date=date)
+    if mode == LAST_PURCHASE:
+        # Price-list margins are worked from the cost the till shows.
+        for price in details["price_lists"]:
+            margin = price["rate"] - rate
+            price.update(cost=rate, margin=margin, margin_pct=(margin / rate * 100) if rate else 0)
+    return details
 
 
-def _till_hides_cost():
-    """Whether the caller's till has 'Hide Cost Price' on. No till (a desk user, who sees
-    valuation in ERPNext anyway): nothing is hidden."""
+def _till_cost_mode():
+    """(Cost Display, company) of the caller's till. No till (a desk user, who sees valuation
+    in ERPNext anyway): Valuation, in the default company."""
     queued = len(frappe.local.message_log)
     try:
-        profile = get_current_pos_profile_lite([COST_HIDDEN_FIELD])
+        profile = get_current_pos_profile_lite([COST_FIELD, "company"])
     except frappe.ValidationError:
         del frappe.local.message_log[queued:]
-        return False
-    return cint(profile.get(COST_HIDDEN_FIELD)) == 1
+        return VALUATION, frappe.defaults.get_user_default("Company")
+    return cost_mode(profile), profile.get("company")
 
 
 def _without_cost(details):

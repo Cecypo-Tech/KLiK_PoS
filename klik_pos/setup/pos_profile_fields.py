@@ -160,6 +160,21 @@ POS_PROFILE_FEATURE_FIELDS = [
         "default": "1",
         "module": "KLiK PoS",
     },
+    {
+        "fieldname": "custom_cost_display",
+        "label": "Cost Display",
+        "fieldtype": "Select",
+        "options": "Hidden\nValuation\nLast Purchase Cost",
+        "insert_after": "custom_item__search_behaviors",
+        "description": (
+            "Which cost the till shows beside the selling price, and works the margin from. "
+            "Hidden: no cost or margin anywhere. Valuation: the stock valuation; hovering it "
+            "shows the last purchase invoice rate. Last Purchase Cost: the rate on the newest "
+            "purchase invoice; hovering it shows the valuation."
+        ),
+        "default": "Hidden",
+        "module": "KLiK PoS",
+    },
 ]
 
 

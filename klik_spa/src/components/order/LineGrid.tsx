@@ -8,7 +8,7 @@ import { toast } from "react-toastify";
 import { exactCodeMatch, highlightRanges, latestOnly, scanAdd, searchGridItems, STALE } from "../../utils/lineGridSearch";
 import LineGridRow from "./LineGridRow";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { getDisplayCost, getInclusiveTaxRate } from "../../utils/costMargin";
+import { costMode, itemCostCell, type CostMode } from "../../utils/costDisplay";
 
 export interface LineGridProps {
   items: CartItem[];
@@ -48,12 +48,14 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 /** The entry row's search dropdown: ten rows, the rest scroll; the highlighted one stays in view. */
-export function ItemResults({ results, highlight, query, currencySymbol, showCost, showCode, onPick, onHover }: {
+export function ItemResults({ results, highlight, query, currencySymbol, showCost, costMode: mode = "Valuation", showCode, onPick, onHover }: {
   results: MenuItem[];
   highlight: number;
   query: string;
   currencySymbol: string;
   showCost: boolean;
+  /** Which cost the column shows; the other is on hover. */
+  costMode?: CostMode;
   showCode?: boolean;
   onPick: (r: MenuItem) => void;
   onHover: (i: number) => void;
@@ -76,7 +78,7 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
       </div>
       <ul ref={list} role="listbox" className="max-h-[17.5rem] overflow-y-auto">
         {results.map((r, i) => {
-          const cost = getDisplayCost(Number(r.cost_price || 0), getInclusiveTaxRate(r.tax_info));
+          const cost = itemCostCell(r, mode, (n) => formatCurrencyWithSymbol(n, currencySymbol));
           return (
             <li
               key={r.id}
@@ -92,7 +94,7 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
                 <span className="@max-[36rem]:hidden max-w-[9rem] shrink truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
               ) : null}
               {showCost ? (
-                <span className={`${money} text-gray-500 dark:text-gray-400`}>{cost > 0 ? formatCurrencyWithSymbol(cost, currencySymbol) : "—"}</span>
+                <span title={cost.title} className={`${money} text-gray-500 dark:text-gray-400`}>{cost.text}</span>
               ) : null}
               <span className={`${money} text-gray-700 dark:text-gray-300`}>{formatCurrencyWithSymbol(r.price, currencySymbol)}</span>
               <span className={`w-12 shrink-0 text-right tabular-nums ${r.available > 0 ? "text-green-600" : "text-red-600"}`}>{r.available}</span>
@@ -285,7 +287,8 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             query={query.trim()}
             currencySymbol={currencySymbol}
             // As the line panel: cost shows unless the profile hides it (the server also blanks it then).
-            showCost={!(posDetails?.restrict_cost_visibility_in_tooltip ?? true)}
+            showCost={costMode(posDetails) !== "Hidden"}
+            costMode={costMode(posDetails)}
             showCode={!!posDetails?.custom_show_item_code_in_product_list}
             onPick={(r) => void pick(r)}
             onHover={setHighlight}
