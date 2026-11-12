@@ -11,6 +11,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, nowdate
 
+from klik_pos.testing import purge_voucher
 from klik_pos.z_report import build_z_report, render_escpos, render_html
 
 TILL = "_Test Z Till"
@@ -35,11 +36,7 @@ def _drop_user(email):
 
 def _cancel_delete(doctype, names):
 	for name in names:
-		doc = frappe.get_doc(doctype, name)
-		if doc.docstatus == 1:
-			doc.flags.ignore_permissions = True
-			doc.cancel()
-		frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
+		purge_voucher(doctype, name)
 
 
 def _purge():

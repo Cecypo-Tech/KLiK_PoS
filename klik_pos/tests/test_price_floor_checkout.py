@@ -13,8 +13,13 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, nowdate
 
-from klik_pos.api.sales_invoice import process_queued_sales_invoice, queue_sales_invoice, validate_checkout_invoice
+from klik_pos.api.sales_invoice import (
+	process_queued_sales_invoice,
+	queue_sales_invoice,
+	validate_checkout_invoice,
+)
 from klik_pos.api.sales_order import checkout_held_order, create_held_order
+from klik_pos.testing import foreign_sales_order_workflows_off_for
 from klik_pos.tests.test_opening_conflict import _profile, _shift
 from klik_pos.tests.test_price_list_recording import CASHIER, CUSTOMER, ELITE, ITEM, RETAIL, _ensure_fixtures
 
@@ -50,6 +55,7 @@ class TestPriceFloorCheckout(FrappeTestCase):
 		)
 		cls.shift = _shift(cls.till, CASHIER)
 		cls.saved = {f: frappe.db.get_single_value("PowerPack Settings", f) for f in SETTINGS}
+		foreign_sales_order_workflows_off_for(cls)
 		frappe.db.set_single_value(
 			"PowerPack Settings",
 			{"enable_min_selling_price": 1, "min_selling_price_override_role": ROLE, "min_selling_price_default_percent": 0},

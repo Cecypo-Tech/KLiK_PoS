@@ -60,6 +60,11 @@ OPTIONAL_CROSS_APP_FIELDS = {
 	("Company", "custom_enable_zatca_e_invoicing"),
 }
 
+# Fields a patch reads on purpose while it retires them, behind frappe.db.has_column.
+RETIRED_FIELDS_READ_BY_PATCHES = {
+	("POS Profile", "custom_line_entry_grid"),  # patches/v16_0/line_entry_grid_to_default_view
+}
+
 
 def _source_files():
 	for path in glob.glob(os.path.join(APP_ROOT, "**", "*.py"), recursive=True):
@@ -176,7 +181,7 @@ class TestQueryFieldReferences(FrappeTestCase):
 				valid = _valid_columns(doctype)
 				for raw in names:
 					for token in _field_tokens(raw):
-						if token in valid or (doctype, token) in OPTIONAL_CROSS_APP_FIELDS:
+						if token in valid or (doctype, token) in OPTIONAL_CROSS_APP_FIELDS | RETIRED_FIELDS_READ_BY_PATCHES:
 							continue
 						problems.append(f"{_rel(path)}:{node.lineno} {doctype} has no field {token!r}")
 
