@@ -925,13 +925,16 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                       ) : (invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
                         renderHeldOrderShareButtons(invoice.id || invoice.name, "sm")
                       ) : invoice.canOpen !== false ? (
-                        <button
-                          onClick={() => handleViewInvoice(invoice)}
-                          className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
-                        >
-                          <Eye className="w-4 h-4" />
-                          <span>View</span>
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleViewInvoice(invoice)}
+                            className="text-beveren-600 hover:text-beveren-900 flex items-center space-x-1"
+                          >
+                            <Eye className="w-4 h-4" />
+                            <span>View</span>
+                          </button>
+                          <DocShareButtons doctype="Sales Invoice" name={invoice.id || invoice.name} size="sm" posDetails={posDetails} copyOnly />
+                        </>
                       ) : (
                         <span className="text-gray-400 text-xs" title="Rung by another cashier">—</span>
                       )}
@@ -1054,12 +1057,17 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
                 ) : (invoice as SalesInvoice & HeldOrderExtras).isHeldOrder && invoice.canOpen !== false ? (
                   <div className="flex items-center gap-1">{renderHeldOrderShareButtons(invoice.id || invoice.name, "md")}</div>
                 ) : invoice.canOpen !== false ? (
-                  <button
-                    onClick={() => handleViewInvoice(invoice)}
-                    className="flex-1 text-xs px-3 py-2 bg-beveren-600 text-white rounded hover:bg-beveren-700 transition-colors"
-                  >
-                    View
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleViewInvoice(invoice)}
+                      className="flex-1 text-xs px-3 py-2 bg-beveren-600 text-white rounded hover:bg-beveren-700 transition-colors"
+                    >
+                      View
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <DocShareButtons doctype="Sales Invoice" name={invoice.id || invoice.name} size="md" posDetails={posDetails} copyOnly />
+                    </div>
+                  </>
                 ) : (
                   <span className="flex-1 text-xs px-3 py-2 text-center text-gray-400" title="Rung by another cashier">—</span>
                 )}

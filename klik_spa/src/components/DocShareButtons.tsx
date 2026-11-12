@@ -19,17 +19,19 @@ const loadTools = (doctype: string) => {
 };
 
 interface Props {
-  /** "Sales Order" for a held order, "Quotation" for a quote. */
+  /** "Sales Order" for a held order, "Quotation" for a quote, "Sales Invoice" for an invoice. */
   doctype: string;
   name: string;
   size: "sm" | "md";
   posDetails: Record<string, unknown> | null | undefined;
   /** Set when the till blocks printing this document: the print-based buttons show, disabled, with it as tooltip. */
   blockedTitle?: string;
+  /** Only Copy as message and Copy as image: for a screen that has its own Print and QZ. */
+  copyOnly?: boolean;
 }
 
 /** Print, QZ, Copy as message and Copy as image: each only when the site and till have it. */
-export default function DocShareButtons({ doctype, name, size, posDetails, blockedTitle }: Props) {
+export default function DocShareButtons({ doctype, name, size, posDetails, blockedTitle, copyOnly }: Props) {
   const [tools, setTools] = useState<HeldOrderShareTools>(NONE);
   const copying = useRef(false);
   const { userInfo } = useUserInfo();
@@ -78,12 +80,14 @@ export default function DocShareButtons({ doctype, name, size, posDetails, block
 
   return (
     <>
-      <button type="button" title={blockedTitle ?? "Print"} aria-label="Print" className={button}
-        disabled={!!blockedTitle}
-        onClick={() => handlePrintInvoice({ name, pos_profile: "" }, { doctype, posDetails })}>
-        <Printer className={icon} />
-      </button>
-      {qzEnabled && (
+      {!copyOnly && (
+        <button type="button" title={blockedTitle ?? "Print"} aria-label="Print" className={button}
+          disabled={!!blockedTitle}
+          onClick={() => handlePrintInvoice({ name, pos_profile: "" }, { doctype, posDetails })}>
+          <Printer className={icon} />
+        </button>
+      )}
+      {!copyOnly && qzEnabled && (
         <HeldOrderQzButton orderId={name} doctype={doctype} className={button} iconSize={size === "sm" ? 16 : 20}
           blockedTitle={blockedTitle} />
       )}
