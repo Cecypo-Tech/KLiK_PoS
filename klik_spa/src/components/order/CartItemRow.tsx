@@ -1053,7 +1053,10 @@ export const CartItemRow = ({
                     </div>
                     {/* Rate against cost: the bar is the rate, the solid tick the cost the margin
                         is worked from, the dashed tick the other cost. */}
-                    <div className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700" aria-hidden="true">
+                    <div
+                      className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700"
+                      title={`Solid: ${costLabel} ${formatNumber(valuationRateInclTax, "money")}${otherCostRate > 0 ? ` · Dashed: ${otherLabel} ${formatNumber(otherCostInclTax, "money")}` : ""}`}
+                    >
                       <div
                         className={`absolute inset-y-0 left-0 rounded-full ${isNegativeMargin ? "bg-red-500" : "bg-green-500"}`}
                         style={{ width: `${marginBar.rate}%` }}
@@ -1063,12 +1066,6 @@ export const CartItemRow = ({
                         <div title={otherLabel} className="absolute -top-1 -bottom-1 border-l-2 border-dashed border-gray-500 dark:border-gray-300" style={{ left: `${marginBar.other}%` }} />
                       ) : null}
                     </div>
-                    {otherCostRate > 0 ? (
-                      <p className="flex gap-3 text-[11px] text-gray-500 dark:text-gray-400">
-                        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-0.5 bg-gray-900 dark:bg-white" />{costLabel}</span>
-                        <span className="flex items-center gap-1"><span className="inline-block h-2.5 border-l-2 border-dashed border-gray-500 dark:border-gray-300" />{otherLabel}</span>
-                      </p>
-                    ) : null}
                   </>
                 ) : null}
               </div>
