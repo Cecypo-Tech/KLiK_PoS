@@ -137,6 +137,8 @@ class TestListAndLoadQuotes(FrappeTestCase):
 		name = self._quote(rate=100)
 		q = frappe.get_doc("Quotation", name)
 		row = q.items[0]
+		# Only this test's price on the list: another run may have left one (rolled back after).
+		frappe.db.delete("Item Price", {"item_code": ITEM, "price_list": q.selling_price_list})
 		frappe.get_doc({
 			"doctype": "Item Price", "item_code": ITEM, "uom": row.uom,
 			"price_list": q.selling_price_list, "price_list_rate": 137,
@@ -155,6 +157,7 @@ class TestListAndLoadQuotes(FrappeTestCase):
 		name = self._quote(rate=100)
 		q = frappe.get_doc("Quotation", name)
 		uom = q.items[0].uom
+		frappe.db.delete("Item Price", {"item_code": ITEM, "price_list": q.selling_price_list})
 		for rate, valid_from in ((137, None), (999, add_days(nowdate(), 1))):
 			frappe.get_doc({
 				"doctype": "Item Price", "item_code": ITEM, "uom": uom, "price_list": q.selling_price_list,

@@ -20,6 +20,7 @@ from klik_pos.klik_pos.utils import (
 	get_current_pos_profile,
 	get_current_pos_profile_lite,
 )
+from klik_pos.testing import purge_voucher
 from klik_pos.tests.pos_fixtures import open_own_shift, pos_profile_settings
 
 TILL = "TEST-PICKED-WAREHOUSE-TILL"
@@ -182,11 +183,7 @@ class TestSalesFollowThePickedWarehouse(FrappeTestCase):
 	def tearDownClass(cls):
 		if getattr(cls, "ready", False):
 			for name in frappe.get_all("Sales Invoice Item", {"item_code": ITEM}, pluck="parent", distinct=True):
-				doc = frappe.get_doc("Sales Invoice", name)
-				if doc.docstatus == 1:
-					doc.flags.ignore_permissions = True
-					doc.cancel()
-				frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+				purge_voucher("Sales Invoice", name)
 			entry = frappe.get_doc("Stock Entry", cls.entry.name)
 			entry.flags.ignore_permissions = True
 			entry.cancel()

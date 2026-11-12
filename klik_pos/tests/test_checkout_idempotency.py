@@ -23,6 +23,7 @@ from klik_pos.api.sales_invoice import (
 	get_checkout_request_status,
 	queue_sales_invoice,
 )
+from klik_pos.testing import purge_voucher
 from klik_pos.tests.pos_fixtures import open_own_shift, payable_total, pick_payment_mode
 
 ITEM_GROUP = "TEST-CHECKOUT-IDEM-GROUP"
@@ -341,11 +342,7 @@ class TestCheckoutEndToEnd(FrappeTestCase):
 			):
 				if not frappe.db.exists("Sales Invoice", name):
 					continue
-				invoice = frappe.get_doc("Sales Invoice", name)
-				if invoice.docstatus == 1:
-					invoice.flags.ignore_permissions = True
-					invoice.cancel()
-				frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+				purge_voucher("Sales Invoice", name)
 
 			if getattr(cls, "stock_entry", None) and frappe.db.exists("Stock Entry", cls.stock_entry.name):
 				entry = frappe.get_doc("Stock Entry", cls.stock_entry.name)
@@ -427,8 +424,4 @@ class TestCheckoutEndToEnd(FrappeTestCase):
 	def _remove_invoice(self, name):
 		if not name or not frappe.db.exists("Sales Invoice", name):
 			return
-		invoice = frappe.get_doc("Sales Invoice", name)
-		if invoice.docstatus == 1:
-			invoice.flags.ignore_permissions = True
-			invoice.cancel()
-		frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+		purge_voucher("Sales Invoice", name)

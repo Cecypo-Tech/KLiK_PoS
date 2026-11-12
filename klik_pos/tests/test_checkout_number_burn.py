@@ -39,6 +39,7 @@ from klik_pos.api.sales_invoice import (
 	_record_failed_checkout_request,
 	queue_sales_invoice,
 )
+from klik_pos.testing import purge_voucher
 from klik_pos.tests.pos_fixtures import (
 	default_sales_tax_template,
 	open_own_shift,
@@ -448,11 +449,7 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 			):
 				if not frappe.db.exists("Sales Invoice", name):
 					continue
-				invoice = frappe.get_doc("Sales Invoice", name)
-				if invoice.docstatus == 1:
-					invoice.flags.ignore_permissions = True
-					invoice.cancel()
-				frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+				purge_voucher("Sales Invoice", name)
 
 			if getattr(cls, "stock_entry", None) and frappe.db.exists("Stock Entry", cls.stock_entry.name):
 				entry = frappe.get_doc("Stock Entry", cls.stock_entry.name)
@@ -521,11 +518,7 @@ class TestReceiptNumberContinuity(FrappeTestCase):
 	def _remove_invoice(self, name):
 		if not name or not frappe.db.exists("Sales Invoice", name):
 			return
-		invoice = frappe.get_doc("Sales Invoice", name)
-		if invoice.docstatus == 1:
-			invoice.flags.ignore_permissions = True
-			invoice.cancel()
-		frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+		purge_voucher("Sales Invoice", name)
 		frappe.db.commit()
 
 	def test_a_failed_checkout_does_not_skip_a_receipt_number(self):
@@ -874,11 +867,7 @@ class TestRestrictedSalesUser(FrappeTestCase):
 			):
 				if not frappe.db.exists("Sales Invoice", name):
 					continue
-				invoice = frappe.get_doc("Sales Invoice", name)
-				if invoice.docstatus == 1:
-					invoice.flags.ignore_permissions = True
-					invoice.cancel()
-				frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+				purge_voucher("Sales Invoice", name)
 			if cls.stock_entry and frappe.db.exists("Stock Entry", cls.stock_entry.name):
 				entry = frappe.get_doc("Stock Entry", cls.stock_entry.name)
 				if entry.docstatus == 1:

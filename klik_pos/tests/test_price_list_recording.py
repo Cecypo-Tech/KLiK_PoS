@@ -73,6 +73,8 @@ class TestPriceListRecording(FrappeTestCase):
 			frappe.delete_doc("POS Opening Entry", cls.shift, force=True, ignore_permissions=True)
 		for name in frappe.get_all("Sales Invoice", {"pos_profile": cls.till}, pluck="name"):
 			frappe.db.delete("Sales Invoice Item", {"parent": name})
+			for ledger in ("GL Entry", "Payment Ledger Entry"):
+				frappe.db.delete(ledger, {"voucher_type": "Sales Invoice", "voucher_no": name})
 			frappe.db.delete("Sales Invoice", name)
 		frappe.delete_doc("POS Profile", cls.till, force=True, ignore_permissions=True)
 		frappe.db.commit()

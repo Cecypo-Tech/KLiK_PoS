@@ -38,6 +38,7 @@ from klik_pos.api.sales_order import (
 	get_held_order_details,
 	get_held_orders,
 )
+from klik_pos.testing import foreign_sales_order_workflows_off_for
 from klik_pos.tests.test_opening_conflict import _profile, _shift, _user
 
 ROLE = "_Klik MSP Override Role"
@@ -101,6 +102,7 @@ class SettingsSnapshot:
 		super().setUpClass()
 		settings = frappe.get_single("PowerPack Settings")
 		cls._settings_before = {field: settings.get(field) for field in cls.SETTINGS_FIELDS}
+		foreign_sales_order_workflows_off_for(cls)
 
 	@classmethod
 	def tearDownClass(cls):

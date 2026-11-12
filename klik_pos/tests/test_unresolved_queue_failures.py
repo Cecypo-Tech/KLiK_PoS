@@ -38,16 +38,10 @@ class TestUnresolvedQueueFailures(FrappeTestCase):
 		_ensure_user(OTHER_CASHIER, [])
 		_ensure_user(MANAGER, ["Sales Manager"])
 
-		reference = frappe.get_all(
-			"Sales Invoice",
-			filters={"docstatus": 1, "is_return": 0},
-			fields=["company", "customer"],
-			limit=1,
-		)
-		if not reference:
-			raise cls.skipException("no posted Sales Invoice to borrow a company from")
-		cls.company = reference[0].company
-		cls.customer = reference[0].customer
+		# Dev Co and Walk In: a KES company and customer whose receivable account agrees,
+		# made on any test site by klik_pos.testing.ensure_dev_records.
+		cls.company = "Dev Co"
+		cls.customer = "Walk In"
 		cls.item = frappe.db.get_value("Item", {"is_sales_item": 1, "disabled": 0}, "name")
 		# A stock item needs somewhere to come from: without a warehouse the invoice throws
 		# "Warehouse required for stock Item" before the test reaches what it is checking.

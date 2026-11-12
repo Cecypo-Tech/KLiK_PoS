@@ -17,6 +17,8 @@ def make_simple_invoice(customer, company, amount, posting_date=None, paid=False
 			"doctype": "Sales Invoice",
 			"customer": customer,
 			"company": company,
+			# The company's own currency, not the site default (KES on dev, INR on a fresh site).
+			"currency": frappe.get_cached_value("Company", company, "default_currency"),
 			"set_posting_time": 1 if posting_date else 0,
 			"posting_date": posting_date or frappe.utils.nowdate(),
 			"items": [{"item_code": item, "qty": 1, "rate": amount}],

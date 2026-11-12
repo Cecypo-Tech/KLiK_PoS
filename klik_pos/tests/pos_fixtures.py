@@ -7,6 +7,8 @@ import contextlib
 
 import frappe
 
+from klik_pos.testing import purge_voucher
+
 
 def pick_payment_mode(profile_name):
 	"""A deterministic mode of payment for a POS Profile.
@@ -166,11 +168,7 @@ def _drop_till(till):
 	for name in frappe.get_all(
 		"Sales Invoice", filters={"pos_profile": till}, pluck="name", order_by="is_return desc, creation desc"
 	):
-		doc = frappe.get_doc("Sales Invoice", name)
-		if doc.docstatus == 1:
-			doc.flags.ignore_permissions = True
-			doc.cancel()
-		frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+		purge_voucher("Sales Invoice", name)
 	for name in frappe.get_all("POS Opening Entry", filters={"pos_profile": till}, pluck="name"):
 		# Shift names are reused once deleted, so nobody may stay pointed at this one.
 		frappe.defaults.clear_default(JOINED_SHIFT_KEY, value=name)

@@ -10,14 +10,31 @@ from klik_pos.api.customer import get_customers, get_walkin_details_by_phone
 NAME, PHONE = "custom_walkin_customer_name", "custom_walkin_phone"
 
 
+def _two_sales():
+	"""The two newest posted sales; on a site with fewer, two Dev Co sales (rolled back after the test)."""
+	names = frappe.get_all("Sales Invoice", filters={"docstatus": 1}, pluck="name", order_by="creation desc", limit=2)
+	while len(names) < 2:
+		sale = frappe.get_doc(
+			{
+				"doctype": "Sales Invoice",
+				"customer": "Walk In",
+				"company": "Dev Co",
+				"currency": "KES",
+				"items": [{"item_code": "Consulting", "qty": 1, "rate": 10}],
+			}
+		)
+		sale.insert(ignore_permissions=True)
+		sale.submit()
+		names.insert(0, sale.name)
+	return names
+
+
 class TestWalkinRecall(FrappeTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.db.rollback)
 		if not frappe.db.has_column("Sales Invoice", PHONE):
 			self.skipTest("no walk-in fields on this site")
-		self.older, self.newer = reversed(
-			frappe.get_all("Sales Invoice", filters={"docstatus": 1}, pluck="name", order_by="creation desc", limit=2)
-		)
+		self.older, self.newer = reversed(_two_sales())
 		self.digits = "7" + "".join(random.choices("0123456789", k=8))
 
 	def _sale(self, invoice, phone, name=None, tax_id=None):

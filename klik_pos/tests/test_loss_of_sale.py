@@ -6,8 +6,9 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from klik_pos.tests.pos_fixtures import open_own_shift, pos_profile_settings
 from klik_pos.setup.pos_profile_fields import install_los_qty_field, install_pos_profile_feature_fields
+from klik_pos.testing import purge_voucher
+from klik_pos.tests.pos_fixtures import open_own_shift, pos_profile_settings
 
 ITEM_GROUP = "TEST-LOS-GROUP"
 STOCKED = "TEST-LOS-STOCKED"  # 10 in the till's warehouse
@@ -106,11 +107,7 @@ class TestLossOfSale(FrappeTestCase):
 	def _drop_invoice(name):
 		if not name or not frappe.db.exists("Sales Invoice", name):
 			return
-		invoice = frappe.get_doc("Sales Invoice", name)
-		if invoice.docstatus == 1:
-			invoice.flags.ignore_permissions = True
-			invoice.cancel()
-		frappe.delete_doc("Sales Invoice", name, force=True, ignore_permissions=True)
+		purge_voucher("Sales Invoice", name)
 		frappe.db.commit()
 
 	def setUp(self):

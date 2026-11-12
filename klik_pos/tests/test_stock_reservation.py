@@ -40,21 +40,10 @@ class StockReservationTestCase(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		# Borrow the company and customer from an invoice the site has already posted, rather
-		# than picking the first row of each table. A Sales Invoice validates its receivable
-		# account currency against the company's, and dev sites routinely carry companies where
-		# those disagree - a known-good pairing keeps this suite testing reservation logic
-		# instead of somebody's chart of accounts.
-		reference = frappe.get_all(
-			"Sales Invoice",
-			filters={"docstatus": 1, "is_return": 0},
-			fields=["company", "customer"],
-			limit=1,
-		)
-		if not reference:
-			raise cls.skipException("no posted Sales Invoice on this site to borrow a company from")
-		cls.company = reference[0].company
-		cls.customer = reference[0].customer
+		# Dev Co and Walk In: a KES company and customer whose receivable account agrees,
+		# made on any test site by klik_pos.testing.ensure_dev_records.
+		cls.company = "Dev Co"
+		cls.customer = "Walk In"
 		cls.warehouse = frappe.db.get_value("Warehouse", {"is_group": 0, "company": cls.company}, "name")
 
 		if not frappe.db.exists("Item Group", ITEM_GROUP):
