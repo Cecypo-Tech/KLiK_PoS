@@ -126,7 +126,7 @@ class TestCheckoutPaymentScenarios(FrappeTestCase):
 	def _total(self):
 		return payable_total(self.customer, self._items(), self.payment_mode)
 
-	def _sell(self, paid, allow_partial):
+	def _sell(self, paid, allow_partial, mode=None):
 		request_id = frappe.generate_hash(length=24)
 		self.addCleanup(_delete_requests, request_id)
 		payload = {
@@ -134,7 +134,7 @@ class TestCheckoutPaymentScenarios(FrappeTestCase):
 			"customer": {"id": self.customer},
 			"items": self._items(),
 			"amountPaid": paid,
-			"paymentMethods": [{"method": self.payment_mode, "amount": paid}],
+			"paymentMethods": [{"method": mode or self.payment_mode, "amount": paid}],
 			"businessType": "B2C",
 		}
 		with pos_profile_settings(self.pos_profile.name, allow_partial_payment=1 if allow_partial else 0):
@@ -192,3 +192,25 @@ class TestCheckoutPaymentScenarios(FrappeTestCase):
 		# measured as outstanding 0.0 / change 50.0 against a 116.0 grand total.
 		self.assertEqual(invoice.outstanding_amount, 0)
 		self.assertEqual(invoice.change_amount, 50)
+
+	def test_overpaying_by_a_non_cash_mode_gives_no_change(self):
+		"""A bank/M-Pesa overpayment is customer credit, not change from the drawer.
+
+		ERPNext computes change whenever any payment row is Cash-type, and the till's modes
+		are pre-filled at 0 before klik adds the tendered rows - so a zero Cash row used to
+		turn a bank-only overpayment into change (KRUNAL TW/POS/00019: DTB 19,350 on 15,900
+		showed change 3,450 while the GL left 3,450 as customer credit).
+		"""
+		rows = frappe.get_all(
+			"POS Payment Method", filters={"parent": self.pos_profile.name}, pluck="mode_of_payment"
+		)
+		types = {m: frappe.db.get_value("Mode of Payment", m, "type") for m in rows}
+		non_cash = next((m for m, t in types.items() if t != "Cash"), None)
+		if not (non_cash and "Cash" in types.values()):
+			self.skipTest("till needs a Cash and a non-Cash mode")
+		total = self._total()
+		invoice = self._invoice(self._sell(total + 50, allow_partial=False, mode=non_cash))
+		self.assertEqual([p.mode_of_payment for p in invoice.payments], [non_cash])
+		self.assertEqual(invoice.paid_amount, total + 50)
+		self.assertEqual(invoice.change_amount, 0)
+		self.assertEqual(invoice.outstanding_amount, -50)
