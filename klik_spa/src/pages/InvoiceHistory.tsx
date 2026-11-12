@@ -67,7 +67,7 @@ import { useTableSort } from "../hooks/useTableSort";
 import SortableHeaderButton from "../components/SortableHeaderButton";
 import { walkinSubline } from "../utils/walkinLabel";
 import { matchesPaymentFilter } from "../utils/paymentFilter";
-import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst } from "../utils/invoiceHistoryTabs";
+import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst, tabPagesInvoices } from "../utils/invoiceHistoryTabs";
 // import InvoiceViewPage from "./InvoiceViewPage";
 
 interface HeldOrderExtras {
@@ -214,6 +214,7 @@ export default function InvoiceHistoryPage() {
   // Skip opening entry filter for Invoice History - show all invoices for cashier regardless of opening entry
   // Pass cashier filter to API so it filters on server side (more efficient)
   const { invoices, isLoading, isLoadingMore, error, hasMore, totalLoaded, totalCount, loadMore, refetch } = useSalesInvoices(searchTerm, true, cashierFilter, false, "history", fromDate, toDate);
+  const pagesInvoices = tabPagesInvoices(activeTab);
 
   // Held draft Sales Orders (custom_is_klik_held=1) — surfaced under the Held tab.
   // Mapped to the SalesInvoice shape with `isHeldOrder` so the row + action handlers
@@ -779,7 +780,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
           </button>
         )}
       </div>
-        {hasMore && (
+        {hasMore && pagesInvoices && (
           <div className="mt-3 text-center">
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Search works on all invoices in the database. Load more invoices to see additional results.
@@ -1134,7 +1135,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       )}
 
       {/* Load More Button */}
-      {hasMore && (
+      {hasMore && pagesInvoices && (
         <div className="flex justify-center mt-8">
           <button
             onClick={loadMore}
@@ -1158,7 +1159,7 @@ const renderApprovalBadge = (invoice: SalesInvoice & HeldOrderExtras) => {
       )}
 
       {/* Show message when all invoices are loaded */}
-      {!hasMore && totalLoaded > 0 && (
+      {!hasMore && pagesInvoices && totalLoaded > 0 && (
         <div className="text-center mt-8 py-4">
           <p className="text-gray-600 dark:text-gray-400">
             {filteredInvoices.length > 0

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst } from "./invoiceHistoryTabs";
+import { countFailed, matchesInvoiceTab, normalizeInvoiceTab, rowsForTab, sortFailedFirst, tabPagesInvoices } from "./invoiceHistoryTabs";
 
 const row = (status: string, queueStatus?: string) => ({ status, queueStatus });
 
@@ -38,5 +38,12 @@ describe("Invoice History tabs", () => {
     expect(rowsForTab("Quotes", sources)).toEqual([quote]);
     expect(rowsForTab("Held", sources)).toEqual(sources.heldOrders);
     expect(rowsForTab("all", sources)).toEqual(sources.invoices);
+  });
+
+  it("Held and Quotes never offer to load more invoices: their rows are not invoice pages", () => {
+    expect(tabPagesInvoices("Held")).toBe(false);
+    expect(tabPagesInvoices("Quotes")).toBe(false);
+    expect(tabPagesInvoices("all")).toBe(true);
+    expect(tabPagesInvoices("Paid")).toBe(true);
   });
 });
