@@ -27,6 +27,9 @@ export function rowsForTab<T>(tab: string, sources: { invoices: T[]; heldOrders:
   return sources.invoices;
 }
 
+/** Only invoice tabs page through Sales Invoices; Held and Quotes load whole lists of their own. */
+export const tabPagesInvoices = (tab: string) => tab !== "Held" && tab !== "Quotes";
+
 /** Failed Queue was merged into Queued; links to it (dashboard alerts) land there. */
 export const normalizeInvoiceTab = (tab: string) => (tab === "queue_failed" ? "queued" : tab);
 
