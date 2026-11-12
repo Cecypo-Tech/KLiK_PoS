@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cashRefundModes, defaultCashRefundMode } from "./returnModes";
+import { cashRefundModes, defaultCashRefundMode, overpayLabel } from "./returnModes";
 
 const modes: Array<{ mode_of_payment: string; type: string; default: number }> = [
   { mode_of_payment: "Mpesa-1", type: "Phone", default: 1 },
@@ -25,5 +25,15 @@ describe("defaultCashRefundMode", () => {
 
   it("is empty when the till has no cash mode", () => {
     expect(defaultCashRefundMode([modes[0]!, modes[1]!])).toBe("");
+  });
+});
+
+describe("overpayLabel", () => {
+  it("is change when cash was tendered - the drawer hands it back", () => {
+    expect(overpayLabel({ Cash: 1000, "Mpesa-1": 500 }, modes)).toBe("Change Due");
+  });
+
+  it("is customer credit when only bank or M-Pesa was tendered - the money stays on account", () => {
+    expect(overpayLabel({ Card: 1500, Cash: 0 }, modes)).toBe("Customer Credit");
   });
 });

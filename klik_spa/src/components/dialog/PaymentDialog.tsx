@@ -61,7 +61,7 @@ import {
   type AppliedVoucher,
 } from "../../utils/voucher";
 import { QUEUE_FAILURE_EVENT, watchQueuedCheckout } from "../../utils/queueFailure";
-import { cashRefundModes } from "../../utils/returnModes";
+import { cashRefundModes, overpayLabel } from "../../utils/returnModes";
 import { fetchCustomerRecord, lookupCreditVoucher } from "../../services/voucher";
 import { useProductStore } from "../../stores/productStore";
 import type { Customer as CartCustomer } from "../../../types";
@@ -3232,6 +3232,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   displayCurrencySymbol={displayCurrencySymbol}
                   isB2B={isB2B}
                   backendTaxPreview={backendTaxPreview}
+                  overpayLabel={overpayLabel(paymentAmounts, modes)}
                   shippingAmount={shippingAmount}
                   netWeightLabel={netWeightLabel}
                 />
@@ -3553,6 +3554,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                       displayCurrencySymbol={displayCurrencySymbol}
                       isB2B={isB2B}
                       backendTaxPreview={backendTaxPreview}
+                      overpayLabel={overpayLabel(paymentAmounts, modes)}
                       shippingAmount={shippingAmount}
                       netWeightLabel={netWeightLabel}
                       compact

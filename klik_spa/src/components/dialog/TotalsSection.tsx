@@ -23,6 +23,8 @@ interface TotalsSectionProps {
   netWeightLabel?: string;
   /** One column, for a half-width summary. */
   compact?: boolean;
+  /** "Change Due", or "Customer Credit" when no cash was tendered. */
+  overpayLabel?: string;
 }
 
 export default function TotalsSection({
@@ -41,6 +43,7 @@ export default function TotalsSection({
   shippingAmount = 0,
   netWeightLabel = "",
   compact = false,
+  overpayLabel = "Change Due",
 }: TotalsSectionProps) {
   const amountDue = checkoutPayableTotal ?? checkoutGrandTotal;
   const changeDue = totalPaidAmount > amountDue ? subtractCurrency(totalPaidAmount, amountDue) : 0;
@@ -122,7 +125,7 @@ export default function TotalsSection({
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Change Due</span>
+              <span className="text-gray-600 dark:text-gray-400">{overpayLabel}</span>
               <span className={`font-bold ${changeDue > 0 ? "text-green-600 dark:text-green-400" : "text-gray-900 dark:text-white"}`}>
                 {formatCurrencyWithSymbol(changeDue, displayCurrencySymbol)}
               </span>
