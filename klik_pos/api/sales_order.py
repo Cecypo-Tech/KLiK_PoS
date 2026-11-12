@@ -1141,7 +1141,7 @@ COPY_MESSAGE_LABEL = "Copy as Message"
 # PowerPack seeds its script under this name; a site's own copy under another name also works.
 POWERPACK_COPY_MESSAGE_SCRIPT = "PowerPack - Copy as Message (Sales Order)"
 # The till shares held orders (draft Sales Orders) and quotes; nothing else goes through here.
-SHARE_DOCTYPES = ("Sales Order", "Quotation")
+SHARE_DOCTYPES = ("Sales Order", "Quotation", "Sales Invoice")
 # The button the script adds, as written in its source: __('Copy as Message') or "...".
 _COPY_MESSAGE_BUTTON = re.compile(r"add_custom_button\(\s*(?:__\(\s*)?['\"]Copy as Message['\"]")
 

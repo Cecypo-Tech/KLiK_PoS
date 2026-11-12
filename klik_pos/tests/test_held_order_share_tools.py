@@ -160,3 +160,14 @@ class TestQuoteShareTools(FrappeTestCase):
 			self.skipTest("no Quotation on this site")
 		result = get_held_order_share_doc(quote[0].name, doctype="Quotation")
 		self.assertEqual(result["doc"]["doctype"], "Quotation")
+
+	def test_a_sales_invoice_uses_its_own_copy_as_message_script(self):
+		"""The invoice view offers the same Copy as Message, from Sales Invoice's script."""
+		for name in frappe.get_all("Client Script", filters={"dt": "Sales Invoice", "enabled": 1}, pluck="name"):
+			frappe.db.set_value("Client Script", name, "enabled", 0)
+		source = SOURCE.replace("Sales Order", "Sales Invoice")
+		frappe.get_doc(
+			{"doctype": "Client Script", "name": "_Test KLiK Copy (Sales Invoice)", "dt": "Sales Invoice",
+			 "view": "Form", "enabled": 1, "script": source}
+		).insert(ignore_permissions=True, set_name="_Test KLiK Copy (Sales Invoice)")
+		self.assertEqual(get_held_order_share_tools("Sales Invoice")["copy_message_script"], source)
