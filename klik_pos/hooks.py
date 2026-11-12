@@ -72,7 +72,12 @@ doc_events = {
 			"klik_pos.api.pos_entry.validate_closing_entry",
 		],
 	},
-	"POS Profile": {"validate": "klik_pos.overrides.pos_profile.remove_duplicate_sales_persons"},
+	"POS Profile": {
+		"validate": [
+			"klik_pos.overrides.pos_profile.remove_duplicate_sales_persons",
+			"klik_pos.overrides.pos_profile.warn_change_account_mismatch",
+		],
+	},
 	# Owned by frappe_mpsa_payments; the handler is a no-op where that app, or the field it
 	# guards, is absent. Cancelling a consumed receipt would cancel the Payment Entry it
 	# points at and un-pay a live invoice.

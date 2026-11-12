@@ -14,3 +14,12 @@ export function defaultCashRefundMode(modes: ModeLike[]): string {
   const cash = cashRefundModes(modes);
   return (cash.find((mode) => Number(mode.default) === 1) || cash[0])?.mode_of_payment || "";
 }
+
+/**
+ * ERPNext gives change only when a cash row was tendered; a bank or M-Pesa overpayment stays
+ * on the customer's account until a Payment Entry offsets it.
+ */
+export function overpayLabel(amounts: Record<string, number>, modes: ModeLike[]): string {
+  const cash = cashRefundModes(modes).some((mode) => Number(amounts[mode.mode_of_payment]) > 0);
+  return cash ? "Change Due" : "Customer Credit";
+}

@@ -4823,6 +4823,11 @@ def _add_payment_entries(doc, mode_of_payment):
 	if not isinstance(mode_of_payment, list):
 		return
 
+	# set_pos_fields pre-fills every till mode at 0. ERPNext gives change whenever any row is
+	# Cash-type, amount or not, so a zero Cash row turned a bank/M-Pesa overpayment into
+	# drawer change. Keep only what was tendered; ERPNext drops zero rows on submit anyway.
+	doc.set("payments", [p for p in doc.get("payments") or [] if flt(p.amount)])
+
 	for payment in mode_of_payment:
 		payment_row = {
 			"mode_of_payment": payment.get("method"),
