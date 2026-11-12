@@ -62,7 +62,8 @@ export interface POSProfile {
   custom_enable_sales_lens?: boolean | number;
   custom_show_overdue_warning?: boolean | number;
   custom_quick_switch_price?: boolean | number;
-  restrict_cost_visibility_in_tooltip?: boolean;
+  /** "Cost Display": Hidden | Valuation | Last Purchase Cost (see utils/costDisplay). */
+  custom_cost_display?: string;
   is_default?: boolean;
   custom_autofetch_batchserial_?: boolean | number;
   /** "Set Grand Total to Default Payment Method": whether the checkout opens with the total on the default mode. */

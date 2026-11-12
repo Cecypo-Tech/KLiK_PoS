@@ -1,6 +1,6 @@
 """C3: what a till hides on screen, the server does not send.
 
-- 'Hide Cost Price' (restrict_cost_visibility_in_tooltip): the item details endpoint leaves
+- Cost Display 'Hidden' (custom_cost_display): the item details endpoint leaves
   out every valuation, stock value, cost and margin figure. The list view already did.
 - 'Hide Expected Amount' (custom_hide_expected_amount): the payment summary leaves out the
   shift's takings, as closing_summary does. The float the cashier entered stays.
@@ -62,14 +62,14 @@ class TestCostIsNotSent(FrappeTestCase):
 		self.assertEqual(hidden["price_lists"][0]["rate"], 120.0)
 
 	def test_the_endpoint_hides_on_a_till_that_hides_cost(self):
-		with patch.object(item_details, "_till_hides_cost", return_value=True):
+		with patch.object(item_details, "_till_cost_mode", return_value=("Hidden", None)):
 			result = item_details.get_full_pricing_and_batch_details("_Test Item")
 		self.assertEqual(result["valuation_rate"], 0)
 		self.assertTrue(all(p["cost"] == 0 for p in result["price_lists"]))
 
 	def test_the_endpoint_sends_cost_where_the_till_shows_it(self):
 		with (
-			patch.object(item_details, "_till_hides_cost", return_value=False),
+			patch.object(item_details, "_till_cost_mode", return_value=("Valuation", None)),
 			patch.object(item_details, "_without_cost") as strip,
 		):
 			item_details.get_full_pricing_and_batch_details("_Test Item")
@@ -79,7 +79,7 @@ class TestCostIsNotSent(FrappeTestCase):
 		"""A desk user with no POS Profile sees valuation in ERPNext anyway."""
 		with patch.object(item_details, "get_current_pos_profile_lite", side_effect=frappe.ValidationError("no till")):
 			messages = len(frappe.local.message_log)
-			self.assertFalse(item_details._till_hides_cost())
+			self.assertEqual(item_details._till_cost_mode()[0], "Valuation")
 			self.assertEqual(len(frappe.local.message_log), messages)
 
 

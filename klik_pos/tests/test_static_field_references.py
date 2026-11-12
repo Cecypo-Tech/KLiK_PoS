@@ -63,6 +63,7 @@ OPTIONAL_CROSS_APP_FIELDS = {
 # Fields a patch reads on purpose while it retires them, behind frappe.db.has_column.
 RETIRED_FIELDS_READ_BY_PATCHES = {
 	("POS Profile", "custom_line_entry_grid"),  # patches/v16_0/line_entry_grid_to_default_view
+	("POS Profile", "restrict_cost_visibility_in_tooltip"),  # patches/v16_0/hide_cost_price_to_cost_display
 }
 
 

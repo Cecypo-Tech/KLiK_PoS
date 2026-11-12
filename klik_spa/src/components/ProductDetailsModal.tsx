@@ -5,6 +5,7 @@ import { MapPin, Package } from "lucide-react"
 import type { MenuItem } from "../../types"
 import { usePOSProfileStore } from "../stores/posProfileStore"
 import { useCartStore } from "../stores/cartStore"
+import { costMode } from "../utils/costDisplay"
 
 interface Batch {
   batch_id: string
@@ -46,6 +47,9 @@ interface ItemFullData {
   item_code: string
   standard_rate: number
   valuation_rate: number
+  /** Per stock UOM; absent when the till's Cost Display is Hidden. */
+  last_purchase_rate?: number
+  last_purchase_date?: string | null
   price_lists: PriceListEntry[]
   batches: Batch[]
   serials: SerialEntry[]
@@ -233,7 +237,7 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
 
   const restrictCostVisibility = useMemo(() => {
     if (loading) return true
-    return posDetails?.restrict_cost_visibility_in_tooltip ?? true
+    return costMode(posDetails) === "Hidden"
   }, [posDetails, loading])
 
   useEffect(() => {
@@ -663,8 +667,8 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
 
                   {!restrictCostVisibility && (
                     <div className="md:col-span-2 bg-gray-50 dark:bg-gray-700/40 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
-                      <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-2">Valuation</p>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-2">Cost</p>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div>
                           <p className="text-xs text-gray-500">Standard Rate</p>
                           <p className="text-base font-bold text-gray-900 dark:text-white">{fmt(data?.standard_rate ?? 0, sym)}</p>
@@ -672,6 +676,13 @@ export default function ProductDetailsModal({ item, onClose }: ProductDetailsMod
                         <div>
                           <p className="text-xs text-gray-500">Avg Valuation Rate</p>
                           <p className="text-base font-bold text-gray-900 dark:text-white">{fmt(data?.valuation_rate ?? 0, sym)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Last Purchase Invoice</p>
+                          <p className="text-base font-bold text-gray-900 dark:text-white">
+                            {data?.last_purchase_rate ? fmt(data.last_purchase_rate, sym) : "—"}
+                          </p>
+                          {data?.last_purchase_date ? <p className="text-[11px] text-gray-500">{data.last_purchase_date}</p> : null}
                         </div>
                         <div>
                           <p className="text-xs text-gray-500">Method</p>

@@ -13,6 +13,7 @@ from ..sql_builder import (
     record_denied_doctype,
     reset_denied_doctypes,
 )
+from .cost import HIDDEN, cost_mode, last_purchase_rates
 from .item_price import checked_price_list, fetch_item_price, get_price_list_with_customer_priority
 from ..sales_invoice import negative_stock_allowed
 from .item_stock import apply_queue_reservations_to_stock_map, fetch_item_balance
@@ -227,8 +228,9 @@ def get_items(
                 barcode_map[row.parent] = row.barcode
 
         stock_map = _fetch_batch_stock(item_codes, warehouse)
-        # "Hide Cost Price" keeps the figure off the wire, not just off the screen.
-        hide_cost_price = cint(getattr(pos_doc, "restrict_cost_visibility_in_tooltip", 0) or 0) == 1
+        # Cost Display "Hidden" keeps the figures off the wire, not just off the screen.
+        hide_cost_price = cost_mode(pos_doc) == HIDDEN
+        last_purchase_map = {} if hide_cost_price else last_purchase_rates(item_codes, pos_doc.get("company"))
         if hide_cost_price:
             cost_price_map = {}
         else:
@@ -303,6 +305,7 @@ def get_items(
                 item_uom_price = item_prices[0]
 
             conversion_factor = conversion_factor_map.get((item_code, item_uom), 1)
+            uom_factor = (flt(conversion_factor) or 1) if item.stock_uom != item_uom else 1
 
             if item.stock_uom != item_uom and conversion_factor:
                 balance = balance // conversion_factor
@@ -354,8 +357,9 @@ def get_items(
                     "has_batch_no": item.has_batch_no,
                     "has_serial_no": item.has_serial_no,
                     # Bin values stock per stock UOM; quote the cost in the UOM the rate is in.
-                    "cost_price": flt(cost_price_map.get(item_code, 0))
-                    * ((flt(conversion_factor) or 1) if item.stock_uom != item_uom else 1),
+                    "cost_price": flt(cost_price_map.get(item_code, 0)) * uom_factor,
+                    "last_purchase_cost": flt(last_purchase_map.get(item_code, (0, None))[0]) * uom_factor,
+                    "last_purchase_date": last_purchase_map.get(item_code, (0, None))[1],
                 }
             )
 

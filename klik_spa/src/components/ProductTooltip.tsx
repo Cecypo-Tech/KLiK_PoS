@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
 import type { MenuItem } from "../../types";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { formatCurrencyWithSymbol } from "../utils/currency";
-import { getCostMargin, getInclusiveTaxRate } from "../utils/costMargin";
+import { getCostMargin, getDisplayCost, getInclusiveTaxRate } from "../utils/costMargin";
+import { costMode, pickCost } from "../utils/costDisplay";
 
 import { ClipboardList, Package } from "lucide-react";
 interface Batch {
@@ -27,6 +28,9 @@ interface ItemFullData {
   item_code: string;
   standard_rate: number;
   valuation_rate: number;
+  /** Per stock UOM; absent when the till's Cost Display is Hidden. */
+  last_purchase_rate?: number;
+  last_purchase_date?: string | null;
   price_lists: PriceListEntry[];
   batches: Batch[];
   stock_by_warehouse?: { warehouse: string; qty: number }[];
@@ -84,10 +88,8 @@ export default function ProductTooltip({
     return selectedWarehouse || posDetails?.warehouse;
   }, [posDetails, loading, selectedWarehouse]);
 
-  const restrictCostVisibility = useMemo(() => {
-    if (loading) return true;
-    return (posDetails as any)?.restrict_cost_visibility_in_tooltip ?? true;
-  }, [posDetails, loading]);
+  const mode = loading ? "Hidden" : costMode(posDetails);
+  const restrictCostVisibility = mode === "Hidden";
 
   useEffect(() => {
     const fetchFullData = async () => {
@@ -134,7 +136,11 @@ export default function ProductTooltip({
   // tax is baked into the sell price before the two are compared.
   const conversionFactor = Number(item.conversion_factor) > 0 ? Number(item.conversion_factor) : 1;
   const stockUomCost = data?.valuation_rate || data?.standard_rate || 0;
-  const costPrice = stockUomCost ? stockUomCost * conversionFactor : item.cost_price || 0;
+  const valuation = stockUomCost ? stockUomCost * conversionFactor : item.cost_price || 0;
+  const lastPurchase = data?.last_purchase_rate ? data.last_purchase_rate * conversionFactor : item.last_purchase_cost || 0;
+  const lastPurchaseDate = data ? data.last_purchase_date : item.last_purchase_date;
+  // The till's Cost Display picks the cost (and so the margin); the other is a footnote.
+  const { shown: costPrice, other: otherCost, otherLabel } = pickCost(mode, valuation, lastPurchase);
   const inclusiveTaxRate = getInclusiveTaxRate(item.tax_info);
   const isInclusiveTax = inclusiveTaxRate > 0;
   const { costInclTax, margin } = getCostMargin({
@@ -331,7 +337,7 @@ export default function ProductTooltip({
 
             <div className="bg-gray-50 dark:bg-gray-900/50 p-2.5 rounded-lg">
               <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">
-                Our Cost{isInclusiveTax ? " (incl. VAT)" : ""}
+                {mode === "Last Purchase Cost" ? "Last Purchase" : "Our Cost"}{isInclusiveTax ? " (incl. VAT)" : ""}
               </p>
               <p className="text-lg font-bold text-gray-900 dark:text-white">
                 {formatCurrencyWithSymbol(costInclTax, item.currency_symbol)}
@@ -341,6 +347,13 @@ export default function ProductTooltip({
                   {formatCurrencyWithSymbol(costPrice, item.currency_symbol)} excl. VAT
                 </p>
               )}
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                {otherLabel}:{" "}
+                {otherCost > 0
+                  ? formatCurrencyWithSymbol(getDisplayCost(otherCost, inclusiveTaxRate), item.currency_symbol)
+                  : otherLabel === "Valuation" ? "none" : "no purchase invoice"}
+                {otherCost > 0 && otherLabel === "Last purchase" && lastPurchaseDate ? ` on ${lastPurchaseDate}` : ""}
+              </p>
             </div>
           </div>
 

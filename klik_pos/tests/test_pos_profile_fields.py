@@ -18,7 +18,8 @@ class TestPosProfileFeatureFields(FrappeTestCase):
         self.assertIn("allow_price_list_switching", names)
         self.assertIn("allow_warehouse_change", names)
         for f in POS_PROFILE_FEATURE_FIELDS:
-            self.assertEqual(f["fieldtype"], "Check")
+            expected = "Select" if f["fieldname"] == "custom_cost_display" else "Check"
+            self.assertEqual(f["fieldtype"], expected)
 
     def test_spec_includes_sales_lens_toggle(self):
         names = [f["fieldname"] for f in POS_PROFILE_FEATURE_FIELDS]

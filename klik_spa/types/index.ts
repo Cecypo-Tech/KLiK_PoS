@@ -122,6 +122,9 @@ export interface MenuItem {
   barcode?: string
   /** Per selling UOM (the UOM `price` is quoted in). */
   cost_price?: number
+  /** Newest purchase invoice rate, per selling UOM, excl. tax (0: never bought). */
+  last_purchase_cost?: number
+  last_purchase_date?: string | null
   /** Stock UOMs per selling UOM. */
   conversion_factor?: number
   price_lists?: PriceListRate[]

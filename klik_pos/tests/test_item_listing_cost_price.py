@@ -126,7 +126,7 @@ class TestGetItemsCostPrice(ItemListingCostPriceTestCase):
 		frappe.db.set_value("Bin", bin_name, "valuation_rate", rate, update_modified=False)
 		frappe.db.commit()
 
-	def _items(self, hide_cost=0):
+	def _items(self, hide_cost=0, mode=None):
 		pos_doc = frappe._dict(
 			name="TEST-COST-PRICE-PROFILE",
 			company=self.company,
@@ -137,7 +137,7 @@ class TestGetItemsCostPrice(ItemListingCostPriceTestCase):
 			custom_enhanced_search=0,
 			is_tax_included_in_basic_rate=0,
 			taxes_and_charges=None,
-			restrict_cost_visibility_in_tooltip=hide_cost,
+			custom_cost_display=mode or ("Hidden" if hide_cost else "Valuation"),
 		)
 		context = (pos_doc, self.warehouse, pos_doc.selling_price_list, False)
 		with patch.object(item_listing, "_get_pos_context", return_value=context):

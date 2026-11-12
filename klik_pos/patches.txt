@@ -17,3 +17,4 @@ klik_pos.patches.v16_0.add_receipt_number_indexes
 klik_pos.patches.v16_0.add_walkin_tax_id_field
 klik_pos.patches.v16_0.move_quotation_walkin_fields
 klik_pos.patches.v16_0.line_entry_grid_to_default_view
+klik_pos.patches.v16_0.hide_cost_price_to_cost_display

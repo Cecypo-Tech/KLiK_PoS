@@ -1,5 +1,6 @@
 "use client"
 
+import { costMode } from "../utils/costDisplay"
 import { Fragment, useCallback, useMemo, useState } from "react"
 import type { MenuItem } from "../../types"
 import ProductDetailsModal from "./ProductDetailsModal"
@@ -45,7 +46,8 @@ export default function ProductLineView({
   const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   const { posDetails } = usePOSProfileStore()
-  const showCostColumn = !(posDetails?.restrict_cost_visibility_in_tooltip ?? true)
+  const costDisplayMode = costMode(posDetails)
+  const showCostColumn = costDisplayMode !== "Hidden"
   const selectedCategory = useProductStore((s) => s.selectedCategory)
   const searching = useProductStore((s) => s.searchQuery.trim() !== "")
   const headers = useMemo(
@@ -127,6 +129,7 @@ export default function ProductLineView({
                 stockUnavailable={stockUnavailable}
                 lossOfSaleEnabled={lossOfSaleEnabled}
                 showCostColumn={showCostColumn}
+                costDisplayMode={costDisplayMode}
                 columns={columns}
                 onAddToCart={onAddToCart}
                 onItemFocus={onItemFocus}

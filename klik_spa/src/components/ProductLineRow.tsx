@@ -3,7 +3,7 @@
 import { memo, useState } from "react"
 import type { MenuItem } from "../../types"
 import ProductTooltip from "./ProductTooltip"
-import { getDisplayCost, getInclusiveTaxRate } from "../utils/costMargin"
+import { itemCostCell, type CostMode } from "../utils/costDisplay"
 import { formatCurrencyWithSymbol } from "../utils/currency"
 import { useCartStore } from "../stores/cartStore"
 import { isItemOutOfStock } from "../utils/stock"
@@ -23,6 +23,7 @@ interface ProductLineRowProps {
   stockUnavailable: boolean
   lossOfSaleEnabled: boolean
   showCostColumn: boolean
+  costDisplayMode: CostMode
   /** lineViewColumns: the code column (null: none) and the name column's classes. */
   columns: { code: string | null; name: string }
   onAddToCart: (item: MenuItem) => void
@@ -46,6 +47,7 @@ function ProductLineRow({
   stockUnavailable,
   lossOfSaleEnabled,
   showCostColumn,
+  costDisplayMode,
   columns,
   onAddToCart,
   onItemFocus,
@@ -66,15 +68,10 @@ function ProductLineRow({
   const formattedBasePrice = formatCurrencyWithSymbol(basePrice, item.currency_symbol)
   const bundleCount = item.is_product_bundle ? item.bundle_items?.length || 0 : 0
   const variantCount = item.is_variant_template ? item.variant_count || 0 : 0
-  // Beside a VAT-inclusive Rate the cost is shown VAT-inclusive too (valuation itself
-  // never includes VAT), so the two columns compare directly.
-  const valuation = Number(item.cost_price || 0)
-  const costTaxRate = getInclusiveTaxRate(item.tax_info)
-  const costPrice = getDisplayCost(valuation, costTaxRate)
-  const formattedCostPrice = costPrice > 0 ? formatCurrencyWithSymbol(costPrice, item.currency_symbol) : "—"
-  const costTitle = costPrice > 0 && costTaxRate > 0
-    ? `Valuation ${formatCurrencyWithSymbol(valuation, item.currency_symbol)} + ${costTaxRate}% VAT`
-    : undefined
+  // Beside a VAT-inclusive Rate the cost is shown VAT-inclusive too, so the two columns
+  // compare directly; the hover gives the other cost (valuation or last purchase).
+  const { text: formattedCostPrice, title: costTitle } = itemCostCell(item, costDisplayMode, (n) =>
+    formatCurrencyWithSymbol(n, item.currency_symbol))
   const thumb = isMobile ? 32 : 28
   const image = (
     item.image ? (
