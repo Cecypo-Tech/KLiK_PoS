@@ -14,6 +14,8 @@ import {
   Mail,
   Phone,
   Contact,
+  Tag,
+  Warehouse,
 } from "lucide-react";
 import type { Customer } from "../../types/customer";
 import { transformCustomerInfo } from "../../utils/transformCustomerInfo";
@@ -38,6 +40,10 @@ import {
   AlertDialogDescription,
   // @ts-expect-error ignore
 } from "@/components/ui/alert-dialog";
+
+const PICKER =
+  "w-full truncate h-9 pl-8 pr-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60";
+const PICKER_ICON = "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400";
 
 interface CustomerSearchSectionProps {
   selectedCustomer: Customer | null;
@@ -632,22 +638,20 @@ export const CustomerSearchSection = ({
             `}
           >
             {selectedCustomer ? (
-              <div className="flex-1 flex items-center gap-3 py-2">
+              <div className="flex-1 min-w-0 flex items-center gap-3 py-2">
                 <div className="flex-shrink-0">
                   {getCustomerIcon(selectedCustomer)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-gray-900 dark:text-white text-sm truncate">
-                      {selectedCustomer.name}
-                    </span>
+                  <div className="font-medium text-gray-900 dark:text-white text-sm leading-tight line-clamp-2 break-words" title={selectedCustomer.name}>
+                    {selectedCustomer.name}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                     {getCustomerBadge(selectedCustomer) && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${getCustomerBadge(selectedCustomer)?.color}`}>
+                      <span className={`shrink-0 text-[11px] leading-none px-1.5 py-0.5 rounded ${getCustomerBadge(selectedCustomer)?.color}`}>
                         {getCustomerBadge(selectedCustomer)?.label}
                       </span>
                     )}
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
                     {selectedCustomer.phone && selectedCustomer.phone !== "N/A" && (
                       <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                         <Phone className="w-3 h-3" />
@@ -698,10 +702,13 @@ export const CustomerSearchSection = ({
               </span>
             )}
             
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {selectedCustomer && (
                 <button
+                  type="button"
                   onClick={handleClear}
+                  aria-label="Clear customer"
+                  title="Clear customer"
                   className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
                 >
                   <X className="w-4 h-4 text-gray-400" />
@@ -717,8 +724,9 @@ export const CustomerSearchSection = ({
         {canCreateCustomer && (
           <button
             onClick={handleAddCustomerClick}
-            className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
+            className="flex-shrink-0 w-10 self-stretch rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-beveren-600 dark:text-beveren-400 hover:border-beveren-400 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors flex items-center justify-center"
             title="Add New Customer"
+            aria-label="Add New Customer"
           >
             <UserPlus size={18} />
           </button>
@@ -727,8 +735,9 @@ export const CustomerSearchSection = ({
         {selectedCustomer && (
           <button
             onClick={() => setAdditionalInfoOpen(true)}
-            className="flex-shrink-0 w-10 h-10 bg-beveren-600 text-white rounded-xl hover:bg-beveren-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
+            className="flex-shrink-0 w-10 self-stretch rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-beveren-600 dark:text-beveren-400 hover:border-beveren-400 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors flex items-center justify-center"
             title="Additional Info"
+            aria-label="Additional Info"
           >
             <Contact size={18} />
           </button>
@@ -738,12 +747,15 @@ export const CustomerSearchSection = ({
       {(allowPriceListSwitching || allowWarehouseChange) && (
       <div className="mt-2 flex gap-2">
         {allowPriceListSwitching && (
+          <label className="relative min-w-0 flex-1" title="Price list">
+          <Tag className={PICKER_ICON} aria-hidden />
           <select
+            aria-label="Price list"
             value={activePriceList}
             title={String(activePriceList)}
             onChange={(event) => { void handlePriceListChange(event.target.value); }}
             disabled={isLoadingPriceLists}
-            className="min-w-0 flex-1 truncate h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
+            className={PICKER}
           >
             {!activePriceList && <option value="">Default Price List</option>}
             {priceLists.map((priceList) => (
@@ -752,20 +764,25 @@ export const CustomerSearchSection = ({
               </option>
             ))}
           </select>
+          </label>
         )}
         {allowWarehouseChange && (
+          <label className="relative min-w-0 flex-1" title="Warehouse">
+          <Warehouse className={PICKER_ICON} aria-hidden />
           <select
+            aria-label="Warehouse"
             value={activeWarehouse}
             title={activeWarehouse}
             onChange={(event) => { void handleWarehouseChange(event.target.value); }}
             disabled={isLoadingWarehouses}
-            className="min-w-0 flex-1 truncate h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
+            className={PICKER}
           >
             {!activeWarehouse && <option value="">Default Warehouse</option>}
             {warehouses.map((wh) => (
               <option key={wh} value={wh}>{wh}</option>
             ))}
           </select>
+          </label>
         )}
       </div>
       )}
