@@ -302,3 +302,19 @@ export async function sendInvoiceWhatsApp(data: {
 
   return result.message;
 }
+
+/** What send_invoice_email would send (subject and HTML body), rendered by the server. Null on failure. */
+export async function previewInvoiceEmail(data: { invoice_data: string; message?: string; template?: string; customer_name?: string }): Promise<{ subject: string; message: string } | null> {
+  try {
+    const response = await fetch("/api/method/klik_pos.api.email.preview_invoice_email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": window.csrf_token },
+      body: JSON.stringify(data),
+      credentials: "include",
+    });
+    const result = await response.json().catch(() => null);
+    return response.ok && result?.message ? result.message : null;
+  } catch {
+    return null;
+  }
+}

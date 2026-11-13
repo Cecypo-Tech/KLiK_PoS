@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from frappe.email.doctype.email_account.email_account import EmailAccount
@@ -40,7 +41,36 @@ def render_email(doc, template=None, message=None, fallback_subject="", fallback
 		body = render((t.response_html if t.use_html else t.response) or "")
 	else:
 		body = fallback_message
+	# Plain text in an HTML email loses its line breaks; keep them. HTML is left as written.
+	if not re.search(r"</?[a-zA-Z][^>]*>", body):
+		body = frappe.utils.escape_html(body).replace("\n", "<br>")
 	return subject, body
+
+
+def _invoice_email(doc, data, pos_profile):
+	"""(subject, message) for the checkout's invoice email; shared by send and preview."""
+	amount = fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency)
+	return render_email(
+		doc,
+		template=data.get("template") or pos_profile.get("custom_email_template"),
+		message=data.get("message"),
+		fallback_subject=f"Invoice {doc.name} from {doc.company}",
+		fallback_message=(
+			f"<p>Dear {data.get('customer_name') or doc.customer_name},</p>"
+			f"<p>Please find attached your invoice <b>{doc.name}</b>.</p>"
+			f"<p>The total amount due is <b>{amount}</b>.</p>"
+			"<p>Thank you for your business.</p>"
+		),
+	)
+
+
+@frappe.whitelist()
+def preview_invoice_email(**data):
+	"""The subject and body send_invoice_email would send, for the checkout's preview."""
+	doc = frappe.get_doc("Sales Invoice", data.get("invoice_data"))
+	doc.check_permission("read")
+	subject, message = _invoice_email(doc, data, get_current_pos_profile())
+	return {"subject": subject, "message": message}
 
 
 @frappe.whitelist()
@@ -68,18 +98,7 @@ def send_invoice_email(**kwargs):
 
 		invoice_amount = fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency)
 
-		subject, message = render_email(
-			doc,
-			template=data.get("template") or pos_profile.get("custom_email_template"),
-			message=data.get("message"),
-			fallback_subject=f"Invoice {doc.name} from {doc.company}",
-			fallback_message=f"""
-			<p>Dear {customer_name},</p>
-			<p>Please find attached your invoice <b>{doc.name}</b>.</p>
-			<p>The total amount due is <b>{invoice_amount}</b>.</p>
-			<p>Thank you for your business.</p>
-		""",
-		)
+		subject, message = _invoice_email(doc, data, pos_profile)
 
 		attachments = [{"fname": f"{doc.name}.pdf", "fcontent": pdf_data}]
 

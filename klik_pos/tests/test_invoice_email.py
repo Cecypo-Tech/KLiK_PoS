@@ -62,3 +62,17 @@ class TestInvoiceEmail(FrappeTestCase):
 		self.assertEqual(kw["message"], f"{self.si}|{doc.company}|{doc.customer_name}|||")
 		kw = self._send(message="{{invoice_total}}")
 		self.assertEqual(kw["message"], frappe.utils.fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency))
+
+	def test_plain_text_keeps_its_line_breaks_and_is_escaped_html_is_untouched(self):
+		frappe.db.set_value("POS Profile", self.profile, "custom_email_template", None)
+		self.assertEqual(self._send(message="Hi A&B,\nTotal due")["message"], "Hi A&amp;B,<br>Total due")
+		self.assertEqual(self._send(message="<p>Hi</p>\n<p>Bye</p>")["message"], "<p>Hi</p>\n<p>Bye</p>")
+
+	def test_preview_is_what_send_would_send(self):
+		frappe.db.set_value("POS Profile", self.profile, "custom_email_template",
+			_template("_Test Inv Mail", "Invoice {{ doc.name }}", "x"))
+		sent = self._send(message="Ref {{invoice_number}}\nThanks")
+		with patch("frappe.sendmail") as send:
+			preview = email.preview_invoice_email(invoice_data=self.si, message="Ref {{invoice_number}}\nThanks")
+		send.assert_not_called()
+		self.assertEqual(preview, {"subject": sent["subject"], "message": sent["message"]})
