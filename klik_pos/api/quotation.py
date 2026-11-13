@@ -348,19 +348,18 @@ def send_quote_email(quote_name, emails):
 
 	q = frappe.get_doc("Quotation", quote_name)
 	q.check_permission("read")
-	template = _get_active_pos_profile().get("custom_email_template")
-	if template:
-		t = frappe.get_doc("Email Template", template)
-		ctx = {"doc": q.as_dict(), **q.as_dict()}
-		subject = frappe.render_template(t.subject or "", ctx)
-		message = frappe.render_template((t.response_html if t.use_html else t.response) or "", ctx)
-	else:
-		subject = f"Quotation {q.name} from {q.company}"
-		message = (
+	from klik_pos.api.email import render_email
+
+	subject, message = render_email(
+		q,
+		template=_get_active_pos_profile().get("custom_email_template"),
+		fallback_subject=f"Quotation {q.name} from {q.company}",
+		fallback_message=(
 			f"<p>Dear {q.customer_name},</p><p>Please find attached quotation <b>{q.name}</b>"
 			f" for {frappe.utils.fmt_money(q.rounded_total or q.grand_total, currency=q.currency)}.</p>"
 			"<p>Thank you.</p>"
-		)
+		),
+	)
 	pdf = frappe.get_print("Quotation", q.name, as_pdf=True)
 	frappe.sendmail(
 		recipients=recipients,

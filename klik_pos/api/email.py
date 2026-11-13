@@ -7,6 +7,29 @@ from frappe.utils import fmt_money, now
 from klik_pos.klik_pos.utils import error_reason, get_current_pos_profile
 
 
+def render_email(doc, template=None, message=None, fallback_subject="", fallback_message=""):
+	"""(subject, message) for emailing `doc`. The Email Template gives the subject and, unless the
+	cashier's own `message` is passed, the body. Both are Jinja-rendered with `doc`; text that
+	isn't valid Jinja is sent as typed."""
+	ctx = {"doc": doc.as_dict(), **doc.as_dict()}
+
+	def render(text):
+		try:
+			return frappe.render_template(text, ctx)
+		except Exception:
+			return text
+
+	t = frappe.get_doc("Email Template", template) if template else None
+	subject = render(t.subject) if t and t.subject else fallback_subject
+	if message:
+		body = render(message)
+	elif t:
+		body = render((t.response_html if t.use_html else t.response) or "")
+	else:
+		body = fallback_message
+	return subject, body
+
+
 @frappe.whitelist()
 def send_invoice_email(**kwargs):
 	"""
@@ -32,13 +55,18 @@ def send_invoice_email(**kwargs):
 
 		invoice_amount = fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency)
 
-		subject = f"Invoice {doc.name} from {frappe.defaults.get_user_default('Company')}"
-		message = f"""
+		subject, message = render_email(
+			doc,
+			template=data.get("template") or pos_profile.get("custom_email_template"),
+			message=data.get("message"),
+			fallback_subject=f"Invoice {doc.name} from {doc.company}",
+			fallback_message=f"""
 			<p>Dear {customer_name},</p>
 			<p>Please find attached your invoice <b>{doc.name}</b>.</p>
 			<p>The total amount due is <b>{invoice_amount}</b>.</p>
 			<p>Thank you for your business.</p>
-		"""
+		""",
+		)
 
 		attachments = [{"fname": f"{doc.name}.pdf", "fcontent": pdf_data}]
 
