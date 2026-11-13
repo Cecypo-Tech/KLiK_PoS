@@ -7,9 +7,8 @@ import {
   ChevronDown, 
   X, 
   Loader2, 
-  Check, 
-  Building, 
-  User, 
+  Check,
+  User,
   UserPlus,
   Mail,
   Phone,
@@ -43,6 +42,8 @@ import {
 
 const PICKER =
   "w-full truncate h-9 pl-8 pr-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60";
+const FOOTER_BTN =
+  "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-beveren-700 dark:text-beveren-300 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors";
 const PICKER_ICON = "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400";
 
 interface CustomerSearchSectionProps {
@@ -50,7 +51,13 @@ interface CustomerSearchSectionProps {
   onCustomerSelect: (customer: Customer) => void;
   onCustomerClear: () => void;
   isMobile?: boolean;
+  /** "bar": one line in the grid till's top bar, pickers beside it. Default: the cart panel's card. */
+  variant?: "panel" | "bar";
 }
+
+/** After a customer pick the cashier scans next: the grid's entry row, or the cart's search box. */
+const focusItemEntry = () =>
+  document.querySelector<HTMLElement>("[data-entry-row] input, #pos-search-input")?.focus();
 
 interface SellingPriceList {
   name: string;
@@ -62,7 +69,9 @@ export const CustomerSearchSection = ({
   onCustomerSelect,
   onCustomerClear,
   isMobile = false,
+  variant = "panel",
 }: CustomerSearchSectionProps) => {
+  const bar = variant === "bar";
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -300,6 +309,7 @@ export const CustomerSearchSection = ({
     } finally {
       setIsLoading(false);
       setUserRemovedDefaultCustomer(false);
+      if (!isMobile) focusItemEntry(); // a phone would pop its keyboard
       setTimeout(() => {
         isSelectingRef.current = false;
         shouldPreventSearchRef.current = false;
@@ -400,6 +410,7 @@ export const CustomerSearchSection = ({
         setIsOpen(false);
         setSearch("");
         setHighlightedIndex(-1);
+        focusItemEntry();
         break;
     }
   };
@@ -478,17 +489,6 @@ export const CustomerSearchSection = ({
     setShowAddCustomerModal(false);
     setPrefilledCustomerName("");
     setPrefilledData({});
-  };
-
-  const getCustomerIcon = (customer: Customer) => {
-    switch (customer.type) {
-      case "company":
-        return <Building size={18} className="text-purple-500" />;
-      case "walk-in":
-        return <User size={18} className="text-gray-500" />;
-      default:
-        return <User size={18} className="text-blue-500" />;
-    }
   };
 
   const getCustomerBadge = (customer: Customer) => {
@@ -572,11 +572,8 @@ export const CustomerSearchSection = ({
                   border-b border-gray-100 dark:border-gray-800 last:border-b-0
                 `}
               >
-                <div className="flex items-start gap-3">
-                  <div className="flex-shrink-0 mt-0.5">
-                    {getCustomerIcon(customer)}
-                  </div>
-                  <div className="flex-1 min-w-0">
+                <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-gray-900 dark:text-white text-sm truncate">
                         {customer.name}
@@ -614,140 +611,118 @@ export const CustomerSearchSection = ({
           </div>
         )}
       </div>
+      {(canCreateCustomer || selectedCustomer) && (
+        <div className="flex border-t border-gray-100 dark:border-gray-800">
+          {canCreateCustomer && (
+            <button type="button" onClick={handleAddCustomerClick} className={FOOTER_BTN}>
+              <UserPlus className="w-4 h-4" aria-hidden /> New customer
+            </button>
+          )}
+          {selectedCustomer && (
+            <button
+              type="button"
+              onClick={() => { setIsOpen(false); setAdditionalInfoOpen(true); }}
+              className={FOOTER_BTN}
+            >
+              <Contact className="w-4 h-4" aria-hidden /> Additional info
+              <kbd className="text-[10px] font-sans text-gray-400">F4</kbd>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   ) : null;
 
-  const containerClass = !isMobile ? "relative" : "flex-shrink-0 p-4 border-b border-gray-100 dark:border-gray-700";
+  const walkin = selectedCustomer?.isWalkin === 1;
+  const phone = walkin ? walkinDetails.phone : selectedCustomer?.phone !== "N/A" ? selectedCustomer?.phone : "";
+  const badge = selectedCustomer ? getCustomerBadge(selectedCustomer) : null;
+  const badgePill = badge && (
+    <span className={`shrink-0 text-[11px] leading-none px-1.5 py-0.5 rounded ${badge.color}`}>{badge.label}</span>
+  );
+  const fixedWarehouse = !allowWarehouseChange && activeWarehouse;
 
-  return (
-    <div className={containerClass}>
-      <div className="flex items-center gap-2">
-        <div ref={containerRef} className="flex-1 min-w-0 relative">
-          <div
-            id="pos-customer-btn"
-            ref={buttonRef}
-            onClick={handleOpenDropdown}
-            className={`
-              flex items-center justify-between w-full min-h-[52px] px-4 gap-2
-              border rounded-xl cursor-pointer transition-all
-              bg-white dark:bg-gray-900
-              ${isOpen 
-                ? "border-blue-500 ring-2 ring-blue-500/20" 
-                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-              }
-            `}
-          >
-            {selectedCustomer ? (
-              <div className="flex-1 min-w-0 flex items-center gap-3 py-2">
-                <div className="flex-shrink-0">
-                  {getCustomerIcon(selectedCustomer)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900 dark:text-white text-sm leading-tight line-clamp-2 break-words" title={selectedCustomer.name}>
-                    {selectedCustomer.name}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                    {getCustomerBadge(selectedCustomer) && (
-                      <span className={`shrink-0 text-[11px] leading-none px-1.5 py-0.5 rounded ${getCustomerBadge(selectedCustomer)?.color}`}>
-                        {getCustomerBadge(selectedCustomer)?.label}
-                      </span>
-                    )}
-                    {selectedCustomer.phone && selectedCustomer.phone !== "N/A" && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <Phone className="w-3 h-3" />
-                        <span>{selectedCustomer.phone}</span>
-                      </div>
-                    )}
-                    {selectedCustomer.email && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <Mail className="w-3 h-3" />
-                        <span className="truncate max-w-[200px]">{selectedCustomer.email}</span>
-                      </div>
-                    )}
-                    {selectedCustomer.taxId && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <span className="font-mono">PIN: {selectedCustomer.taxId}</span>
-                      </div>
-                    )}
-                    {selectedCustomer.isWalkin === 1 && walkinDetails.name && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <User className="w-3 h-3" />
-                        <span className="truncate max-w-[160px]">{walkinDetails.name}</span>
-                      </div>
-                    )}
-                    {selectedCustomer.isWalkin === 1 && walkinDetails.phone && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <Phone className="w-3 h-3" />
-                        <span>{walkinDetails.phone}</span>
-                      </div>
-                    )}
-                    {selectedCustomer.isWalkin === 1 && walkinDetails.taxId && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <span className="font-mono">PIN: {walkinDetails.taxId}</span>
-                      </div>
-                    )}
-                    {extraFieldDefs
-                      .filter((f) => (extraFields[f.fieldname] || "").toString().trim())
-                      .map((f) => (
-                        <div key={f.fieldname} className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                          <span className="font-mono">{f.label}: {extraFields[f.fieldname]}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <span className="flex-1 text-sm text-gray-400 dark:text-gray-500 py-3">
-                Search or select customer...
-              </span>
-            )}
-            
-            <div className="flex shrink-0 items-center gap-1">
-              {selectedCustomer && (
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  aria-label="Clear customer"
-                  title="Clear customer"
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-                >
-                  <X className="w-4 h-4 text-gray-400" />
-                </button>
-              )}
-              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-            </div>
-          </div>
-
-          {typeof window !== "undefined" && createPortal(dropdown, document.body)}
-        </div>
-
-        {canCreateCustomer && (
-          <button
-            onClick={handleAddCustomerClick}
-            className="flex-shrink-0 w-10 self-stretch rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-beveren-600 dark:text-beveren-400 hover:border-beveren-400 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors flex items-center justify-center"
-            title="Add New Customer"
-            aria-label="Add New Customer"
-          >
-            <UserPlus size={18} />
-          </button>
-        )}
-
-        {selectedCustomer && (
-          <button
-            onClick={() => setAdditionalInfoOpen(true)}
-            className="flex-shrink-0 w-10 self-stretch rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-beveren-600 dark:text-beveren-400 hover:border-beveren-400 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors flex items-center justify-center"
-            title="Additional Info"
-            aria-label="Additional Info"
-          >
-            <Contact size={18} />
-          </button>
-        )}
+  const card = selectedCustomer ? (
+    bar ? (
+      <div className="flex-1 min-w-0 flex items-center gap-2" title={[selectedCustomer.name, phone].filter(Boolean).join(" · ")}>
+        <span className="truncate font-medium text-gray-900 dark:text-white text-sm">{selectedCustomer.name}</span>
+        {/* Tight bar: the name wins over the badge. */}
+        <span className="hidden xl:contents">{badgePill}</span>
+        {phone && <span className="hidden xl:inline shrink-0 text-xs text-gray-500 dark:text-gray-400">{phone}</span>}
       </div>
+    ) : (
+      <div className="flex-1 min-w-0 py-2">
+        <div className="font-medium text-gray-900 dark:text-white text-sm leading-tight line-clamp-2 break-words" title={selectedCustomer.name}>
+          {selectedCustomer.name}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+          {badgePill}
+          {phone && (
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <Phone className="w-3 h-3" />
+              <span>{phone}</span>
+            </div>
+          )}
+          {selectedCustomer.email && (
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <Mail className="w-3 h-3" />
+              <span className="truncate max-w-[200px]">{selectedCustomer.email}</span>
+            </div>
+          )}
+          {selectedCustomer.taxId && (
+            <span className="font-mono text-xs text-gray-500 dark:text-gray-400">PIN: {selectedCustomer.taxId}</span>
+          )}
+          {walkin && walkinDetails.name && (
+            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+              <User className="w-3 h-3" />
+              <span className="truncate max-w-[160px]">{walkinDetails.name}</span>
+            </div>
+          )}
+          {walkin && walkinDetails.taxId && (
+            <span className="font-mono text-xs text-gray-500 dark:text-gray-400">PIN: {walkinDetails.taxId}</span>
+          )}
+          {extraFieldDefs
+            .filter((f) => (extraFields[f.fieldname] || "").toString().trim())
+            .map((f) => (
+              <span key={f.fieldname} className="font-mono text-xs text-gray-500 dark:text-gray-400">
+                {f.label}: {extraFields[f.fieldname]}
+              </span>
+            ))}
+        </div>
+      </div>
+    )
+  ) : (
+    <span className={`flex-1 text-sm text-gray-400 dark:text-gray-500 ${bar ? "" : "py-3"}`}>Search or select customer...</span>
+  );
 
-      {(allowPriceListSwitching || allowWarehouseChange) && (
-      <div className="mt-2 flex gap-2">
-        {allowPriceListSwitching && (
-          <label className="relative min-w-0 flex-1" title="Price list">
+  // Warehouse first (where the stock comes from), then price list. A till that cannot switch
+  // warehouse still shows which one it sells from, in the same place.
+  const pickers = (allowWarehouseChange || fixedWarehouse || allowPriceListSwitching) && (
+    <div className={bar ? "flex flex-[2] max-w-md gap-2" : "mt-2 flex gap-2"}>
+      {allowWarehouseChange ? (
+        <label className={`relative flex-1 ${bar ? "min-w-[7.5rem]" : "min-w-0"}`} title="Warehouse">
+          <Warehouse className={PICKER_ICON} aria-hidden />
+          <select
+            aria-label="Warehouse"
+            value={activeWarehouse}
+            title={activeWarehouse}
+            onChange={(event) => { void handleWarehouseChange(event.target.value); }}
+            disabled={isLoadingWarehouses}
+            className={PICKER}
+          >
+            {!activeWarehouse && <option value="">Default Warehouse</option>}
+            {warehouses.map((wh) => (
+              <option key={wh} value={wh}>{wh}</option>
+            ))}
+          </select>
+        </label>
+      ) : fixedWarehouse && (
+        <div className={`relative flex-1 ${bar ? "min-w-[7.5rem]" : "min-w-0"}`} title={`Warehouse: ${activeWarehouse}`}>
+          <Warehouse className={PICKER_ICON} aria-hidden />
+          <span className={`${PICKER} block leading-[34px] bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300`}>{activeWarehouse}</span>
+        </div>
+      )}
+      {allowPriceListSwitching && (
+        <label className={`relative flex-1 ${bar ? "min-w-[7.5rem]" : "min-w-0"}`} title="Price list">
           <Tag className={PICKER_ICON} aria-hidden />
           <select
             aria-label="Price list"
@@ -764,28 +739,53 @@ export const CustomerSearchSection = ({
               </option>
             ))}
           </select>
-          </label>
-        )}
-        {allowWarehouseChange && (
-          <label className="relative min-w-0 flex-1" title="Warehouse">
-          <Warehouse className={PICKER_ICON} aria-hidden />
-          <select
-            aria-label="Warehouse"
-            value={activeWarehouse}
-            title={activeWarehouse}
-            onChange={(event) => { void handleWarehouseChange(event.target.value); }}
-            disabled={isLoadingWarehouses}
-            className={PICKER}
-          >
-            {!activeWarehouse && <option value="">Default Warehouse</option>}
-            {warehouses.map((wh) => (
-              <option key={wh} value={wh}>{wh}</option>
-            ))}
-          </select>
-          </label>
-        )}
-      </div>
+        </label>
       )}
+    </div>
+  );
+
+  const containerClass = bar
+    ? "flex min-w-0 flex-1 items-center gap-2"
+    : !isMobile ? "relative" : "flex-shrink-0 p-4 border-b border-gray-100 dark:border-gray-700";
+
+  return (
+    <div className={containerClass}>
+      <div ref={containerRef} className={bar ? "relative min-w-[10rem] flex-[3] max-w-md" : "relative"}>
+        <div
+          id="pos-customer-btn"
+          ref={buttonRef}
+          onClick={handleOpenDropdown}
+          className={`
+            flex items-center justify-between w-full gap-2 border cursor-pointer transition-all
+            bg-white dark:bg-gray-900
+            ${bar ? "h-9 px-3 rounded-lg" : "min-h-[52px] px-4 rounded-xl"}
+            ${isOpen
+              ? "border-blue-500 ring-2 ring-blue-500/20"
+              : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+            }
+          `}
+        >
+          {card}
+          <div className="flex shrink-0 items-center gap-1">
+            {selectedCustomer && (
+              <button
+                type="button"
+                onClick={handleClear}
+                aria-label="Clear customer"
+                title="Clear customer"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            )}
+            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+          </div>
+        </div>
+
+        {typeof window !== "undefined" && createPortal(dropdown, document.body)}
+      </div>
+
+      {pickers}
 
       {showAddCustomerModal && (
         <AddCustomerModal

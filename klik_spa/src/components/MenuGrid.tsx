@@ -7,7 +7,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useProduct } from "../providers/ProductProvider";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { useCartStore } from "../stores/cartStore";
-import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap, Warehouse, Scan } from "lucide-react";
+import { Settings, LogOut, Moon, Sun, Grid3X3, List, Store, RefreshCw, Lock, Unlock, Keyboard, Zap, Scan } from "lucide-react";
 import { toast } from "react-toastify";
 import { clearCacheAndReload } from "../utils/clearCache";
 import { isItemOutOfStock } from "../utils/stock";
@@ -20,6 +20,7 @@ import { useSalespersonStore } from "../stores/salespersonStore";
 import KeyboardShortcutsPanel from "./KeyboardShortcutsPanel";
 import QuickEntryDialog from "./QuickEntryDialog";
 import CartSaleType from "./order/CartSaleType";
+import { CustomerSearchSection } from "./order/CustomerSearchSection";
 
 interface MenuGridProps {
   onRefreshStock?: () => void;
@@ -50,6 +51,9 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
     lossOfSaleEnabled,
   } = useProduct();
   const addToCart = useCartStore((s) => s.addToCart);
+  const quoteMode = useCartStore((s) => s.quoteMode);
+  const selectedCustomer = useCartStore((s) => s.selectedCustomer);
+  const setSelectedCustomer = useCartStore((s) => s.setSelectedCustomer);
   
   const { posDetails } = usePOSProfileStore();
   const { activeSalesperson, rememberLocked, ensureInitialized } = useSalespersonStore();
@@ -181,45 +185,28 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
           here is never drawn under them; below dialogs (z-50) and checkout (z-60), which cover
           this whole page. Cards are their own stacking contexts (z-1/z-2), so their inner
           layers never compete. */}
-      <div className="sticky top-0 z-40 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700">
+      <div className={`sticky top-0 z-40 border-b transition-colors ${
+        // Quote mode: the whole bar turns the Quote amber; nothing else needs to say it.
+        quoteMode ? "bg-amber-100 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700" : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700"
+      }`}>
+        <div className="flex items-center justify-between gap-3 px-6 py-2">
+          {headerOnly ? (
+            // The sale's context, in the order it is set: customer, warehouse, price list.
+            <CustomerSearchSection
+              variant="bar"
+              selectedCustomer={selectedCustomer}
+              onCustomerSelect={(c) => { void setSelectedCustomer(c); }}
+              onCustomerClear={() => { void setSelectedCustomer(null); }}
+            />
+          ) : (
           <div className="flex items-center space-x-3 flex-1 max-w-md">
-            {headerOnly ? (
-              onScanBarcode && (
-                <button
-                  onClick={onScanBarcode}
-                  className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  title="Scan Barcode"
-                  type="button"
-                >
-                  <Scan className="w-4 h-4" />
-                </button>
-              )
-            ) : (
-              <SearchBar
-                searchQuery={searchQuery}
-                onSearchChange={handleSearchChange}
-                onScanBarcode={onScanBarcode}
-                onSearchKeyDown={handleSearchKeyDown}
-              />
-            )}
-            <button
-              id="pos-shortcuts-btn"
-              onClick={() => setShowShortcuts(true)}
-              className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title="Keyboard shortcuts (?)"
-            >
-              <Keyboard className="w-4 h-4" />
-            </button>
-            {!useScannerOnly && <button
-              onClick={() => setShowQuickEntry(true)}
-              className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title="Quick entry: item, qty, rate per line"
-              aria-label="Quick entry"
-            >
-              <Zap className="w-4 h-4" />
-            </button>}
-            {!headerOnly && <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+            <SearchBar
+              searchQuery={searchQuery}
+              onSearchChange={handleSearchChange}
+              onScanBarcode={onScanBarcode}
+              onSearchKeyDown={handleSearchKeyDown}
+            />
+            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
@@ -242,17 +229,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
               >
                 <List className="w-4 h-4" />
               </button>
-            </div>}
-
-            {!posDetails?.allow_warehouse_change && posDetails?.warehouse && (
-              <div
-                className="flex items-center gap-1 h-7 px-2.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 shrink-0"
-                title={`Warehouse: ${posDetails.warehouse}`}
-              >
-                <Warehouse className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-xs font-medium truncate max-w-[10rem]">{posDetails.warehouse}</span>
-              </div>
-            )}
+            </div>
 
             {useScannerOnly && (
               <div className="flex items-center h-8 px-3 rounded-lg bg-blue-600 text-white">
@@ -260,12 +237,44 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
               </div>
             )}
           </div>
+          )}
 
-          <div className="ml-auto"><CartSaleType /></div>
+          <div className="ml-auto shrink-0"><CartSaleType /></div>
 
-          <div className="flex items-center space-x-4 ml-6 relative" ref={dropdownRef}>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerOnly && (
+              onScanBarcode && (
+                <button
+                  onClick={onScanBarcode}
+                  className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  title="Scan Barcode"
+                  type="button"
+                >
+                  <Scan className="w-4 h-4" />
+                </button>
+              )
+            )}
+            <button
+              id="pos-shortcuts-btn"
+              onClick={() => setShowShortcuts(true)}
+              className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="Keyboard shortcuts (?)"
+            >
+              <Keyboard className="w-4 h-4" />
+            </button>
+            {!useScannerOnly && <button
+              onClick={() => setShowQuickEntry(true)}
+              className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="Quick entry: item, qty, rate per line"
+              aria-label="Quick entry"
+            >
+              <Zap className="w-4 h-4" />
+            </button>}
+          </div>
+
+          <div className="flex shrink-0 items-center space-x-4 ml-3 relative" ref={dropdownRef}>
             <div className="text-right">
-              <div className="text-sm font-medium text-gray-900 dark:text-white">{posProfileName}</div>
+              <div className="hidden xl:block text-sm font-medium text-gray-900 dark:text-white">{posProfileName}</div>
               {requiresSalespersonPin ? (
                 <button
                   type="button"
@@ -276,7 +285,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
                   <span>{activeSalesperson?.salesperson_name || "Verify salesperson"}</span>
                 </button>
               ) : null}
-              <div className="text-xs text-gray-500 dark:text-gray-400">{userEmail}</div>
+              <div className="hidden xl:block text-xs text-gray-500 dark:text-gray-400">{userEmail}</div>
             </div>
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}

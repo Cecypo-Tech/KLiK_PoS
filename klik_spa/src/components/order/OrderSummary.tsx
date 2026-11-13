@@ -715,22 +715,6 @@ export default function OrderSummary({
     </div>
   );
 
-  const quoteBanner = quoteMode && (
-    <div
-      role="status"
-      className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-b border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm"
-    >
-      <span className="font-semibold">QUOTE MODE — not a sale; stock is not limited</span>
-      <button
-        id="pos-cancel-quote-btn"
-        onClick={exitQuoteMode}
-        className="shrink-0 rounded-lg border border-amber-500 px-2 py-1 text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-800/40"
-      >
-        Cancel quote
-      </button>
-    </div>
-  );
-
   const cartRow = (item: CartItem, isExpanded: boolean, onToggleExpand: () => void) => (
     <CartItemRow
       key={item.id}
@@ -834,7 +818,6 @@ export default function OrderSummary({
         {/* The payment page sits over the cart: nothing under it may take focus or a stray key. */}
         <div className="contents" inert={showPaymentDialog}>
         <div className="flex-1 min-w-0 flex flex-col">
-          {quoteBanner}
           <div className="flex-1 overflow-y-auto cart-scroll">
             <LineGrid
               ref={gridRef}
@@ -856,7 +839,8 @@ export default function OrderSummary({
           </div>
         </div>
         <div className="@container w-[300px] xl:w-[380px] shrink-0 flex flex-col border-l border-gray-200 dark:border-gray-700 shadow-lg">
-          {customerHeader}
+          {/* The customer sits in the top bar on this layout; the panel is the line and the totals. */}
+          <div className="px-4 empty:hidden"><CustomerLoyaltySummary customer={selectedCustomer} currencySymbol={currency_symbol} /></div>
           <div
             id="pos-line-panel"
             tabIndex={-1}
@@ -914,8 +898,6 @@ export default function OrderSummary({
     >
       <div className="contents" inert={showPaymentDialog}>
       {customerHeader}
-
-      {quoteBanner}
 
       <div
         className={`${
