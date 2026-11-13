@@ -87,3 +87,25 @@ export async function getQuoteDetails(quoteId: string) {
     message?: string;
   }>;
 }
+
+/** The quote's contact and customer email addresses, to prefill the email box. [] on failure. */
+export async function getQuoteEmails(quoteName: string): Promise<string[]> {
+  const res = await getMessage(
+    `/api/method/klik_pos.api.quotation.get_quote_emails?quote_name=${encodeURIComponent(quoteName)}`,
+    "",
+  );
+  return Array.isArray(res) ? res : [];
+}
+
+/** Email the quote PDF to comma-separated addresses. Throws the server's reason on failure. */
+export async function sendQuoteEmail(quoteName: string, emails: string): Promise<void> {
+  const response = await fetch("/api/method/klik_pos.api.quotation.send_quote_email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Frappe-CSRF-Token": csrf() },
+    body: JSON.stringify({ quote_name: quoteName, emails }),
+    credentials: "include",
+  });
+  if (response.ok) return;
+  const result = await response.json().catch(() => null);
+  throw new Error(serverMessage(result) || "Failed to send the email");
+}

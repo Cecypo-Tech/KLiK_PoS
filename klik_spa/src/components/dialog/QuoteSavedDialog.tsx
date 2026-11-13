@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
-import { Loader2, MessageCirclePlus } from "lucide-react";
+import { Loader2, MailPlus, MessageCirclePlus } from "lucide-react";
 import DocShareButtons from "../DocShareButtons";
 import { sendWhatsAppMessage } from "../../services/useSharing";
+import { getQuoteEmails, sendQuoteEmail } from "../../services/quotation";
 
 interface QuoteSavedDialogProps {
   /** "Quote saved" after saving; Invoice History reuses it to send a quote from the list. */
@@ -20,6 +21,33 @@ interface QuoteSavedDialogProps {
 export default function QuoteSavedDialog({ title = "Quote saved", quoteName, customerName, phone, posDetails, onDone }: QuoteSavedDialogProps) {
   const [mobile, setMobile] = useState(phone);
   const [sending, setSending] = useState(false);
+  const [emails, setEmails] = useState("");
+  const [emailing, setEmailing] = useState(false);
+
+  // Prefill from the quote's contact and customer; never overwrite what the cashier typed.
+  useEffect(() => {
+    let live = true;
+    void getQuoteEmails(quoteName).then((found) => {
+      if (live && found.length) setEmails((typed) => typed || found.join(", "));
+    });
+    return () => { live = false; };
+  }, [quoteName]);
+
+  const sendEmail = async () => {
+    if (!emails.trim()) {
+      toast.error("Enter an email address");
+      return;
+    }
+    setEmailing(true);
+    try {
+      await sendQuoteEmail(quoteName, emails);
+      toast.success(`${quoteName} emailed`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send the email");
+    } finally {
+      setEmailing(false);
+    }
+  };
 
   const sendWhatsApp = async () => {
     if (!mobile.trim()) {
@@ -79,6 +107,28 @@ export default function QuoteSavedDialog({ title = "Quote saved", quoteName, cus
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCirclePlus className="h-4 w-4" />}
             WhatsApp
+          </button>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="email"
+            aria-label="Email addresses"
+            placeholder="Email (comma-separate several)"
+            value={emails}
+            onChange={(e) => setEmails(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void sendEmail(); }}
+            className="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={() => void sendEmail()}
+            disabled={emailing}
+            className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {emailing ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailPlus className="h-4 w-4" />}
+            Email
           </button>
         </div>
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createQuote, getQuoteDetails, getQuotes } from "./quotation";
+import { createQuote, getQuoteDetails, getQuoteEmails, getQuotes, sendQuoteEmail } from "./quotation";
 
 const reply = (message: unknown, ok = true) =>
   vi.fn().mockResolvedValue({ ok, status: ok ? 200 : 500, json: async () => ({ message }) });
@@ -84,5 +84,20 @@ describe("quote lookups", () => {
 
     expect(await getQuoteDetails("SAL-QTN-0001")).toEqual({ success: false, message: "No permission for Quotation" });
     expect(await getQuotes()).toEqual({ success: false, message: "No permission for Quotation" });
+  });
+});
+
+describe("quote email", () => {
+  it("prefill is [] when the server refuses", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }));
+    expect(await getQuoteEmails("SAL-QTN-1")).toEqual([]);
+  });
+
+  it("send throws the server's reason", async () => {
+    vi.stubGlobal("window", { csrf_token: "t" });
+    const msg = JSON.stringify({ message: "Not an email address: x" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 417, json: async () => ({ _server_messages: JSON.stringify([msg]) }) }));
+    await expect(sendQuoteEmail("SAL-QTN-1", "x")).rejects.toThrow("Not an email address: x");
   });
 });
