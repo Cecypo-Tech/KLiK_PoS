@@ -21,7 +21,7 @@ import {
   type ReturnData
 } from "../services/returnService";
 
-import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
+import { formatAmount, formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
 import { cashRefundDefault, fixedChargeReturned, returnedValueWithTax, returnsAnyFixedCharge } from "../utils/returnFixedCharges";
 import { useCustomers } from "../hooks/useCustomers";
 import { usePOSProfileStore } from "../stores/posProfileStore";
@@ -1078,7 +1078,7 @@ export default function MultiInvoiceReturn({
                             Return Qty
                           </th>
                           <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                            Amount
+                            Amount ({currency})
                           </th>
                         </tr>
                       </thead>
@@ -1153,7 +1153,7 @@ export default function MultiInvoiceReturn({
                               </div>
                             </td>
                             <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-white">
-                              {formatCurrencyWithSymbol(((item.return_qty || 0) * item.rate), currency)}
+                              {formatAmount((item.return_qty || 0) * item.rate)}
                             </td>
                           </tr>
                         ))}
@@ -1175,13 +1175,13 @@ export default function MultiInvoiceReturn({
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white">
-                                {formatCurrencyWithSymbol(charge.amount, currency)}
+                                {formatAmount(charge.amount)}
                               </td>
                               <td className="px-4 py-3 text-center text-sm text-red-600 dark:text-red-400">
-                                {charge.reversed_by ? formatCurrencyWithSymbol(charge.amount, currency) : ""}
+                                {charge.reversed_by ? formatAmount(charge.amount) : ""}
                               </td>
                               <td className="px-4 py-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                                {charge.reversed_by ? "—" : formatCurrencyWithSymbol(charge.amount, currency)}
+                                {charge.reversed_by ? "—" : formatAmount(charge.amount)}
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center justify-center">
@@ -1196,7 +1196,7 @@ export default function MultiInvoiceReturn({
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-white">
-                                {formatCurrencyWithSymbol(returned ? charge.amount : 0, currency)}
+                                {formatAmount(returned ? charge.amount : 0)}
                               </td>
                             </tr>
                           );

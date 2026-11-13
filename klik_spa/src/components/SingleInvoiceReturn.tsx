@@ -10,7 +10,8 @@ import {
   Truck
 } from "lucide-react";
 import { toast } from "react-toastify";
-import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
+import { formatAmount, formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
+import { creditNoteLine, processReturnLabel } from "./returnCopy";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
@@ -394,36 +395,6 @@ export default function SingleInvoiceReturn({
                     Clear All
                   </button>
                 </div>
-                <div className="text-right">
-                  {originalInvoicePaidAmount > 0 && totalReturnAmount !== returnAmount ? (
-                    <div className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      <div className="flex justify-between items-center">
-                        <span>Total Return Amount:</span>
-                        <span>{formatCurrencyWithSymbol(totalReturnAmount, currency)}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span>Refund to customer:</span>
-                        <span>{formatCurrencyWithSymbol(cashRefundAmount, currency)}</span>
-                      </div>
-                      {/* Nothing is written off: what is not refunded stays on the credit note. */}
-                      <div className="flex justify-between items-center">
-                        <span className="text-orange-600 dark:text-red-400 font-semibold">Left as customer credit:</span>
-                        <span className="text-orange-600 dark:text-red-400 font-semibold">
-                          {formatCurrencyWithSymbol(creditNoteAmount, currency)}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-lg font-bold text-black-600 dark:text-orange-400">
-                      {formatCurrencyWithSymbol(totalReturnAmount, currency)}
-                    </div>
-                  )}
-                  {originalInvoicePaidAmount > 0 && totalReturnAmount === returnAmount && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Customer Paid: {formatCurrencyWithSymbol(originalInvoicePaidAmount, currency)}
-                    </div>
-                  )}
-                </div>
               </div>
 
               {/* Items Table */}
@@ -448,10 +419,10 @@ export default function SingleInvoiceReturn({
                           Return Qty
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Unit Price
+                          Unit Price ({currency})
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Return Amount
+                          Return Amount ({currency})
                         </th>
                       </tr>
                     </thead>
@@ -527,10 +498,10 @@ export default function SingleInvoiceReturn({
                             </div>
                           </td>
                           <td className="px-4 py-4 text-right text-sm text-gray-900 dark:text-white">
-                            {formatCurrencyWithSymbol(item.rate, currency)}
+                            {formatAmount(item.rate)}
                           </td>
                           <td className="px-4 py-4 text-right text-sm font-medium text-gray-900 dark:text-white">
-                            {formatCurrencyWithSymbol((item.return_qty || 0) * item.rate, currency)}
+                            {formatAmount((item.return_qty || 0) * item.rate)}
                           </td>
                         </tr>
                       ))}
@@ -575,10 +546,10 @@ export default function SingleInvoiceReturn({
                               </div>
                             </td>
                             <td className="px-4 py-4 text-right text-sm text-gray-900 dark:text-white">
-                              {formatCurrencyWithSymbol(charge.amount, currency)}
+                              {formatAmount(charge.amount)}
                             </td>
                             <td className="px-4 py-4 text-right text-sm font-medium text-gray-900 dark:text-white">
-                              {formatCurrencyWithSymbol(returned ? charge.amount : 0, currency)}
+                              {formatAmount(returned ? charge.amount : 0)}
                             </td>
                           </tr>
                         );
@@ -643,13 +614,10 @@ export default function SingleInvoiceReturn({
             {refundableCash <= 0 ? (
               <div className="mb-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                 <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-200">
-                  Credit note - no cash refund
+                  Credit note · no cash back
                 </h3>
                 <p className="text-xs text-blue-800 dark:text-blue-300 mt-1">
-                  No cash was kept from this sale, so there is nothing to hand back at the till.{" "}
-                  {owedOnSale > 0 && totalReturnAmount <= owedOnSale
-                    ? `${formatCurrencyWithSymbol(totalReturnAmount, currency)} comes off the ${formatCurrencyWithSymbol(owedOnSale, currency)} the customer still owes on this sale.`
-                    : `${formatCurrencyWithSymbol(totalReturnAmount, currency)} stays with the customer as credit; card or M-Pesa money is refunded by accounts.`}
+                  {creditNoteLine(totalReturnAmount, owedOnSale, currency)}
                 </p>
               </div>
             ) : (
@@ -726,6 +694,9 @@ export default function SingleInvoiceReturn({
                   <CheckCircle className="w-4 h-4 text-green-500" />
                   <span>
                     {returnItems.filter(item => (item.return_qty || 0) > 0).length} item(s) selected for return
+                    {originalInvoicePaidAmount > 0 && totalReturnAmount === returnAmount
+                      ? ` · Customer paid ${formatCurrencyWithSymbol(originalInvoicePaidAmount, currency)}`
+                      : ""}
                   </span>
                 </div>
               </div>
@@ -745,7 +716,7 @@ export default function SingleInvoiceReturn({
                       : 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  {isLoading ? 'Processing Return...' : 'Process Return'}
+                  {processReturnLabel(totalReturnAmount, currency, isLoading)}
                 </button>
               </div>
             </div>
