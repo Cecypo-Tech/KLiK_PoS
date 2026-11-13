@@ -6,7 +6,7 @@ import { toast } from "react-toastify";
 import { paymentBlockReason } from "../../utils/paymentBlockReason";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { getCreditTerms } from "../../services/paymentTerms";
-import { chooseTerm, termLabel, type CreditTerms } from "../../utils/creditTerms";
+import { chooseTerm, type CreditTerms } from "../../utils/creditTerms";
 import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, RefreshCw, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
@@ -91,6 +91,7 @@ import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, ge
 import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader, { AdditionalInfoButton } from "./PaymentHeader";
+import CreditSaleCard from "./CreditSaleCard";
 import { blockKey } from "../../utils/blockKey";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
@@ -245,7 +246,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [invoiceSubmitted, setInvoiceSubmitted] = useState(false);
   // What the server did with the sale - not what the background checkbox asked for.
   const [submissionQueued, setSubmissionQueued] = useState(false);
-  const [isCreditSale, setIsCreditSale] = useState(false);
+  // Picked in the cart (Sale | Credit | Quote); a till with credit off never sells on credit.
+  const isCreditSale = useCartStore((s) => s.creditSale) && creditSalesAllowed(usePOSProfileStore((s) => s.posDetails));
+  const setSaleType = useCartStore((s) => s.setSaleType);
   const [dueDate, setDueDate] = useState("");
   // Payment terms in place of a typed due date, where the site has any (utils/creditTerms).
   const [creditTerms, setCreditTerms] = useState<CreditTerms | null>(null);
@@ -466,13 +469,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     posDetails?.custom_auto_allocate_remaining_payment === 1 ||
     posDetails?.custom_auto_allocate_remaining_payment === "1" ||
     posDetails?.custom_auto_allocate_remaining_payment === true;
-
-  const defaultSalesType = useMemo(() => {
-    const rawValue = typeof posDetails?.default_sales_type === "string"
-      ? posDetails.default_sales_type
-      : "Cash";
-    return rawValue.trim().toLowerCase();
-  }, [posDetails?.default_sales_type]);
 
   const [enableBackgroundSubmission, setEnableBackgroundSubmission] = useState<boolean>(
     Boolean(posDetails?.enable_background_invoice_submission)
@@ -746,10 +742,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       toast.error("An M-Pesa push is pending or paid on this sale - it cannot become a credit sale.");
       return;
     }
-    setIsCreditSale((prev) => {
-      if (!prev) setPaymentAmounts({});
-      return !prev;
-    });
+    if (!isCreditSale) setPaymentAmounts({});
+    setSaleType(isCreditSale ? "sale" : "credit");
   };
 
   const currentDate = new Date().toLocaleDateString("en-US", {
@@ -2493,16 +2487,15 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
 
-    const shouldDefaultToCredit = allowCreditSales && defaultSalesType === "credit";
-    setIsCreditSale(shouldDefaultToCredit);
-
-    if (shouldDefaultToCredit) {
+    // The cart decided (its default follows the till's Default Sales Type): a credit sale
+    // opens with no payment typed in.
+    if (isCreditSale) {
       setPaymentAmounts({});
       setLastModifiedMethodId(null);
     }
 
     initializedCreditDefaultRef.current = true;
-  }, [isOpen, allowCreditSales, defaultSalesType]);
+  }, [isOpen, isCreditSale]);
 
   useEffect(() => {
     // A template restored from a held order wins over the till default.
@@ -3118,6 +3111,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             ) : (
               <>
+                {isCreditSale && (
+                  <CreditSaleCard
+                    customerName={selectedCustomer?.name || ""}
+                    terms={creditTerms}
+                    termsTemplate={termsTemplate}
+                    onSelectTerm={selectTerm}
+                    dueDate={dueDate}
+                    onDueDateChange={setDueDate}
+                    disabled={invoiceSubmitted || isProcessingPayment}
+                    currencySymbol={displayCurrencySymbol}
+                  />
+                )}
                 <PaymentMethods
                   paymentMethods={paymentMethods}
                   invoiceSubmitted={invoiceSubmitted}
@@ -3132,67 +3137,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   headerRight={
                     <div className="flex items-center gap-2 flex-wrap justify-end">
                     {renderVoucherButton()}
-                    {allowCreditSales ? (
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
-                          {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
-                        </button>
-                        {isCreditSale && usingTerms && (
-                          <div className="flex items-center gap-1.5">
-                            <label htmlFor="pos-credit-terms-mobile" className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                              Terms:
-                            </label>
-                            <select
-                              id="pos-credit-terms-mobile"
-                              value={termsTemplate}
-                              onChange={(e) => selectTerm(e.target.value)}
-                              disabled={invoiceSubmitted || isProcessingPayment}
-                              className={`max-w-[11rem] px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
-                            >
-                              {creditTerms?.templates.map((term) => (
-                                <option key={term.name} value={term.name}>
-                                  {termLabel(term)}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        {isCreditSale && !usingTerms && (
-                          <div className="flex items-center gap-1.5">
-                            <label htmlFor="pos-credit-due-date-mobile" className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                              Due:
-                            </label>
-                            <input
-                              id="pos-credit-due-date-mobile"
-                              type="date"
-                              value={dueDate}
-                              onChange={(e) => setDueDate(e.target.value)}
-                              min={new Date().toISOString().split("T")[0]}
-                              disabled={invoiceSubmitted || isProcessingPayment}
-                              className={`px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      // Rendered inert rather than hidden: a control that simply vanishes cannot
-                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
-                      // button emits no click, so the explanation would never fire.
-                      <button
-                        type="button"
-                        aria-disabled="true"
-                        onClick={() =>
-                          toast.info(
-                            posDetails?.name
-                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" on ${posDetails.name} to use them.`
-                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" to use them.',
-                          )
-                        }
-                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
-                      >
-                        Is Credit Sale
-                      </button>
-                    )}
                     </div>
                   }
                 />
@@ -3413,6 +3357,18 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               />
             ) : (
               <>
+                {isCreditSale && (
+                  <CreditSaleCard
+                    customerName={selectedCustomer?.name || ""}
+                    terms={creditTerms}
+                    termsTemplate={termsTemplate}
+                    onSelectTerm={selectTerm}
+                    dueDate={dueDate}
+                    onDueDateChange={setDueDate}
+                    disabled={invoiceSubmitted || isProcessingPayment}
+                    currencySymbol={displayCurrencySymbol}
+                  />
+                )}
                 <PaymentMethods
                   paymentMethods={paymentMethods}
                   invoiceSubmitted={invoiceSubmitted}
@@ -3427,67 +3383,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   headerRight={
                     <div className="flex items-center gap-2 flex-wrap justify-end">
                     {renderVoucherButton()}
-                    {allowCreditSales ? (
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => toggleCreditSale()} disabled={invoiceSubmitted || isProcessingPayment} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${isCreditSale ? "bg-teal-600 text-white dark:bg-teal-500" : "bg-teal-100 text-teal-800 hover:bg-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/60"} ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}>
-                          {isCreditSale ? "Credit Sale Enabled" : "Is Credit Sale"}
-                        </button>
-                        {isCreditSale && usingTerms && (
-                          <div className="flex items-center gap-2">
-                            <label htmlFor="pos-credit-terms" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                              Terms
-                            </label>
-                            <select
-                              id="pos-credit-terms"
-                              value={termsTemplate}
-                              onChange={(e) => selectTerm(e.target.value)}
-                              disabled={invoiceSubmitted || isProcessingPayment}
-                              className={`max-w-[16rem] px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
-                            >
-                              {creditTerms?.templates.map((term) => (
-                                <option key={term.name} value={term.name}>
-                                  {termLabel(term)}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        {isCreditSale && !usingTerms && (
-                          <div className="flex items-center gap-2">
-                            <label htmlFor="pos-credit-due-date" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                              Due Date
-                            </label>
-                            <input
-                              id="pos-credit-due-date"
-                              type="date"
-                              value={dueDate}
-                              onChange={(e) => setDueDate(e.target.value)}
-                              min={new Date().toISOString().split("T")[0]}
-                              disabled={invoiceSubmitted || isProcessingPayment}
-                              className={`px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-beveren-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm ${invoiceSubmitted || isProcessingPayment ? "cursor-not-allowed opacity-50" : ""}`}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      // Rendered inert rather than hidden: a control that simply vanishes cannot
-                      // tell anyone why. aria-disabled, NOT the disabled attribute — a disabled
-                      // button emits no click, so the explanation would never fire.
-                      <button
-                        type="button"
-                        aria-disabled="true"
-                        onClick={() =>
-                          toast.info(
-                            posDetails?.name
-                              ? `Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" on ${posDetails.name} to use them.`
-                              : 'Credit sales are turned off for this POS Profile. Enable "Allow Credit Sales" to use them.',
-                          )
-                        }
-                        className="px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors cursor-help"
-                      >
-                        Is Credit Sale
-                      </button>
-                    )}
                     </div>
                   }
                 />
