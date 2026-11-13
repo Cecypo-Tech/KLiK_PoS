@@ -12,3 +12,11 @@ export function defaultCreditSale(
   const type = typeof profile?.default_sales_type === "string" ? profile.default_sales_type.trim().toLowerCase() : "";
   return creditSalesAllowed(profile) && type === "credit" && (customer as { isWalkin?: number } | null)?.isWalkin !== 1;
 }
+
+export const SALE_TYPE_LABEL: Record<SaleType, string> = { sale: "Cash Sale", credit: "Credit Sale", quote: "Quote" };
+// The box wears the chosen type's colour: beveren sale, teal credit, amber quote (the bar turns amber too).
+export const SALE_TYPE_COLOUR: Record<SaleType, string> = {
+  sale: "bg-beveren-600 hover:bg-beveren-700",
+  credit: "bg-teal-600 hover:bg-teal-700 dark:bg-teal-500",
+  quote: "bg-amber-600 hover:bg-amber-700",
+};
