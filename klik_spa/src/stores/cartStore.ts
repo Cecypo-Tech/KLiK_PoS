@@ -639,22 +639,23 @@ export const useCartStore = create<CartState>()(
         const item = state.cartItems.find((cartItem) => cartItem.id === id);
         if (!item) return;
 
-        const requested = item.quantity + (item.los_qty ?? 0) + delta;
+        const onLine = item.quantity + (item.los_qty ?? 0);
+        const stockAvailable = (item.available ?? 0) * stockFactor(item);
+        const stock = {
+          limited: hasFiniteAvailableStock(item),
+          available: stockAvailable,
+          otherLinesQty: linesStockQty(state.cartItems, item.item_code || item.id, id),
+          factor: item.conversion_factor,
+        };
+        // + takes the last part-unit (1 → 1.5 of 1.5 kg), as a click on the item does.
+        const requested = onLine + (delta === 1 ? clickStep(stock, onLine) : delta);
 
         if (requested <= 0) {
           get().removeItem(id);
           return;
         }
 
-        const stockAvailable = (item.available ?? 0) * stockFactor(item);
-        const plan = planLineQty({
-          limited: hasFiniteAvailableStock(item),
-          available: stockAvailable,
-          requested,
-          otherLinesQty: linesStockQty(state.cartItems, item.item_code || item.id, id),
-          losEnabled: losEnabledFor(item),
-          factor: item.conversion_factor,
-        });
+        const plan = planLineQty({ ...stock, requested, losEnabled: losEnabledFor(item) });
         if (!plan) {
           toast.warning(`${noStockMessage(item.name, item.uom, stockAvailable, item.conversion_factor)}.`);
           return;
