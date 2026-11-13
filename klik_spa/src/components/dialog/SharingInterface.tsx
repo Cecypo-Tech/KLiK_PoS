@@ -157,7 +157,8 @@ export default function SharingInterface({
         email: sharingData.email,
         customer_name: sharingData.name,
         invoice_data: invoiceData?.name || "",
-        message: getProcessedEmailMessage(),
+        // Raw text: the server fills the placeholders from the invoice (the preview below is approximate).
+        message: emailMessage,
         template: selectedEmailTemplate?.name || undefined,
         sender: selectedSender || undefined,
       });

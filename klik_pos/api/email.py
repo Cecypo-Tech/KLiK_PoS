@@ -11,7 +11,20 @@ def render_email(doc, template=None, message=None, fallback_subject="", fallback
 	"""(subject, message) for emailing `doc`. The Email Template gives the subject and, unless the
 	cashier's own `message` is passed, the body. Both are Jinja-rendered with `doc`; text that
 	isn't valid Jinja is sent as typed."""
-	ctx = {"doc": doc.as_dict(), **doc.as_dict()}
+	d = doc.as_dict()
+	name = d.get("customer_name") or ""
+	total = frappe.utils.fmt_money(d.get("rounded_total") or d.get("grand_total") or 0, currency=d.get("currency"))
+	# The checkout's older {{placeholder}} names, filled from the document. Delivery ones have no
+	# source on an invoice and go blank.
+	aliases = {
+		"customer": name, "first_name": name.split(" ")[0], "last_name": " ".join(name.split(" ")[1:]),
+		"address": d.get("address_display") or "", "customer_address": d.get("address_display") or "",
+		"invoice_number": doc.name, "delivery_note": doc.name, "invoice_total": total, "grand_total": total,
+		"company_name": d.get("company") or "",
+		"date": frappe.utils.formatdate(d.get("posting_date") or d.get("transaction_date")),
+		"departure_time": "", "estimated_arrival": "", "driver_name": "", "cell_number": "", "vehicle": "",
+	}
+	ctx = {**d, **aliases, "doc": d}
 
 	def render(text):
 		try:

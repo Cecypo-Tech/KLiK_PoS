@@ -54,3 +54,11 @@ class TestInvoiceEmail(FrappeTestCase):
 		kw = self._send(message="Price {{ oops")
 		self.assertEqual(kw["message"], "Price {{ oops")
 		self.assertIn(self.si, kw["subject"])
+
+	def test_old_placeholder_names_get_real_values_and_delivery_ones_go_blank(self):
+		frappe.db.set_value("POS Profile", self.profile, "custom_email_template", None)
+		doc = frappe.get_doc("Sales Invoice", self.si)
+		kw = self._send(message="{{invoice_number}}|{{company_name}}|{{customer}}|{{driver_name}}|{{cell_number}}|")
+		self.assertEqual(kw["message"], f"{self.si}|{doc.company}|{doc.customer_name}|||")
+		kw = self._send(message="{{invoice_total}}")
+		self.assertEqual(kw["message"], frappe.utils.fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency))
