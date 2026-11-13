@@ -8,7 +8,6 @@ import {
   X, 
   Loader2, 
   Check,
-  Building,
   User,
   UserPlus,
   Mail,
@@ -27,8 +26,9 @@ import { useCartStore } from "../../stores/cartStore";
 import { useExtraFields } from "../../hooks/useExtraFields";
 import countryList from "react-select-country-list";
 import { parsePhoneNumber } from "react-phone-number-input";
-import { customerRowDetails } from "../../utils/customerRow";
+import { customerBadge, customerRowDetails } from "../../utils/customerRow";
 import AddCustomerModal from "../customer/AddCustomerModal";
+import { CustomerIcon } from "./customerMarks";
 import OverdueWarningModal from "../customer/OverdueWarningModal";
 import {
   AlertDialog,
@@ -492,21 +492,6 @@ export const CustomerSearchSection = ({
     setPrefilledData({});
   };
 
-  const getCustomerIcon = (customer: Customer, size = 18) =>
-    customer.type === "company"
-      ? <Building size={size} className="shrink-0 text-purple-500" aria-hidden />
-      : <User size={size} className={`shrink-0 ${customer.type === "walk-in" ? "text-gray-500" : "text-blue-500"}`} aria-hidden />;
-
-  const getCustomerBadge = (customer: Customer) => {
-    if (customer.type === "company") {
-      return { label: "Company", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" };
-    }
-    if (customer.status === "vip") {
-      return { label: "VIP", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" };
-    }
-    return null;
-  };
-
   const isLoadingState = isLoading || isLoadingCustomers;
 
   const dropdown = isOpen ? (
@@ -558,7 +543,7 @@ export const CustomerSearchSection = ({
           </div>
         ) : customers.length > 0 ? (
           customers.map((customer, idx) => {
-            const badge = getCustomerBadge(customer);
+            const badge = customerBadge(customer);
             const isSelected = selectedCustomer?.id === customer.id;
             
             return (
@@ -579,7 +564,7 @@ export const CustomerSearchSection = ({
                 `}
               >
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5">{getCustomerIcon(customer)}</div>
+                  <div className="mt-0.5"><CustomerIcon customer={customer} /></div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-gray-900 dark:text-white text-sm truncate">
@@ -642,7 +627,7 @@ export const CustomerSearchSection = ({
 
   const walkin = selectedCustomer?.isWalkin === 1;
   const phone = walkin ? walkinDetails.phone : selectedCustomer?.phone !== "N/A" ? selectedCustomer?.phone : "";
-  const badge = selectedCustomer ? getCustomerBadge(selectedCustomer) : null;
+  const badge = selectedCustomer ? customerBadge(selectedCustomer) : null;
   const badgePill = badge && (
     <span className={`shrink-0 text-[11px] leading-none px-1.5 py-0.5 rounded ${badge.color}`}>{badge.label}</span>
   );
@@ -651,7 +636,7 @@ export const CustomerSearchSection = ({
   const card = selectedCustomer ? (
     bar ? (
       <div className="flex-1 min-w-0 flex items-center gap-2" title={[selectedCustomer.name, phone].filter(Boolean).join(" · ")}>
-        {getCustomerIcon(selectedCustomer, 16)}
+        <CustomerIcon customer={selectedCustomer} size={16} />
         <span className="truncate font-medium text-gray-900 dark:text-white text-sm">{selectedCustomer.name}</span>
         {/* Tight bar: the name wins over the badge. */}
         <span className="hidden xl:contents">{badgePill}</span>
@@ -659,7 +644,7 @@ export const CustomerSearchSection = ({
       </div>
     ) : (
       <div className="flex-1 min-w-0 flex items-center gap-3 py-2">
-        {getCustomerIcon(selectedCustomer)}
+        <CustomerIcon customer={selectedCustomer} />
         <div className="flex-1 min-w-0">
         <div className="font-medium text-gray-900 dark:text-white text-sm leading-tight line-clamp-2 break-words" title={selectedCustomer.name}>
           {selectedCustomer.name}

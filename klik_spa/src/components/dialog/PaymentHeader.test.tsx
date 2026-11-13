@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import PaymentHeader from "./PaymentHeader";
 
+vi.mock("../order/SaleContextStrip", () => ({ default: () => <div data-stub="sale-context" /> }));
 vi.mock("../../utils/printHandler", () => ({ handlePrintInvoice: vi.fn() }));
 
 const orderComplete = (extra: Record<string, unknown> = {}) =>
@@ -44,17 +45,10 @@ describe("PaymentHeader on Order Complete (desktop)", () => {
 describe("PaymentHeader before payment", () => {
   const checkout = (extra: Record<string, unknown> = {}) => orderComplete({ invoiceSubmitted: false, ...extra });
 
-  it("names the customer instead of 'Order Summary'", () => {
-    const html = checkout({ customerName: "JOHN NJENGA MUIRURI" });
-    expect(html).toMatch(/<h2[^>]*>JOHN NJENGA MUIRURI<\/h2>/);
-    expect(html).not.toContain("Order Summary");
-  });
-
-  it("falls back to 'Order Summary' with no customer", () => {
-    expect(checkout()).toMatch(/<h2[^>]*>Order Summary<\/h2>/);
-  });
-
-  it("renders the sale type slot", () => {
-    expect(checkout({ saleTypeSlot: <span>SALE-TYPE-SLOT</span> })).toContain("SALE-TYPE-SLOT");
+  it("shows the cart's top bar, read-only, in place of a title", () => {
+    const html = checkout();
+    expect(html).toContain('data-stub="sale-context"');
+    expect(html).not.toMatch(/<h2/);
+    expect(html).not.toMatch(/<select/);
   });
 });

@@ -45,7 +45,6 @@ import {
 } from "../../utils/mpesaReceipts";
 import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
-import { quotesAllowed } from "../../utils/quotesAllowed";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
 import {
@@ -93,7 +92,6 @@ import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, get
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader, { AdditionalInfoButton } from "./PaymentHeader";
 import CreditSaleCard from "./CreditSaleCard";
-import SaleTypeControl from "../order/SaleTypeControl";
 import { blockKey } from "../../utils/blockKey";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
@@ -452,7 +450,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     || posDetails?.allow_discount_change === "1"
     || posDetails?.allow_discount_change === true;
   const allowPartialPayments = Boolean(posDetails?.allow_partial_payment);
-  const allowCreditSales = creditSalesAllowed(posDetails);
   const requiresSalespersonPin = !!posDetails?.custom_sales_person_pin_required;
   const allow_holding_invoices = Boolean(posDetails?.allow_holding_invoices);
   const isShippingRuleEnabled =
@@ -742,15 +739,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   }, [backendTaxPreview, cartItems, getEffectiveItemRate]);
   
   const previousCheckoutGrandTotalRef = useRef(checkoutPayableTotal);
-
-  const toggleCreditSale = () => {
-    if (stkLockedMethod) {
-      toast.error("An M-Pesa push is pending or paid on this sale - it cannot become a credit sale.");
-      return;
-    }
-    if (!isCreditSale) setPaymentAmounts({});
-    setSaleType(isCreditSale ? "sale" : "credit");
-  };
 
   const currentDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
@@ -3031,24 +3019,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   if (isLoading || posLoading) return <div className="p-6">Loading...</div>;
   if (error) return <div className="p-6 text-red-500">Error: {error}</div>;
 
-  // Quote / Cash Sale | Credit Sale without going back to the cart. A quote takes no payment,
-  // so picking it returns to the cart in quote mode. The STK guard lives in toggleCreditSale.
-  const saleTypeSwitch = (
-    <SaleTypeControl
-      value={isCreditSale ? "credit" : "sale"}
-      options={[...(quotesAllowed(posDetails) ? (["quote"] as const) : []), "sale", ...(allowCreditSales ? (["credit"] as const) : [])]}
-      onChange={(type) => {
-        if (type === "quote") { setSaleType("quote"); closeDialog(false); return; }
-        if ((type === "credit") !== isCreditSale) toggleCreditSale();
-      }}
-      disabledReasons={{
-        ...(selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : {}),
-        ...(stkLockedMethod ? { quote: "An M-Pesa payment is in progress" } : {}),
-      }}
-      disabled={invoiceSubmitted || isProcessingPayment}
-    />
-  );
-
   if (isMobile) {
     return (
       <div className={isFullPage ? "h-full bg-white dark:bg-gray-900 flex flex-col overflow-hidden" : "fixed inset-0 bg-white dark:bg-gray-900 z-50 flex flex-col overflow-hidden"}>
@@ -3137,7 +3107,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             ) : (
               <>
-                {!invoiceSubmitted && saleTypeSwitch}
                 {isCreditSale && (
                   <CreditSaleCard
                     customerName={selectedCustomer?.name || ""}
@@ -3347,8 +3316,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onAdditionalInfo={canOpenAdditionalInfo ? () => setAdditionalInfoOpen(true) : undefined}
           onQzReprint={qzEnabled ? qz.start : undefined}
           qzCount={qz.count}
-          customerName={selectedCustomer?.name}
-          saleTypeSlot={saleTypeSwitch}
         />
 
         <div className="flex flex-1 min-h-0">
