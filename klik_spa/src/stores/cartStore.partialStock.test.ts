@@ -42,4 +42,37 @@ describe("the last part-unit of stock", () => {
     expect(await useCartStore.getState().addToCart(wire())).toBeNull();
     expect(lines().map((l) => l.quantity)).toEqual([0.5]);
   });
+
+  it("+ on a line takes the last part-unit (1.5 in stock, line at 1 → 1.5)", async () => {
+    profile(0);
+    await useCartStore.getState().addToCart(wire(1.5));
+    const id = lines()[0]!.id;
+    await useCartStore.getState().adjustQuantity(id, 1);
+    expect(lines().map((l) => [l.quantity, l.los_qty ?? 0])).toEqual([[1.5, 0]]);
+  });
+
+  it("+ with Loss of Sale on takes the last part-unit without booking LoS", async () => {
+    profile(1);
+    await useCartStore.getState().addToCart(wire(1.5));
+    await useCartStore.getState().adjustQuantity(lines()[0]!.id, 1);
+    expect(lines().map((l) => [l.quantity, l.los_qty ?? 0])).toEqual([[1.5, 0]]);
+  });
+
+  it("+ once the stock is all on the line is still refused (LoS off)", async () => {
+    profile(0);
+    await useCartStore.getState().addToCart(wire(1.5));
+    const id = lines()[0]!.id;
+    await useCartStore.getState().adjustQuantity(id, 1);
+    await useCartStore.getState().adjustQuantity(id, 1);
+    expect(lines().map((l) => l.quantity)).toEqual([1.5]);
+  });
+
+  it("- from a part-unit steps down by one as before", async () => {
+    profile(0);
+    await useCartStore.getState().addToCart(wire(1.5));
+    const id = lines()[0]!.id;
+    await useCartStore.getState().adjustQuantity(id, 1);
+    await useCartStore.getState().adjustQuantity(id, -1);
+    expect(lines().map((l) => l.quantity)).toEqual([0.5]);
+  });
 });

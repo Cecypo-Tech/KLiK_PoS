@@ -261,7 +261,7 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
             )}
           </div>
 
-          <CartSaleType />
+          <div className="ml-auto"><CartSaleType /></div>
 
           <div className="flex items-center space-x-4 ml-6 relative" ref={dropdownRef}>
             <div className="text-right">
