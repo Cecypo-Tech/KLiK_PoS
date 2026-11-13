@@ -79,6 +79,8 @@ describe("LineGrid", () => {
     expect(off).toContain('colSpan="7"');
     const on = render([line("SKU-1", "Apple")], { custom_show_item_code_in_product_list: 1 });
     expect(on).toContain(">Code</th>");
+    expect(on.indexOf(">Code</th>")).toBeLessThan(on.indexOf(">Item</th>"));
+    expect(on.indexOf(">SKU-1</td>")).toBeLessThan(on.indexOf(">Apple</div>"));
     expect(on).toMatch(/<td[^>]*text-gray-900[^>]*>SKU-1<\/td>/);
     expect(on).toContain('colSpan="8"');
   });
@@ -132,6 +134,9 @@ describe("ItemResults (the entry row's search dropdown)", () => {
   it("shows the item code only when the profile shows codes in the product list", () => {
     expect(html(false, [pen], true)).toContain(">Code</span>");
     expect(html(false, [pen], true)).toMatch(/text-gray-900[^>]*>PEN<\/span>/);
+    const out = html(false, [pen], true);
+    expect(out.indexOf(">Code</span>")).toBeLessThan(out.indexOf(">Item</span>"));
+    expect(out.indexOf(">PEN</span>")).toBeLessThan(out.indexOf("Blue"));
     expect(html(false, [pen], false)).not.toContain(">PEN</span>");
   });
 

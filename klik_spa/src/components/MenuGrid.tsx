@@ -19,6 +19,7 @@ import SalespersonAuthModal from "./dialog/SalespersonAuthModal";
 import { useSalespersonStore } from "../stores/salespersonStore";
 import KeyboardShortcutsPanel from "./KeyboardShortcutsPanel";
 import QuickEntryDialog from "./QuickEntryDialog";
+import CartSaleType from "./order/CartSaleType";
 
 interface MenuGridProps {
   onRefreshStock?: () => void;
@@ -259,7 +260,9 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
               </div>
             )}
           </div>
-          
+
+          <CartSaleType />
+
           <div className="flex items-center space-x-4 ml-6 relative" ref={dropdownRef}>
             <div className="text-right">
               <div className="text-sm font-medium text-gray-900 dark:text-white">{posProfileName}</div>

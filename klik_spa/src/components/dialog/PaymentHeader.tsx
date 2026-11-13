@@ -135,7 +135,7 @@ export default function PaymentHeader({
         </button>
       </div>
       <div className="flex items-center gap-2">
-        {saleTypeSlot && <div className="w-48">{saleTypeSlot}</div>}
+        {saleTypeSlot && <div className="shrink-0">{saleTypeSlot}</div>}
         <button
           onClick={() => onClose(invoiceSubmitted)}
           disabled={isProcessingPayment || isHoldingOrder}

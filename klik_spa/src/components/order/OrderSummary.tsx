@@ -34,9 +34,7 @@ import { OrderSummaryFooter } from "./OrderSummaryFooter";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { quotesAllowed } from "../../utils/quotesAllowed";
-import { creditSalesAllowed } from "../../utils/creditSales";
-import type { SaleType } from "../../utils/saleType";
-import SaleTypeControl from "./SaleTypeControl";
+import CartSaleType from "./CartSaleType";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
 import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
@@ -80,8 +78,6 @@ export default function OrderSummary({
     consumeRateOverrides,
     quoteMode,
     exitQuoteMode,
-    creditSale,
-    setSaleType,
     walkinDetails,
     extraFields,
     shippingRule,
@@ -152,11 +148,6 @@ export default function OrderSummary({
   const currency_symbol = posDetails?.currency_symbol;
   const autoFetchBatch = posDetails?.custom_autofetch_batchserial_ === 1;
   const canQuote = quotesAllowed(posDetails);
-  const saleTypeOptions: SaleType[] = [
-    "sale",
-    ...(creditSalesAllowed(posDetails) ? (["credit"] as const) : []),
-    ...(canQuote ? (["quote"] as const) : []),
-  ];
   // A till switched off for quotes drops a quote mode left over from before (it is persisted).
   useEffect(() => {
     if (!canQuote && quoteMode) exitQuoteMode();
@@ -719,14 +710,8 @@ export default function OrderSummary({
         customer={selectedCustomer}
         currencySymbol={currency_symbol}
       />
-      <div className="mt-3">
-        <SaleTypeControl
-          value={quoteMode ? "quote" : creditSale ? "credit" : "sale"}
-          options={saleTypeOptions}
-          onChange={setSaleType}
-          disabledReasons={selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : undefined}
-        />
-      </div>
+      {/* Desktop carries it in the top bar; the phone cart has no top bar. */}
+      {isMobile && <div className="mt-3"><CartSaleType /></div>}
     </div>
   );
 

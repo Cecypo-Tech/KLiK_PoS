@@ -45,6 +45,7 @@ import {
 } from "../../utils/mpesaReceipts";
 import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
+import { quotesAllowed } from "../../utils/quotesAllowed";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
 import {
@@ -3030,16 +3031,23 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   if (isLoading || posLoading) return <div className="p-6">Loading...</div>;
   if (error) return <div className="p-6 text-red-500">Error: {error}</div>;
 
-  // Sale | Credit without going back to the cart; the STK guard lives in toggleCreditSale.
-  const saleTypeSwitch = allowCreditSales ? (
+  // Quote / Cash Sale | Credit Sale without going back to the cart. A quote takes no payment,
+  // so picking it returns to the cart in quote mode. The STK guard lives in toggleCreditSale.
+  const saleTypeSwitch = (
     <SaleTypeControl
       value={isCreditSale ? "credit" : "sale"}
-      options={["sale", "credit"]}
-      onChange={(type) => { if ((type === "credit") !== isCreditSale) toggleCreditSale(); }}
-      disabledReasons={selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : undefined}
+      options={[...(quotesAllowed(posDetails) ? (["quote"] as const) : []), "sale", ...(allowCreditSales ? (["credit"] as const) : [])]}
+      onChange={(type) => {
+        if (type === "quote") { setSaleType("quote"); closeDialog(false); return; }
+        if ((type === "credit") !== isCreditSale) toggleCreditSale();
+      }}
+      disabledReasons={{
+        ...(selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : {}),
+        ...(stkLockedMethod ? { quote: "An M-Pesa payment is in progress" } : {}),
+      }}
       disabled={invoiceSubmitted || isProcessingPayment}
     />
-  ) : null;
+  );
 
   if (isMobile) {
     return (
