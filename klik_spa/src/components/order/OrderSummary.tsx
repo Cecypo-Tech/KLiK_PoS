@@ -715,9 +715,10 @@ export default function OrderSummary({
     </div>
   );
 
-  const cartRow = (item: CartItem, isExpanded: boolean, onToggleExpand: () => void) => (
+  const cartRow = (item: CartItem, isExpanded: boolean, onToggleExpand: () => void, variant?: "facts") => (
     <CartItemRow
       key={item.id}
+      variant={variant}
       item={item}
       itemId={item.id}
       isExpanded={isExpanded}
@@ -853,7 +854,7 @@ export default function OrderSummary({
             }}
           >
             {selected ? (
-              cartRow(selected, true, () => {})
+              cartRow(selected, true, () => {}, "facts")
             ) : (
               <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                 {cartItems.length ? "Select a line" : "Scan or type an item to start"}

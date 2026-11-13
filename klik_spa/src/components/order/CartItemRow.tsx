@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { Minus, Plus, X, Package, ChevronDown, ChevronUp, AlertTriangle, Eye, Pencil } from "lucide-react";
 import { toast } from "react-toastify";
 import type { BundleEntry, CartItem, ItemTaxInfo } from "../../../types";
@@ -39,6 +39,7 @@ import {
 } from "../../utils/priceOptions";
 import { rateBoxMinimum } from "../../utils/priceFloor";
 import { discountAmountFromPct, discountPctFromAmount } from "../../utils/lineEdits";
+import { uomLines, visibleFacts, type LineInfo } from "../../utils/lineInfo";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -61,6 +62,9 @@ interface CartItemRowProps {
   currency_symbol?: string;
   isMobile?: boolean;
   autoFetchBatch?: boolean;
+  /** "facts": the grid till's side panel. The grid row edits the line, so the panel shows the
+   * item's facts as the till's POS Profile lists them, under the name, chip and Serial/Batch. */
+  variant?: "row" | "facts";
 }
 
 interface BatchData {
@@ -135,7 +139,9 @@ export const CartItemRow = ({
   currency_symbol,
   isMobile,
   autoFetchBatch = false,
+  variant = "row",
 }: CartItemRowProps) => {
+  const facts = variant === "facts";
   const { updateItemBundleEntries, adjustQuantity } = useCartStore();
   const cartPriceList = useCartStore((s) => s.selectedPriceList);
   const quoteMode = useCartStore((s) => s.quoteMode);
@@ -192,6 +198,17 @@ export const CartItemRow = ({
   }, [itemDiscount.discountAmount, preDiscountPrice]);
   const [fullItemData, setFullItemData] = useState<ItemFullData | null>(null);
   const [isLoadingFullData, setIsLoadingFullData] = useState(false);
+  const [lineInfo, setLineInfo] = useState<LineInfo | null>(null);
+  useEffect(() => {
+    if (!facts) return;
+    let live = true;
+    setLineInfo(null);
+    fetch(`/api/method/klik_pos.api.item.line_info.get_line_info?item_code=${encodeURIComponent(item.item_code || item.id)}`)
+      .then((r) => r.json())
+      .then((res) => { if (live) setLineInfo(res?.message ?? null); })
+      .catch((e) => console.error("Line info failed:", e));
+    return () => { live = false; };
+  }, [facts, item.item_code, item.id]);
 
   const hasSerialOrBatch = item.has_serial_no || item.has_batch_no;
   const pickedWarehouse = usePOSProfileStore((s) => s.warehouse);
@@ -620,6 +637,288 @@ export const CartItemRow = ({
     }
   };
 
+  // Each fact once: the cart row draws them in a fixed order, the facts panel in the till's.
+  const priceChip = linePriceOptions.length > 0 ? (
+                <button
+                  ref={priceTriggerRef}
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded={!!linePricePopup}
+                  onClick={(e) => { e.stopPropagation(); if (linePricePopup) setLinePricePopup(null); else openLinePricePopup(); }}
+                  onKeyDown={handlePriceTriggerKeyDown}
+                  // Firefox clicks a button on Space keyup even when keydown was prevented,
+                  // which would reopen the popup straight after a Space commit.
+                  onKeyUp={(e) => { if (e.key === " ") e.preventDefault(); }}
+                  onBlur={() => setLinePricePopup(null)}
+                  title={
+                    shownLinePriceList
+                      ? `${shownLinePriceList.price_list}: ${formatCurrencyWithSymbol(Number(shownLinePriceList.rate || 0), currency_symbol)} - switch price list`
+                      : "Switch price list for this line"
+                  }
+                  className={`max-w-full inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    activeLinePriceList
+                      ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
+                      : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
+                  }`}
+                >
+                  <span className="truncate font-mono">
+                    {linePriceListLabel}
+                  </span>
+                  <ChevronDown size={10} className="flex-shrink-0" />
+                </button>
+              ) : null;
+  const serialBatch = (
+    <>
+      {hasSerialOrBatch ? (
+                <button
+                  type="button"
+                  onClick={handleOpenModal}
+                  className={`w-full flex items-center justify-center gap-2 h-9 rounded-md border text-sm font-medium transition-colors ${
+                    hasBundleEntries
+                      ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30"
+                      : "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                  }`}
+                >
+                  <Package size={14} />
+                  {hasBundleEntries ? "Update Serial/Batch" : "Add Serial/Batch"}
+                </button>
+              ) : null}
+      {hasBundleEntries ? (
+                <div className="rounded-md border border-blue-200 dark:border-blue-800 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setIsBundleDetailsOpen(!isBundleDetailsOpen)}
+                    className="w-full flex items-center justify-between p-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                  >
+                    <span className="text-xs text-blue-800 dark:text-blue-300 font-medium">Batch/Serial Details:</span>
+                    {isBundleDetailsOpen ? (
+                      <ChevronUp size={14} className="text-blue-800 dark:text-blue-300" />
+                    ) : (
+                      <ChevronDown size={14} className="text-blue-800 dark:text-blue-300" />
+                    )}
+                  </button>
+                  {isBundleDetailsOpen ? (
+                    <div className="p-2 pt-0 bg-blue-50 dark:bg-blue-900/20 space-y-1">
+                      {bundleEntries.map((entry, idx) => (
+                        <div key={idx} className="text-xs text-blue-700 dark:text-blue-400">
+                          {entry.serial_no ? <span>Serial: {entry.serial_no} </span> : null}
+                          {entry.batch_no ? <span>Batch: {entry.batch_no} </span> : null}
+                          {entry.qty ? <span>Qty: {entry.qty}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+    </>
+  );
+  const stockRow = currentWarehouseStock || showNoStockWarning ? (
+                  <div className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>In stock</span>
+                    <span className={`text-right tabular-nums ${showNoStockWarning ? "text-red-600 dark:text-red-400" : showStockWarning ? "text-amber-600 dark:text-amber-400" : "text-gray-900 dark:text-white"}`}>
+                      {(showNoStockWarning || showStockWarning) ? <AlertTriangle size={12} className="inline mr-1 -mt-0.5" /> : null}
+                      {availableStockLabel} {item.uom || fullItemData?.uom}
+                      <span className="text-xs text-gray-500 dark:text-gray-400"> · {warehouse}</span>
+                    </span>
+                  </div>
+                ) : null;
+  const weightRow = lineWeight.total > 0 ? (
+                  <div className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>Weight</span>
+                    <span className="text-right tabular-nums text-gray-900 dark:text-white">
+                      {formatNumber(lineWeight.total, "qty")} {lineWeight.uom}
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {" "}· {formatNumber(Number(item.weight_per_unit), "qty")} / {item.base_uom || item.uom}
+                      </span>
+                    </span>
+                  </div>
+                ) : null;
+  const costRows: Record<string, ReactNode> = !restrictCostVisibility && currentWarehouseStock
+    ? {
+        [costLabel]: (
+          <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>{costLabel}</span>
+                      <span className="text-right tabular-nums text-gray-900 dark:text-white">
+                        {hasValidValuationRate ? formatNumber(valuationRateInclTax, "money") : "—"}
+                        {hasValidValuationRate ? (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {isInclusiveTax
+                              ? ` incl. VAT · ${formatNumber(costRate * uomFactor, "money")} excl.`
+                              : ` / ${item.uom || fullItemData?.uom}`}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
+        ),
+        [otherLabel]: (
+          <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>{otherLabel}</span>
+                      <span className="text-right tabular-nums text-gray-500 dark:text-gray-400">
+                        {otherCostRate > 0
+                          ? `${formatNumber(otherCostInclTax, "money")}${otherLabel === "Last purchase" && lastPurchaseDate ? ` · ${lastPurchaseDate}` : ""}`
+                          : otherLabel === "Last purchase" ? "no purchase invoice" : "—"}
+                      </span>
+                    </div>
+        ),
+      }
+    : {};
+  const marginRows = (showPositiveMarginWarning || showNegativeMarginWarning) ? (
+                  <>
+                    <div className={LEDGER_ROW}>
+                      <span className={LEDGER_LABEL}>Margin</span>
+                      <span className={`text-right tabular-nums font-semibold ${isNegativeMargin ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>
+                        {isNegativeMargin ? "" : "+"}{formatNumber(marginAmount, "money")}
+                        <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] ${isNegativeMargin ? "bg-red-100 dark:bg-red-900/40" : "bg-green-100 dark:bg-green-900/40"}`}>
+                          {marginPercentage > 0 ? "+" : ""}{marginPercentage.toFixed(1)}%
+                        </span>
+                      </span>
+                    </div>
+                    {/* Rate against cost: the bar is the rate, the solid tick the cost the margin
+                        is worked from, the dashed tick the other cost. */}
+                    <div
+                      className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700"
+                      title={`Solid: ${costLabel} ${formatNumber(valuationRateInclTax, "money")}${otherCostRate > 0 ? ` · Dashed: ${otherLabel} ${formatNumber(otherCostInclTax, "money")}` : ""}`}
+                    >
+                      <div
+                        className={`absolute inset-y-0 left-0 rounded-full ${isNegativeMargin ? "bg-red-500" : "bg-green-500"}`}
+                        style={{ width: `${marginBar.rate}%` }}
+                      />
+                      <div title={costLabel} className="absolute -top-1 -bottom-1 w-0.5 bg-gray-900 dark:bg-white" style={{ left: `${marginBar.cost}%` }} />
+                      {otherCostRate > 0 ? (
+                        <div title={otherLabel} className="absolute -top-1 -bottom-1 border-l-2 border-dashed border-gray-500 dark:border-gray-300" style={{ left: `${marginBar.other}%` }} />
+                      ) : null}
+                    </div>
+                  </>
+                ) : null;
+  const builtinFact: Record<string, ReactNode> = {
+    in_stock: stockRow,
+    weight: weightRow,
+    valuation: costRows["Valuation"],
+    last_purchase: costRows["Last purchase"],
+    margin: marginRows,
+    warehouses: lineInfo?.warehouses.length ? (
+      <div className="flex flex-col gap-0.5">
+        <span className={LEDGER_LABEL}>Warehouses</span>
+        {lineInfo.warehouses.map((w) => (
+          <div key={w.warehouse} className={`flex justify-between gap-3 text-xs tabular-nums ${w.warehouse === warehouse ? "font-semibold text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-300"}`}>
+            <span className="truncate" title={w.warehouse}>{w.warehouse}</span>
+            <span className="shrink-0">{formatNumber(w.qty, "qty")} {lineInfo.stock_uom}</span>
+          </div>
+        ))}
+      </div>
+    ) : null,
+    uoms: lineInfo?.uoms.length ? (
+      <div className={LEDGER_ROW}>
+        <span className={LEDGER_LABEL}>Units</span>
+        <span className="text-right text-xs tabular-nums text-gray-900 dark:text-white">
+          {uomLines(lineInfo).map((l) => <div key={l}>{l}</div>)}
+        </span>
+      </div>
+    ) : null,
+  };
+
+  const bundleModal = (
+    <SerialBatchBundleModal
+          isOpen={showBundleModal}
+          onClose={() => setShowBundleModal(false)}
+          onSave={handleBundleSave}
+          item={{
+            id: item.id,
+            item_code: item.item_code,
+            name: item.name,
+            has_serial_no: item.has_serial_no,
+            has_batch_no: item.has_batch_no,
+          }}
+          warehouse={warehouse}
+          qty={modalQty}
+          onQtyChange={handleModalQtyChange}
+          availableBatches={availableBatches}
+          availableSerials={availableSerials}
+          entries={modalEntries}
+          onEntriesChange={setModalEntries}
+          isLoading={isFetchingBundleData}
+          onFetchData={handleModalFetchData}
+          autoFetchBatch={autoFetchBatch}
+        />
+  );
+  const pricePopup = linePricePopup && linePriceOptions.length > 0 && (
+    <PriceListPopup
+          options={linePriceOptions}
+          selectedIndex={linePricePopup.selectedIndex}
+          customValue=""
+          position={linePricePopup.position}
+          currencySymbol={currency_symbol}
+          onSelect={commitLinePriceOption}
+        />
+  );
+  const productModal = showProductModal && (
+    <ProductDetailsModal
+          item={{
+            id: item.item_code || item.id,
+            name: item.name,
+            item_code: item.item_code,
+            category: item.category,
+            image: item.image,
+            currency_symbol: currency_symbol,
+          }}
+          warehouse={warehouse}
+          onClose={() => setShowProductModal(false)}
+        />
+  );
+
+  if (facts) {
+    const shown = visibleFacts(lineInfo, restrictCostVisibility);
+    return (
+      <>
+        <div data-cart-item-id={itemId} className="px-3 py-3 flex flex-col gap-3 text-sm">
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 font-medium leading-tight text-gray-900 dark:text-white line-clamp-2 break-words" title={item.name}>
+              {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowProductModal(true)}
+              className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+              title="View full details"
+              aria-label="View full details"
+            >
+              <Eye size={16} />
+            </button>
+          </div>
+          {linePriceOptions.length > 0 ? <div>{priceChip}</div> : null}
+          {serialBatch}
+          {!lineInfo || isLoadingFullData ? (
+            <div className="flex items-center gap-2 py-1 text-xs text-gray-500">
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-beveren-500 border-t-transparent" />
+              Loading…
+            </div>
+          ) : (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex flex-col gap-1.5">
+              {shown.map((r) =>
+                r.key in builtinFact ? (
+                  <Fragment key={r.key}>{builtinFact[r.key]}</Fragment>
+                ) : (r.value ?? "").length > 40 ? (
+                  <div key={r.key} className="flex flex-col gap-0.5">
+                    <span className={LEDGER_LABEL}>{r.label}</span>
+                    <span className="text-gray-900 dark:text-white whitespace-pre-line break-words">{r.value}</span>
+                  </div>
+                ) : (
+                  <div key={r.key} className={LEDGER_ROW}>
+                    <span className={LEDGER_LABEL}>{r.label}</span>
+                    <span className="min-w-0 text-right break-words text-gray-900 dark:text-white">{r.value}</span>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+        </div>
+        {bundleModal}
+        {pricePopup}
+        {productModal}
+      </>
+    );
+  }
+
   return (
     <>
       <div
@@ -708,35 +1007,7 @@ export const CartItemRow = ({
             {/* Quick Switch Price: one compact trigger; the choices drop down in the same popup
                 the item list's '*' shortcut uses, instead of a pill per price list. */}
             <div className="min-w-0">
-              {linePriceOptions.length > 0 ? (
-                <button
-                  ref={priceTriggerRef}
-                  type="button"
-                  aria-haspopup="listbox"
-                  aria-expanded={!!linePricePopup}
-                  onClick={(e) => { e.stopPropagation(); if (linePricePopup) setLinePricePopup(null); else openLinePricePopup(); }}
-                  onKeyDown={handlePriceTriggerKeyDown}
-                  // Firefox clicks a button on Space keyup even when keydown was prevented,
-                  // which would reopen the popup straight after a Space commit.
-                  onKeyUp={(e) => { if (e.key === " ") e.preventDefault(); }}
-                  onBlur={() => setLinePricePopup(null)}
-                  title={
-                    shownLinePriceList
-                      ? `${shownLinePriceList.price_list}: ${formatCurrencyWithSymbol(Number(shownLinePriceList.rate || 0), currency_symbol)} - switch price list`
-                      : "Switch price list for this line"
-                  }
-                  className={`max-w-full inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                    activeLinePriceList
-                      ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
-                      : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-beveren-300"
-                  }`}
-                >
-                  <span className="truncate font-mono">
-                    {linePriceListLabel}
-                  </span>
-                  <ChevronDown size={10} className="flex-shrink-0" />
-                </button>
-              ) : null}
+              {priceChip}
             </div>
 
             {/* Qty: - qty UOM + */}
@@ -920,48 +1191,8 @@ export const CartItemRow = ({
                 </div>
               ) : null}
 
-              {hasSerialOrBatch ? (
-                <button
-                  type="button"
-                  onClick={handleOpenModal}
-                  className={`w-full flex items-center justify-center gap-2 h-9 rounded-md border text-sm font-medium transition-colors ${
-                    hasBundleEntries
-                      ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30"
-                      : "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-                  }`}
-                >
-                  <Package size={14} />
-                  {hasBundleEntries ? "Update Serial/Batch" : "Add Serial/Batch"}
-                </button>
-              ) : null}
+              {serialBatch}
 
-              {hasBundleEntries ? (
-                <div className="rounded-md border border-blue-200 dark:border-blue-800 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setIsBundleDetailsOpen(!isBundleDetailsOpen)}
-                    className="w-full flex items-center justify-between p-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-                  >
-                    <span className="text-xs text-blue-800 dark:text-blue-300 font-medium">Batch/Serial Details:</span>
-                    {isBundleDetailsOpen ? (
-                      <ChevronUp size={14} className="text-blue-800 dark:text-blue-300" />
-                    ) : (
-                      <ChevronDown size={14} className="text-blue-800 dark:text-blue-300" />
-                    )}
-                  </button>
-                  {isBundleDetailsOpen ? (
-                    <div className="p-2 pt-0 bg-blue-50 dark:bg-blue-900/20 space-y-1">
-                      {bundleEntries.map((entry, idx) => (
-                        <div key={idx} className="text-xs text-blue-700 dark:text-blue-400">
-                          {entry.serial_no ? <span>Serial: {entry.serial_no} </span> : null}
-                          {entry.batch_no ? <span>Batch: {entry.batch_no} </span> : null}
-                          {entry.qty ? <span>Qty: {entry.qty}</span> : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
 
             {/* Line total and what the customer saves against the list. */}
@@ -991,83 +1222,14 @@ export const CartItemRow = ({
               </div>
             ) : (
               <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex flex-col gap-1.5">
-                {currentWarehouseStock || showNoStockWarning ? (
-                  <div className={LEDGER_ROW}>
-                    <span className={LEDGER_LABEL}>In stock</span>
-                    <span className={`text-right tabular-nums ${showNoStockWarning ? "text-red-600 dark:text-red-400" : showStockWarning ? "text-amber-600 dark:text-amber-400" : "text-gray-900 dark:text-white"}`}>
-                      {(showNoStockWarning || showStockWarning) ? <AlertTriangle size={12} className="inline mr-1 -mt-0.5" /> : null}
-                      {availableStockLabel} {item.uom || fullItemData?.uom}
-                      <span className="text-xs text-gray-500 dark:text-gray-400"> · {warehouse}</span>
-                    </span>
-                  </div>
-                ) : null}
+                {stockRow}
 
-                {lineWeight.total > 0 ? (
-                  <div className={LEDGER_ROW}>
-                    <span className={LEDGER_LABEL}>Weight</span>
-                    <span className="text-right tabular-nums text-gray-900 dark:text-white">
-                      {formatNumber(lineWeight.total, "qty")} {lineWeight.uom}
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {" "}· {formatNumber(Number(item.weight_per_unit), "qty")} / {item.base_uom || item.uom}
-                      </span>
-                    </span>
-                  </div>
-                ) : null}
+                {weightRow}
 
-                {!restrictCostVisibility && currentWarehouseStock ? (
-                  <>
-                    <div className={LEDGER_ROW}>
-                      <span className={LEDGER_LABEL}>{costLabel}</span>
-                      <span className="text-right tabular-nums text-gray-900 dark:text-white">
-                        {hasValidValuationRate ? formatNumber(valuationRateInclTax, "money") : "—"}
-                        {hasValidValuationRate ? (
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {isInclusiveTax
-                              ? ` incl. VAT · ${formatNumber(costRate * uomFactor, "money")} excl.`
-                              : ` / ${item.uom || fullItemData?.uom}`}
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                    <div className={LEDGER_ROW}>
-                      <span className={LEDGER_LABEL}>{otherLabel}</span>
-                      <span className="text-right tabular-nums text-gray-500 dark:text-gray-400">
-                        {otherCostRate > 0
-                          ? `${formatNumber(otherCostInclTax, "money")}${otherLabel === "Last purchase" && lastPurchaseDate ? ` · ${lastPurchaseDate}` : ""}`
-                          : otherLabel === "Last purchase" ? "no purchase invoice" : "—"}
-                      </span>
-                    </div>
-                  </>
-                ) : null}
+                {costRows[costLabel]}
+                {costRows[otherLabel]}
 
-                {(showPositiveMarginWarning || showNegativeMarginWarning) ? (
-                  <>
-                    <div className={LEDGER_ROW}>
-                      <span className={LEDGER_LABEL}>Margin</span>
-                      <span className={`text-right tabular-nums font-semibold ${isNegativeMargin ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>
-                        {isNegativeMargin ? "" : "+"}{formatNumber(marginAmount, "money")}
-                        <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] ${isNegativeMargin ? "bg-red-100 dark:bg-red-900/40" : "bg-green-100 dark:bg-green-900/40"}`}>
-                          {marginPercentage > 0 ? "+" : ""}{marginPercentage.toFixed(1)}%
-                        </span>
-                      </span>
-                    </div>
-                    {/* Rate against cost: the bar is the rate, the solid tick the cost the margin
-                        is worked from, the dashed tick the other cost. */}
-                    <div
-                      className="relative h-1.5 rounded-full bg-gray-200 dark:bg-gray-700"
-                      title={`Solid: ${costLabel} ${formatNumber(valuationRateInclTax, "money")}${otherCostRate > 0 ? ` · Dashed: ${otherLabel} ${formatNumber(otherCostInclTax, "money")}` : ""}`}
-                    >
-                      <div
-                        className={`absolute inset-y-0 left-0 rounded-full ${isNegativeMargin ? "bg-red-500" : "bg-green-500"}`}
-                        style={{ width: `${marginBar.rate}%` }}
-                      />
-                      <div title={costLabel} className="absolute -top-1 -bottom-1 w-0.5 bg-gray-900 dark:bg-white" style={{ left: `${marginBar.cost}%` }} />
-                      {otherCostRate > 0 ? (
-                        <div title={otherLabel} className="absolute -top-1 -bottom-1 border-l-2 border-dashed border-gray-500 dark:border-gray-300" style={{ left: `${marginBar.other}%` }} />
-                      ) : null}
-                    </div>
-                  </>
-                ) : null}
+                {marginRows}
               </div>
             )}
           </div>
@@ -1075,40 +1237,10 @@ export const CartItemRow = ({
           <></>
         )}
 
-        <SerialBatchBundleModal
-          isOpen={showBundleModal}
-          onClose={() => setShowBundleModal(false)}
-          onSave={handleBundleSave}
-          item={{
-            id: item.id,
-            item_code: item.item_code,
-            name: item.name,
-            has_serial_no: item.has_serial_no,
-            has_batch_no: item.has_batch_no,
-          }}
-          warehouse={warehouse}
-          qty={modalQty}
-          onQtyChange={handleModalQtyChange}
-          availableBatches={availableBatches}
-          availableSerials={availableSerials}
-          entries={modalEntries}
-          onEntriesChange={setModalEntries}
-          isLoading={isFetchingBundleData}
-          onFetchData={handleModalFetchData}
-          autoFetchBatch={autoFetchBatch}
-        />
+        {bundleModal}
       </div>
 
-      {linePricePopup && linePriceOptions.length > 0 && (
-        <PriceListPopup
-          options={linePriceOptions}
-          selectedIndex={linePricePopup.selectedIndex}
-          customValue=""
-          position={linePricePopup.position}
-          currencySymbol={currency_symbol}
-          onSelect={commitLinePriceOption}
-        />
-      )}
+      {pricePopup}
 
       <DescriptionDialog
         isOpen={showDescriptionDialog}
@@ -1121,20 +1253,7 @@ export const CartItemRow = ({
         onClose={() => setShowDescriptionDialog(false)}
       />
 
-      {showProductModal && (
-        <ProductDetailsModal
-          item={{
-            id: item.item_code || item.id,
-            name: item.name,
-            item_code: item.item_code,
-            category: item.category,
-            image: item.image,
-            currency_symbol: currency_symbol,
-          }}
-          warehouse={warehouse}
-          onClose={() => setShowProductModal(false)}
-        />
-      )}
+      {productModal}
     </>
   );
 };
