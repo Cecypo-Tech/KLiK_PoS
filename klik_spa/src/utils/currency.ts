@@ -122,12 +122,12 @@ export const getCurrencySymbol = (currency: string): string => {
  * @param currencySymbol - Currency symbol to prefix
  * @returns Formatted string (e.g., "KES 9,900.00")
  */
-export const formatCurrencyWithSymbol = (amount: number, currencySymbol?: string): string => {
-  const safeAmount = Number(amount || 0);
-  const symbol = currencySymbol;
+export const formatCurrencyWithSymbol = (amount: number, currencySymbol?: string): string =>
+  `${currencySymbol} ${formatAmount(amount)}`;
 
-  return `${symbol} ${safeAmount.toLocaleString('en-US', {
+/** An amount with thousands separators and 2 decimals, no symbol (e.g. "9,900.00"). */
+export const formatAmount = (amount: number): string =>
+  Number(amount || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
-};
+  });

@@ -10,7 +10,7 @@ import {
   Truck
 } from "lucide-react";
 import { toast } from "react-toastify";
-import { formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
+import { formatAmount, formatCurrencyWithSymbol, getCurrencySymbol } from "../utils/currency";
 import { usePOSProfileStore } from "../stores/posProfileStore";
 import { usePaymentModes } from "../hooks/usePaymentModes";
 import { cashRefundModes, defaultCashRefundMode } from "../utils/returnModes";
@@ -448,10 +448,10 @@ export default function SingleInvoiceReturn({
                           Return Qty
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Unit Price
+                          Unit Price ({currency})
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                          Return Amount
+                          Return Amount ({currency})
                         </th>
                       </tr>
                     </thead>
@@ -527,10 +527,10 @@ export default function SingleInvoiceReturn({
                             </div>
                           </td>
                           <td className="px-4 py-4 text-right text-sm text-gray-900 dark:text-white">
-                            {formatCurrencyWithSymbol(item.rate, currency)}
+                            {formatAmount(item.rate)}
                           </td>
                           <td className="px-4 py-4 text-right text-sm font-medium text-gray-900 dark:text-white">
-                            {formatCurrencyWithSymbol((item.return_qty || 0) * item.rate, currency)}
+                            {formatAmount((item.return_qty || 0) * item.rate)}
                           </td>
                         </tr>
                       ))}
@@ -575,10 +575,10 @@ export default function SingleInvoiceReturn({
                               </div>
                             </td>
                             <td className="px-4 py-4 text-right text-sm text-gray-900 dark:text-white">
-                              {formatCurrencyWithSymbol(charge.amount, currency)}
+                              {formatAmount(charge.amount)}
                             </td>
                             <td className="px-4 py-4 text-right text-sm font-medium text-gray-900 dark:text-white">
-                              {formatCurrencyWithSymbol(returned ? charge.amount : 0, currency)}
+                              {formatAmount(returned ? charge.amount : 0)}
                             </td>
                           </tr>
                         );
