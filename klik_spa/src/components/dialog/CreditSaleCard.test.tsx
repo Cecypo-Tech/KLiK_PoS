@@ -28,4 +28,15 @@ describe("CreditSaleCard", () => {
     expect(html).toContain('id="pos-credit-due-date"');
     expect(html).not.toContain("pos-credit-terms");
   });
+
+  it("shows what the customer owes when a balance is given", () => {
+    const html = renderToStaticMarkup(<CreditSaleCard {...base} terms={null} balance={{ customer: "C1", outstanding: 5000, overdue: 2000 }} />);
+    expect(html).toContain("Owes KES 5,000.00");
+    expect(html).toContain("KES 2,000.00 overdue");
+  });
+
+  it("no balance line without a balance", () => {
+    const html = renderToStaticMarkup(<CreditSaleCard {...base} terms={null} />);
+    expect(html).not.toContain("Owes");
+  });
 });

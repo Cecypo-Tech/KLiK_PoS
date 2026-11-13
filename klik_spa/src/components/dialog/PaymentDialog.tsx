@@ -250,6 +250,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // Picked in the cart (Sale | Credit | Quote); a till with credit off never sells on credit.
   const isCreditSale = useCartStore((s) => s.creditSale) && creditSalesAllowed(usePOSProfileStore((s) => s.posDetails));
   const setSaleType = useCartStore((s) => s.setSaleType);
+  const storedBalance = useCartStore((s) => s.customerBalance);
   const [dueDate, setDueDate] = useState("");
   // Payment terms in place of a typed due date, where the site has any (utils/creditTerms).
   const [creditTerms, setCreditTerms] = useState<CreditTerms | null>(null);
@@ -3134,6 +3135,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     onDueDateChange={setDueDate}
                     disabled={invoiceSubmitted || isProcessingPayment}
                     currencySymbol={displayCurrencySymbol}
+                    balance={storedBalance?.customer === selectedCustomer?.id ? storedBalance : null}
                   />
                 )}
                 <PaymentMethods
@@ -3382,6 +3384,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     onDueDateChange={setDueDate}
                     disabled={invoiceSubmitted || isProcessingPayment}
                     currencySymbol={displayCurrencySymbol}
+                    balance={storedBalance?.customer === selectedCustomer?.id ? storedBalance : null}
                   />
                 )}
                 <PaymentMethods

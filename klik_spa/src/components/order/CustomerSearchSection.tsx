@@ -309,7 +309,13 @@ export const CustomerSearchSection = ({
       const params = new URLSearchParams({ customer: customer.id, company });
       const res = await fetch(`/api/method/klik_pos.api.customer.get_customer_overdue_invoices?${params.toString()}`);
       const json = await res.json();
-      if (json?.message?.has_overdue) {
+      const message = json?.message;
+      // Same call, so the credit card's balance and this popup never disagree.
+      if (message && typeof message.total_outstanding === "number") {
+        const overdue = (message.invoices || []).reduce((sum: number, inv: { outstanding_amount?: number }) => sum + Number(inv.outstanding_amount || 0), 0);
+        useCartStore.getState().setCustomerBalance({ customer: customer.id, outstanding: message.total_outstanding, overdue });
+      }
+      if (message?.has_overdue) {
         setOverdueData({
           invoices: json.message.invoices,
           customerName: json.message.customer_name || customer.name,

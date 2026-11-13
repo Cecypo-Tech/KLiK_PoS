@@ -1,4 +1,6 @@
 import { termLabel, type CreditTerms } from "../../utils/creditTerms";
+import { formatCurrencyWithSymbol } from "../../utils/currency";
+import type { CustomerBalance } from "../../stores/cartStore";
 
 export interface CreditSaleCardProps {
   customerName: string;
@@ -9,6 +11,8 @@ export interface CreditSaleCardProps {
   onDueDateChange: (date: string) => void;
   disabled: boolean;
   currencySymbol: string;
+  /** What the customer owes; only on tills that show overdue warnings. */
+  balance?: CustomerBalance | null;
 }
 
 const FIELD =
@@ -16,12 +20,22 @@ const FIELD =
 
 /** A credit sale's when-to-pay: Payment Terms when the site has them, else a due date. */
 export default function CreditSaleCard({
-  customerName, terms, termsTemplate, onSelectTerm, dueDate, onDueDateChange, disabled,
+  customerName, terms, termsTemplate, onSelectTerm, dueDate, onDueDateChange, disabled, currencySymbol, balance,
 }: CreditSaleCardProps) {
   const templates = terms?.templates ?? [];
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/30">
-      <h3 className="text-sm font-semibold text-teal-900 dark:text-teal-200">Credit sale · {customerName}</h3>
+      <div>
+        <h3 className="text-sm font-semibold text-teal-900 dark:text-teal-200">Credit sale · {customerName}</h3>
+        {balance && (
+          <p className="text-xs text-gray-700 dark:text-gray-300">
+            Owes {formatCurrencyWithSymbol(balance.outstanding, currencySymbol)}
+            {balance.overdue > 0 && (
+              <span className="text-red-600 dark:text-red-400"> · {formatCurrencyWithSymbol(balance.overdue, currencySymbol)} overdue</span>
+            )}
+          </p>
+        )}
+      </div>
       {templates.length > 0 ? (
         <div className="flex items-center gap-2">
           <label htmlFor="pos-credit-terms" className="text-sm font-medium text-gray-700 dark:text-gray-300">Terms</label>

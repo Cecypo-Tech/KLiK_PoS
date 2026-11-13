@@ -128,6 +128,9 @@ const fetchItemTaxDetails = async (
 export interface WalkinDetails { name: string; taxId: string; phone: string }
 const EMPTY_WALKIN: WalkinDetails = { name: '', taxId: '', phone: '' };
 
+/** What `customer` owes. Tagged with the customer: its lookup can land before or after the customer is set. */
+export interface CustomerBalance { customer: string; outstanding: number; overdue: number }
+
 interface CartState {
   cartItems: CartItem[]
   appliedCoupons: GiftCoupon[]
@@ -145,6 +148,9 @@ interface CartState {
   creditSale: boolean
   /** Sale, Credit or Quote: one of them, never two. */
   setSaleType: (type: SaleType) => void
+  /** What the selected customer owes, when the till shows overdue warnings. Not saved. */
+  customerBalance: CustomerBalance | null
+  setCustomerBalance: (balance: CustomerBalance | null) => void
   isPricingLoading: boolean
   pricingError: string | null
 
@@ -261,6 +267,8 @@ export const useCartStore = create<CartState>()(
       exitQuoteMode: () => set({ quoteMode: false }),
       creditSale: false,
       setSaleType: (type) => set({ quoteMode: type === "quote", creditSale: type === "credit" }),
+      customerBalance: null,
+      setCustomerBalance: (balance) => set({ customerBalance: balance }),
       isPricingLoading: false,
       pricingError: null,
       shippingRule: null,
@@ -714,6 +722,7 @@ export const useCartStore = create<CartState>()(
           expandedCartItemId: null,
           saleCompleted: false,
           creditSale: defaultCreditSale(usePOSProfileStore.getState().posDetails, null),
+          customerBalance: null,
         }));
       },
 
