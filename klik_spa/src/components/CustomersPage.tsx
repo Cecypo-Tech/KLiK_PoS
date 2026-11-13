@@ -555,61 +555,39 @@ export default function CustomersPage() {
       <div className="flex-1 px-6 py-8 mt-16 lg:ml-20 max-w-none">
 
         <div className="mx-auto w-full">
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-3">
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                <div className="flex items-center">
-                  <Users className="text-orange-500" size={24} />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Customers</p>
-                    <p className="text-2xl font-semibold text-gray-900 dark:text-white">{customers.length} of {totalCount || customers.length}</p>
-                  </div>
-                </div>
-              </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-              <div className="flex items-center">
-                <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center">
-                  <Package className="w-3.5 h-3.5 text-white" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Orders</p>
-                  <p className="text-2xl font-semibold text-gray-900 dark:text-white">{stats.totalOrders}</p>
-                </div>
+          {/* Stats and search: one row of three cards. */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 mt-3">
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center">
+              <Users className="text-orange-500 shrink-0" size={24} />
+              <div className="ml-4 min-w-0">
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Customers</p>
+                <p className="text-2xl font-semibold text-gray-900 dark:text-white">{customers.length} of {totalCount || customers.length}</p>
               </div>
             </div>
-          </div>
 
-          {/* Filters and Search */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0 sm:space-x-4">
-              {/* Search */}
-              <div className="relative flex-1 max-w-md">
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center">
+              <div className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center shrink-0">
+                <Package className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div className="ml-4 min-w-0">
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Orders</p>
+                <p className="text-2xl font-semibold text-gray-900 dark:text-white">{stats.totalOrders}</p>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center">
+              <div className="relative w-full">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
                 <input
                   type="text"
-                  placeholder="Search customers... (Press Enter to add new customer)"
+                  placeholder="Search customers... (Enter adds a new one)"
+                  title="Search customers. Press Enter to add a new customer."
                   value={searchQuery}
                   onChange={handleSearchInput}
                   onKeyPress={handleSearchKeyPress}
                   className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-beveren-500 text-sm font-medium border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white"
                 />
               </div>
-
-              {/* Status Filter */}
-              {/* <div className="flex items-center space-x-2">
-                <Filter className="text-gray-400" size={18} />
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as "all" | Customer['status'])}
-                  className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="vip">VIP</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div> */}
             </div>
           </div>
 
