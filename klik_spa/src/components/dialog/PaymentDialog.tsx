@@ -248,7 +248,10 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   // What the server did with the sale - not what the background checkbox asked for.
   const [submissionQueued, setSubmissionQueued] = useState(false);
   // Picked in the cart (Sale | Credit | Quote); a till with credit off never sells on credit.
-  const isCreditSale = useCartStore((s) => s.creditSale) && creditSalesAllowed(usePOSProfileStore((s) => s.posDetails));
+  // Walk-in never: the server refuses credit to a walk-in, whatever the cart says.
+  const creditPicked = useCartStore((s) => s.creditSale);
+  const creditProfile = usePOSProfileStore((s) => s.posDetails);
+  const isCreditSale = creditPicked && creditSalesAllowed(creditProfile) && selectedCustomer?.isWalkin !== 1;
   const setSaleType = useCartStore((s) => s.setSaleType);
   const storedBalance = useCartStore((s) => s.customerBalance);
   const [dueDate, setDueDate] = useState("");
@@ -2860,6 +2863,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       return;
     }
     useProductStore.getState().setSelectedCustomer(customer as unknown as CartCustomer);
+    // Paid with the voucher: still a paid sale, not the new customer's default credit.
+    setSaleType("sale");
     toast.info(`Sale switched to ${customer.customerName || customerName}.`);
   };
 

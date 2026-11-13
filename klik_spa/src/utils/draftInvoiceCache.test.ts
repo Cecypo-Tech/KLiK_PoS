@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("../stores/cartStore", () => ({ useCartStore: { setState: vi.fn() } }));
+vi.mock("../stores/posProfileStore", () => ({
+  usePOSProfileStore: { getState: () => ({ posDetails: { custom_allow_credit_sales_as_pos: 1, default_sales_type: "Credit" } }) },
+}));
 
 import { useCartStore } from "../stores/cartStore";
 import { EMPTY_CHECKOUT_EXTRAS } from "./heldOrderPayload";
@@ -152,5 +155,26 @@ describe("a held order kept for its M-Pesa push", () => {
     cacheHeldOrder("SAL-ORD-1", [], null, 0);
 
     expect(getOriginalHeldOrderMpesa()).toEqual({ isMpesaOrder: false, request: null });
+  });
+});
+
+describe("loadCachedItemsToCart and the sale type", () => {
+  const item = { id: "A", item_code: "A", name: "A", quantity: 1, price: 10 } as never;
+  async function creditAfterLoad() {
+    const setState = useCartStore.setState as unknown as ReturnType<typeof vi.fn>;
+    setState.mockClear();
+    await loadCachedItemsToCart();
+    const updater = setState.mock.calls[0]![0] as (s: Record<string, unknown>) => Record<string, unknown>;
+    return updater({ cartItems: [], creditSale: false, quoteMode: false }).creditSale;
+  }
+
+  it("a resumed named customer's sale starts on the till's default (Credit here)", async () => {
+    cacheDraftInvoiceItems("ACC-SINV-1", [item], { id: "C1", name: "C1" } as never, 0);
+    expect(await creditAfterLoad()).toBe(true);
+  });
+
+  it("a resumed walk-in sale is never credit", async () => {
+    cacheDraftInvoiceItems("ACC-SINV-1", [item], { id: "WALK", name: "Walk-in", isWalkin: 1 } as never, 0);
+    expect(await creditAfterLoad()).toBe(false);
   });
 });
