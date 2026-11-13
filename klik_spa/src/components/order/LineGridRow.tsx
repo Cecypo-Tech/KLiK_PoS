@@ -164,6 +164,9 @@ export default function LineGridRow({
       onFocus={() => onSelect(item.id)}
       className={`border-b border-gray-100 dark:border-gray-800 ${selected ? "bg-beveren-50 dark:bg-beveren-900/20" : ""}`}
     >
+      {posDetails?.custom_show_item_code_in_product_list ? (
+        <td className="px-2 py-1 truncate text-gray-900 dark:text-white" title={item.item_code || item.id}>{item.item_code || item.id}</td>
+      ) : null}
       <td className="px-2 py-1">
         <div tabIndex={0} data-row={row} data-col="item" className="rounded px-1 focus:outline-none focus:ring-2 focus:ring-beveren-500">
           <div className="truncate text-gray-900 dark:text-white" title={item.name}>
@@ -175,9 +178,6 @@ export default function LineGridRow({
           ) : null}
         </div>
       </td>
-      {posDetails?.custom_show_item_code_in_product_list ? (
-        <td className="px-2 py-1 truncate text-gray-900 dark:text-white" title={item.item_code || item.id}>{item.item_code || item.id}</td>
-      ) : null}
       <td className="px-1">
         <div className="flex items-center justify-end gap-1">
           {/* Asked for beyond stock: the Loss of Sale part rides beside the qty sold. */}

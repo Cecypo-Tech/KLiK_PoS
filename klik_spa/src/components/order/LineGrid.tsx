@@ -71,8 +71,8 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
   return (
     <div ref={box} className="@container absolute left-2 right-2 z-30 mt-1 max-w-[52rem] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
       <div className="flex h-6 items-center gap-2 border-b border-gray-100 dark:border-gray-700 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-        <span className="min-w-0 flex-1">Item</span>
         {showCode ? <span className="@max-[30rem]:hidden w-32 shrink-0">Code</span> : null}
+        <span className="min-w-0 flex-1">Item</span>
         {showCost ? <span className={money}>Cost</span> : null}
         <span className={money}>Price</span>
         <span className="w-12 shrink-0 text-right">Stock</span>
@@ -90,10 +90,10 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
               onMouseMove={() => i !== highlight && onHover(i)}
               className={`flex h-7 items-center gap-2 px-2 cursor-pointer ${i === highlight ? "bg-beveren-50 dark:bg-beveren-900/30" : ""}`}
             >
-              <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query} /></span>
               {showCode ? (
                 <span className="@max-[30rem]:hidden w-32 shrink-0 truncate text-gray-900 dark:text-white" title={r.item_code || r.id}>{r.item_code || r.id}</span>
               ) : null}
+              <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query} /></span>
               {showCost ? (
                 <span title={cost.title} className={`${money} text-gray-500 dark:text-gray-400`}>{cost.text}</span>
               ) : null}
@@ -304,8 +304,8 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
     <table ref={tableRef} onKeyDown={onKeyDown} className="w-full table-fixed text-sm">
       <thead>
         <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
-          <th className="px-2 py-1 text-left font-medium">Item</th>
           {showCode ? <th className="w-24 xl:w-32 px-2 py-1 text-left font-medium">Code</th> : null}
+          <th className="px-2 py-1 text-left font-medium">Item</th>
           {/* Below 1280 px the side panel narrows and these columns tighten, so the item name keeps
               its room; the LoS chip moves under the name. */}
           <th className={`w-14 ${Number(posDetails?.custom_enable_loss_of_sale) ? "xl:w-32" : "xl:w-20"} px-2 py-1 text-right font-medium`}>Qty</th>
