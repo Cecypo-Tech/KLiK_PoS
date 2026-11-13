@@ -740,9 +740,10 @@ export const CustomerSearchSection = ({
         {allowPriceListSwitching && (
           <select
             value={activePriceList}
+            title={String(activePriceList)}
             onChange={(event) => { void handlePriceListChange(event.target.value); }}
             disabled={isLoadingPriceLists}
-            className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
+            className="min-w-0 flex-1 truncate h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
           >
             {!activePriceList && <option value="">Default Price List</option>}
             {priceLists.map((priceList) => (
@@ -755,9 +756,10 @@ export const CustomerSearchSection = ({
         {allowWarehouseChange && (
           <select
             value={activeWarehouse}
+            title={activeWarehouse}
             onChange={(event) => { void handleWarehouseChange(event.target.value); }}
             disabled={isLoadingWarehouses}
-            className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
+            className="min-w-0 flex-1 truncate h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-beveren-500 focus:border-transparent disabled:opacity-60"
           >
             {!activeWarehouse && <option value="">Default Warehouse</option>}
             {warehouses.map((wh) => (

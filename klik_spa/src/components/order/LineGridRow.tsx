@@ -72,7 +72,7 @@ function UomCell({ item, row, customerId, onUOMChange }: {
         const next = switchUom(maps, uom, item.price, e.target.value);
         onUOMChange(item.id, next.uom, next.price, next.conversionFactor);
       }}
-      className="w-full h-7 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1 text-[13px] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
+      className="w-full h-7 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-beveren-500"
     >
       {(maps.uoms.includes(uom) ? maps.uoms : [uom, ...maps.uoms]).map((u) => <option key={u} value={u}>{u}</option>)}
     </select>
@@ -175,6 +175,9 @@ export default function LineGridRow({
           ) : null}
         </div>
       </td>
+      {posDetails?.custom_show_item_code_in_product_list ? (
+        <td className="px-2 py-1 truncate text-gray-900 dark:text-white" title={item.item_code || item.id}>{item.item_code || item.id}</td>
+      ) : null}
       <td className="px-1">
         <div className="flex items-center justify-end gap-1">
           {/* Asked for beyond stock: the Loss of Sale part rides beside the qty sold. */}

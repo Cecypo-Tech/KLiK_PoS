@@ -660,7 +660,7 @@ export const CartItemRow = ({
                 {getItemDisplayName(item, !!posDetails?.custom_use_item_code_as_display_name)}
               </p>
               {!!posDetails?.custom_show_item_code_in_product_list && (item.item_code || item.id) && (
-                <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-tight truncate">
+                <p className="text-sm text-gray-900 dark:text-white leading-tight truncate">
                   {posDetails?.custom_use_item_code_as_display_name ? item.name : (item.item_code || item.id)}
                 </p>
               )}

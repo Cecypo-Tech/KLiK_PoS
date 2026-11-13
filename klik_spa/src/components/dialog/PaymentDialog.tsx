@@ -3143,6 +3143,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     balance={storedBalance?.customer === selectedCustomer?.id ? storedBalance : null}
                   />
                 )}
+                {/* A credit sale takes no payment now: the methods stay in view but greyed out and inert. */}
+                <fieldset disabled={isCreditSale} aria-disabled={isCreditSale} className={`min-w-0 transition-opacity ${isCreditSale ? "pointer-events-none select-none opacity-40 grayscale" : ""}`}>
                 <PaymentMethods
                   paymentMethods={paymentMethods}
                   invoiceSubmitted={invoiceSubmitted}
@@ -3160,6 +3162,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     </div>
                   }
                 />
+                </fieldset>
                 {renderVoucherPanel()}
                 {/* Remarks is on every till, so this row always shows. */}
                 <div className="flex flex-wrap items-end gap-3">
@@ -3392,6 +3395,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     balance={storedBalance?.customer === selectedCustomer?.id ? storedBalance : null}
                   />
                 )}
+                {/* A credit sale takes no payment now: the methods stay in view but greyed out and inert. */}
+                <fieldset disabled={isCreditSale} aria-disabled={isCreditSale} className={`min-w-0 transition-opacity ${isCreditSale ? "pointer-events-none select-none opacity-40 grayscale" : ""}`}>
                 <PaymentMethods
                   paymentMethods={paymentMethods}
                   invoiceSubmitted={invoiceSubmitted}
@@ -3409,6 +3414,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                     </div>
                   }
                 />
+                </fieldset>
 
                 {renderVoucherPanel()}
 
