@@ -40,3 +40,21 @@ describe("PaymentHeader on Order Complete (desktop)", () => {
     expect(orderComplete()).not.toContain('title="QZ Print"');
   });
 });
+
+describe("PaymentHeader before payment", () => {
+  const checkout = (extra: Record<string, unknown> = {}) => orderComplete({ invoiceSubmitted: false, ...extra });
+
+  it("names the customer instead of 'Order Summary'", () => {
+    const html = checkout({ customerName: "JOHN NJENGA MUIRURI" });
+    expect(html).toMatch(/<h2[^>]*>JOHN NJENGA MUIRURI<\/h2>/);
+    expect(html).not.toContain("Order Summary");
+  });
+
+  it("falls back to 'Order Summary' with no customer", () => {
+    expect(checkout()).toMatch(/<h2[^>]*>Order Summary<\/h2>/);
+  });
+
+  it("renders the sale type slot", () => {
+    expect(checkout({ saleTypeSlot: <span>SALE-TYPE-SLOT</span> })).toContain("SALE-TYPE-SLOT");
+  });
+});

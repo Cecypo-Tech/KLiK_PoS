@@ -7,7 +7,7 @@ import { paymentBlockReason } from "../../utils/paymentBlockReason";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { getCreditTerms } from "../../services/paymentTerms";
 import { chooseTerm, type CreditTerms } from "../../utils/creditTerms";
-import { Award, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, RefreshCw, X } from "lucide-react";
+import { Award, CloudUpload, Eye, Loader2, MailPlus, MessageCirclePlus, MessageSquarePlus, Printer, RefreshCw, X } from "lucide-react";
 import { useCartStore } from "../../stores/cartStore";
 import { usePaymentModes } from "../../hooks/usePaymentModes";
 import { useSalesTaxCharges } from "../../hooks/useSalesTaxCharges";
@@ -92,6 +92,7 @@ import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, get
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader, { AdditionalInfoButton } from "./PaymentHeader";
 import CreditSaleCard from "./CreditSaleCard";
+import SaleTypeControl from "../order/SaleTypeControl";
 import { blockKey } from "../../utils/blockKey";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
@@ -3023,6 +3024,17 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   if (isLoading || posLoading) return <div className="p-6">Loading...</div>;
   if (error) return <div className="p-6 text-red-500">Error: {error}</div>;
 
+  // Sale | Credit without going back to the cart; the STK guard lives in toggleCreditSale.
+  const saleTypeSwitch = allowCreditSales ? (
+    <SaleTypeControl
+      value={isCreditSale ? "credit" : "sale"}
+      options={["sale", "credit"]}
+      onChange={(type) => { if ((type === "credit") !== isCreditSale) toggleCreditSale(); }}
+      disabledReasons={selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : undefined}
+      disabled={invoiceSubmitted || isProcessingPayment}
+    />
+  ) : null;
+
   if (isMobile) {
     return (
       <div className={isFullPage ? "h-full bg-white dark:bg-gray-900 flex flex-col overflow-hidden" : "fixed inset-0 bg-white dark:bg-gray-900 z-50 flex flex-col overflow-hidden"}>
@@ -3111,6 +3123,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             ) : (
               <>
+                {!invoiceSubmitted && saleTypeSwitch}
                 {isCreditSale && (
                   <CreditSaleCard
                     customerName={selectedCustomer?.name || ""}
@@ -3316,6 +3329,8 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onAdditionalInfo={canOpenAdditionalInfo ? () => setAdditionalInfoOpen(true) : undefined}
           onQzReprint={qzEnabled ? qz.start : undefined}
           qzCount={qz.count}
+          customerName={selectedCustomer?.name}
+          saleTypeSlot={saleTypeSwitch}
         />
 
         <div className="flex flex-1 min-h-0">
@@ -3519,25 +3534,22 @@ export default function PaymentDialog(props: PaymentDialogProps) {
               </div>
             )}
             <div className={`flex items-center gap-4 ${isDeliveryRequired || isShippingRuleEnabled ? "" : "w-full justify-between"}`}>
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={enableBackgroundSubmission}
-                    onChange={(e) => setEnableBackgroundSubmission(e.target.checked)}
-                    disabled={invoiceSubmitted || isProcessingPayment}
-                    className="w-4 h-4 rounded border-gray-300 text-beveren-600 focus:ring-beveren-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Submit Invoice in Background
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    Process invoice without waiting for response
-                  </span>
-                </div>
-              </label>
+              {/* Per-sale switch; its default is the POS Profile's background submission. */}
+              <button
+                type="button"
+                aria-pressed={enableBackgroundSubmission}
+                aria-label="Submit in background"
+                title={`Submit in background: ${enableBackgroundSubmission ? "on" : "off"}`}
+                onClick={() => setEnableBackgroundSubmission((on) => !on)}
+                disabled={invoiceSubmitted || isProcessingPayment}
+                className={`p-2 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  enableBackgroundSubmission
+                    ? "border-beveren-500 bg-beveren-50 text-beveren-700 dark:bg-beveren-900/30 dark:text-beveren-300"
+                    : "border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                }`}
+              >
+                <CloudUpload size={18} />
+              </button>
               <PriceFloorPanel
                 floor={backendTaxPreview?.price_floor ?? null}
                 authorisation={floorAuth}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronLeft, Contact, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
 import { handlePrintInvoice } from "../../utils/printHandler";
 import QzPrintIcon from "../QzPrintIcon";
@@ -22,6 +23,10 @@ interface PaymentHeaderProps {
   onQzReprint?: () => void;
   /** Times QZ has printed this invoice, shown as QZ-n. */
   qzCount?: number;
+  /** The sale's customer, shown as the title before payment. */
+  customerName?: string;
+  /** Sale | Credit, beside the title. */
+  saleTypeSlot?: ReactNode;
 }
 
 export default function PaymentHeader({
@@ -41,6 +46,8 @@ export default function PaymentHeader({
   onAdditionalInfo,
   onQzReprint,
   qzCount = 0,
+  customerName,
+  saleTypeSlot,
 }: PaymentHeaderProps) {
   if (invoiceSubmitted) {
     return (
@@ -117,8 +124,8 @@ export default function PaymentHeader({
 
   return (
     <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-      <div className="flex items-center gap-2">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Order Summary</h2>
+      <div className="flex items-center gap-2 min-w-0">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white truncate">{customerName || "Order Summary"}</h2>
         <button
           onClick={onCopyOrder}
           className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
@@ -128,6 +135,7 @@ export default function PaymentHeader({
         </button>
       </div>
       <div className="flex items-center gap-2">
+        {saleTypeSlot && <div className="w-48">{saleTypeSlot}</div>}
         <button
           onClick={() => onClose(invoiceSubmitted)}
           disabled={isProcessingPayment || isHoldingOrder}
