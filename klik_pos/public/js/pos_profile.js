@@ -27,9 +27,46 @@ async function loadExtraFieldCandidates(frm) {
     }
 }
 
+// The line panel list offers the built-in facts plus every field Item has ON THIS SITE
+// (custom ones included), so its choices come from the server, like the extra fields above.
+let lineInfoDefaults = [];
+async function loadLineInfoChoices(frm) {
+    const grid = frm.fields_dict.custom_line_info?.grid;
+    if (!grid) return;
+    try {
+        const { message } = await frappe.call({ method: 'klik_pos.api.item.line_info.get_line_info_choices' });
+        if (!message) return;
+        lineInfoDefaults = message.defaults || [];
+        const options = [...message.builtins, ...message.item_fields].map((f) => ({
+            value: f.value,
+            label: f.label,
+            description: f.value,
+        }));
+        grid.update_docfield_property('info', 'options', options);
+        frm.refresh_field('custom_line_info');
+    } catch (e) {
+        console.error('klik_pos: could not load line panel choices', e);
+    }
+}
+
+function addLineInfoResetButton(frm) {
+    const field = frm.fields_dict.custom_line_info;
+    if (!field || field.$wrapper.find('.klik-line-info-reset').length) return;
+    $(`<button class="btn btn-xs btn-default klik-line-info-reset" style="margin-bottom: 8px">${__('Reset to default')}</button>`)
+        .prependTo(field.$wrapper)
+        .on('click', () => {
+            if (!lineInfoDefaults.length) return;
+            frm.clear_table('custom_line_info');
+            lineInfoDefaults.forEach((info) => frm.add_child('custom_line_info', { info }));
+            frm.refresh_field('custom_line_info');
+            frm.dirty();
+        });
+}
+
 frappe.ui.form.on('POS Profile', {
     onload(frm) {
         loadExtraFieldCandidates(frm);
+        loadLineInfoChoices(frm);
     },
 
     hide_images(frm) {
@@ -39,6 +76,7 @@ frappe.ui.form.on('POS Profile', {
     },
 
     refresh(frm) {
+        addLineInfoResetButton(frm);
         frm.add_custom_button(__('Install Walk-in Party Fields'), () => {
             frappe.confirm(
                 __('Add Walk-in Name / Tax ID / Phone fields to Quotation, Sales Order, Delivery Note and Sales Invoice?'),
