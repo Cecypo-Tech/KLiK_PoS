@@ -326,7 +326,7 @@ export default function InvoiceHistoryPage() {
     return (
       <>
         <DocShareButtons doctype="Quotation" name={quoteId} size={size} posDetails={posDetails} />
-        <button type="button" title="WhatsApp" aria-label="WhatsApp" className={button}
+        <button type="button" title="Send quote (WhatsApp or email)" aria-label="Send quote" className={button}
           onClick={() => setQuoteToShare({ name: quoteId, customer: invoice.customer })}>
           <MessageCirclePlus className={icon} />
         </button>

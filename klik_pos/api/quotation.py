@@ -305,3 +305,70 @@ def get_quote_details(quote_id):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Get Quote Details Error")
         return {"success": False, "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Email (Quote Saved dialog)
+# ---------------------------------------------------------------------------
+
+
+def _unique_emails(values):
+	seen, out = set(), []
+	for v in values:
+		v = (v or "").strip()
+		if v and v.lower() not in seen:
+			seen.add(v.lower())
+			out.append(v)
+	return out
+
+
+@frappe.whitelist()
+def get_quote_emails(quote_name):
+	"""Prefill for the quote's email box: its contact's address, then the customer's."""
+	q = frappe.get_doc("Quotation", quote_name)
+	q.check_permission("read")
+	customer_email = (
+		frappe.db.get_value("Customer", q.party_name, "email_id") if q.quotation_to == "Customer" else None
+	)
+	return _unique_emails([q.contact_email, customer_email])
+
+
+@frappe.whitelist()
+def send_quote_email(quote_name, emails):
+	"""Email the quote as a PDF to the comma/semicolon-separated addresses, using the till's
+	Email Template (POS Profile custom_email_template) when one is set."""
+	from frappe.utils import validate_email_address
+
+	recipients = _unique_emails(str(emails or "").replace(";", ",").split(","))
+	if not recipients:
+		frappe.throw("Enter an email address")
+	bad = [e for e in recipients if not validate_email_address(e)]
+	if bad:
+		frappe.throw(f"Not an email address: {', '.join(bad)}")
+
+	q = frappe.get_doc("Quotation", quote_name)
+	q.check_permission("read")
+	template = _get_active_pos_profile().get("custom_email_template")
+	if template:
+		t = frappe.get_doc("Email Template", template)
+		ctx = {"doc": q.as_dict(), **q.as_dict()}
+		subject = frappe.render_template(t.subject or "", ctx)
+		message = frappe.render_template((t.response_html if t.use_html else t.response) or "", ctx)
+	else:
+		subject = f"Quotation {q.name} from {q.company}"
+		message = (
+			f"<p>Dear {q.customer_name},</p><p>Please find attached quotation <b>{q.name}</b>"
+			f" for {frappe.utils.fmt_money(q.rounded_total or q.grand_total, currency=q.currency)}.</p>"
+			"<p>Thank you.</p>"
+		)
+	pdf = frappe.get_print("Quotation", q.name, as_pdf=True)
+	frappe.sendmail(
+		recipients=recipients,
+		subject=subject,
+		message=message,
+		attachments=[{"fname": f"{q.name}.pdf", "fcontent": pdf}],
+		reference_doctype="Quotation",
+		reference_name=q.name,
+		delayed=False,
+	)
+	return {"recipients": recipients}
