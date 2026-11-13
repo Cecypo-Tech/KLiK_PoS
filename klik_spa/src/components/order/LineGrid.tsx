@@ -69,9 +69,10 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
   }, [highlight]);
   const money = "w-24 shrink-0 text-right tabular-nums";
   return (
-    <div ref={box} className="@container absolute left-2 right-2 z-30 mt-1 max-w-[44rem] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+    <div ref={box} className="@container absolute left-2 right-2 z-30 mt-1 max-w-[52rem] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
       <div className="flex h-6 items-center gap-2 border-b border-gray-100 dark:border-gray-700 px-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
         <span className="min-w-0 flex-1">Item</span>
+        {showCode ? <span className="@max-[30rem]:hidden w-32 shrink-0">Code</span> : null}
         {showCost ? <span className={money}>Cost</span> : null}
         <span className={money}>Price</span>
         <span className="w-12 shrink-0 text-right">Stock</span>
@@ -91,7 +92,7 @@ export function ItemResults({ results, highlight, query, currencySymbol, showCos
             >
               <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-white"><Highlight text={r.name} query={query} /></span>
               {showCode ? (
-                <span className="@max-[36rem]:hidden max-w-[9rem] shrink truncate font-mono text-[11px] text-gray-400">{r.item_code || r.id}</span>
+                <span className="@max-[30rem]:hidden w-32 shrink-0 truncate text-gray-900 dark:text-white" title={r.item_code || r.id}>{r.item_code || r.id}</span>
               ) : null}
               {showCost ? (
                 <span title={cost.title} className={`${money} text-gray-500 dark:text-gray-400`}>{cost.text}</span>
@@ -118,6 +119,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   const [open, setOpen] = useState(false);
 
   const top = posDetails?.custom_cart_item_insertion_position === "Top";
+  const showCode = !!posDetails?.custom_show_item_code_in_product_list;
   // Under 1024 px (an 800x600 counter) Disc % and the remove button leave the row: both are in the
   // side panel, and Shift+Delete still deletes. Rendered or not, never CSS-hidden: the entry row's
   // colSpan would keep hidden columns alive and they would split the item name's width.
@@ -262,7 +264,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
 
   const entry = (
     <tr data-entry-row="" className="border-b border-gray-100 dark:border-gray-800">
-      <td className="relative px-2 py-1" colSpan={compact ? 5 : 7}>
+      <td className="relative px-2 py-1" colSpan={(compact ? 5 : 7) + (showCode ? 1 : 0)}>
         <input
           type="text"
           data-row={entryRow}
@@ -289,7 +291,7 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
             // As the line panel: cost shows unless the profile hides it (the server also blanks it then).
             showCost={costMode(posDetails) !== "Hidden"}
             costMode={costMode(posDetails)}
-            showCode={!!posDetails?.custom_show_item_code_in_product_list}
+            showCode={showCode}
             onPick={(r) => void pick(r)}
             onHover={setHighlight}
           />
@@ -299,10 +301,11 @@ const LineGrid = forwardRef<LineGridHandle, LineGridProps>(function LineGrid(pro
   );
 
   return (
-    <table ref={tableRef} onKeyDown={onKeyDown} className="w-full table-fixed text-[13px]">
+    <table ref={tableRef} onKeyDown={onKeyDown} className="w-full table-fixed text-sm">
       <thead>
         <tr className="border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
           <th className="px-2 py-1 text-left font-medium">Item</th>
+          {showCode ? <th className="w-24 xl:w-32 px-2 py-1 text-left font-medium">Code</th> : null}
           {/* Below 1280 px the side panel narrows and these columns tighten, so the item name keeps
               its room; the LoS chip moves under the name. */}
           <th className={`w-14 ${Number(posDetails?.custom_enable_loss_of_sale) ? "xl:w-32" : "xl:w-20"} px-2 py-1 text-right font-medium`}>Qty</th>

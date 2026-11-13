@@ -5,6 +5,7 @@ import frappe
 from erpnext.setup.utils import get_exchange_rate
 from erpnext.accounts.party import get_party_details
 from frappe import _
+from frappe.utils import flt, getdate, today
 from frappe.utils.nestedset import get_descendants_of
 
 from klik_pos.klik_pos.utils import get_current_pos_profile, get_user_default_company
@@ -962,45 +963,54 @@ def get_required_customer_fields():
     return required_fields
 
 
+def _till_shows_overdue():
+    """Whether the caller's current till has 'Show Overdue Warning' on: the one tick that
+    decides whether its cashiers see what a customer owes."""
+    from klik_pos.api.sales_invoice import get_current_pos_opening_entry
+
+    entry = get_current_pos_opening_entry()
+    profile = entry and frappe.db.get_value("POS Opening Entry", entry, "pos_profile")
+    return bool(profile and frappe.db.get_value("POS Profile", profile, "custom_show_overdue_warning"))
+
+
 @frappe.whitelist()
 def get_customer_overdue_invoices(customer, company=""):
-    """Return overdue Sales Invoices (past due date, still outstanding) for a customer.
+    """Overdue Sales Invoices (past due date, still outstanding) for a customer, and the total
+    the customer owes across every unpaid invoice, due or not.
 
-    Called from the POS on customer selection when custom_show_overdue_warning is on.
+    Called from the POS on customer selection. Refused unless the caller's till shows overdue
+    warnings or the caller is a shift manager: balances are not for every cashier.
     Walk-in customers are excluded on the frontend; this function has no awareness of that.
     """
+    from klik_pos.api.shift import is_shift_manager
+
+    if not (is_shift_manager() or _till_shows_overdue()):
+        frappe.throw(_("Customer balances are not shown on this till."), frappe.PermissionError)
+
     customer = (customer or "").strip()
     if not customer:
-        return {"has_overdue": False, "invoices": [], "customer_name": ""}
+        return {"has_overdue": False, "invoices": [], "customer_name": "", "total_outstanding": 0.0}
 
     company = (company or "").strip()
+    company_filter = "AND company = %(company)s" if company else ""
+    unpaid = frappe.db.sql(f"""
+        SELECT name, due_date, grand_total, outstanding_amount, currency, customer_name
+        FROM `tabSales Invoice`
+        WHERE customer = %(customer)s
+          {company_filter}
+          AND docstatus = 1
+          AND outstanding_amount > 0.001
+        ORDER BY due_date ASC
+    """, {"customer": customer, "company": company}, as_dict=True)
 
-    if company:
-        invoices = frappe.db.sql("""
-            SELECT name, due_date, grand_total, outstanding_amount, currency, customer_name
-            FROM `tabSales Invoice`
-            WHERE customer = %(customer)s
-              AND company = %(company)s
-              AND docstatus = 1
-              AND outstanding_amount > 0.001
-              AND due_date < CURDATE()
-            ORDER BY due_date ASC
-        """, {"customer": customer, "company": company}, as_dict=True)
-    else:
-        invoices = frappe.db.sql("""
-            SELECT name, due_date, grand_total, outstanding_amount, currency, customer_name
-            FROM `tabSales Invoice`
-            WHERE customer = %(customer)s
-              AND docstatus = 1
-              AND outstanding_amount > 0.001
-              AND due_date < CURDATE()
-            ORDER BY due_date ASC
-        """, {"customer": customer}, as_dict=True)
-
+    cutoff = getdate(today())
+    invoices = [row for row in unpaid if row.due_date and getdate(row.due_date) < cutoff]
     customer_name = frappe.db.get_value("Customer", customer, "customer_name") or customer
 
     return {
         "has_overdue": len(invoices) > 0,
         "invoices": invoices,
         "customer_name": customer_name,
+        # ponytail: sums invoice-currency amounts; a customer billed in two currencies needs base_ amounts.
+        "total_outstanding": flt(sum(flt(row.outstanding_amount) for row in unpaid), 2),
     }

@@ -1,6 +1,6 @@
 /** Cart state that lives only while the page is open: never saved, so a reload neither
  * reopens a panel nor replays a request. */
-const TRANSIENT = ["expandedCartItemId", "pendingRateOverrides", "rateOverrideNonce", "additionalInfoOpen"] as const;
+const TRANSIENT = ["expandedCartItemId", "pendingRateOverrides", "rateOverrideNonce", "additionalInfoOpen", "customerBalance"] as const;
 
 /** The order itself. Once its sale is complete none of it is saved: the Order Complete
  * screen still shows it, but a reload starts empty instead of offering the sale again. */
@@ -14,6 +14,7 @@ const ORDER = [
   "shippingRule",
   "checkoutExtras",
   "saleCompleted",
+  "creditSale",
 ] as const;
 
 export function persistedCartState<T extends object>(state: T): Omit<T, (typeof TRANSIENT)[number]> {

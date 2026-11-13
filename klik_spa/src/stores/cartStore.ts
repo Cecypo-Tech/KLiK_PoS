@@ -15,6 +15,7 @@ import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '..
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 import { addEntries, moveLine, type BulkEntry } from '../utils/bulkAdd'
 import { persistedCartState } from '../utils/cartPersist'
+import { defaultCreditSale, type SaleType } from '../utils/saleType'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -127,6 +128,9 @@ const fetchItemTaxDetails = async (
 export interface WalkinDetails { name: string; taxId: string; phone: string }
 const EMPTY_WALKIN: WalkinDetails = { name: '', taxId: '', phone: '' };
 
+/** What `customer` owes. Tagged with the customer: its lookup can land before or after the customer is set. */
+export interface CustomerBalance { customer: string; outstanding: number; overdue: number }
+
 interface CartState {
   cartItems: CartItem[]
   appliedCoupons: GiftCoupon[]
@@ -140,6 +144,13 @@ interface CartState {
   quoteMode: boolean
   enterQuoteMode: () => void
   exitQuoteMode: () => void
+  /** Credit sale, picked in the cart beside the customer. Resets with the customer. */
+  creditSale: boolean
+  /** Sale, Credit or Quote: one of them, never two. */
+  setSaleType: (type: SaleType) => void
+  /** What the selected customer owes, when the till shows overdue warnings. Not saved. */
+  customerBalance: CustomerBalance | null
+  setCustomerBalance: (balance: CustomerBalance | null) => void
   isPricingLoading: boolean
   pricingError: string | null
 
@@ -252,8 +263,12 @@ export const useCartStore = create<CartState>()(
       highlightNonce: 0,
       selectedPriceList: null,
       quoteMode: false,
-      enterQuoteMode: () => set({ quoteMode: true }),
+      enterQuoteMode: () => set({ quoteMode: true, creditSale: false }),
       exitQuoteMode: () => set({ quoteMode: false }),
+      creditSale: false,
+      setSaleType: (type) => set({ quoteMode: type === "quote", creditSale: type === "credit" }),
+      customerBalance: null,
+      setCustomerBalance: (balance) => set({ customerBalance: balance }),
       isPricingLoading: false,
       pricingError: null,
       shippingRule: null,
@@ -706,6 +721,8 @@ export const useCartStore = create<CartState>()(
           checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS },
           expandedCartItemId: null,
           saleCompleted: false,
+          creditSale: defaultCreditSale(usePOSProfileStore.getState().posDetails, null),
+          customerBalance: null,
         }));
       },
 
@@ -725,7 +742,12 @@ export const useCartStore = create<CartState>()(
       })),
 
       setSelectedCustomer: async (customer) => {
-        set({ selectedCustomer: customer });
+        // Credit is a choice about this customer: another customer starts from the till's default.
+        const changed = (get().selectedCustomer?.id ?? null) !== (customer?.id ?? null);
+        set({
+          selectedCustomer: customer,
+          ...(changed ? { creditSale: defaultCreditSale(usePOSProfileStore.getState().posDetails, customer) } : {}),
+        });
         if (!customer || customer.isWalkin !== 1) {
           set({ walkinDetails: { ...EMPTY_WALKIN } });
         }
@@ -775,3 +797,7 @@ export const useCartStore = create<CartState>()(
     }
   )
 )
+
+/** The cart's sale type, from its two flags. */
+export const saleTypeOf = (s: { quoteMode: boolean; creditSale: boolean }): SaleType =>
+  s.quoteMode ? "quote" : s.creditSale ? "credit" : "sale"

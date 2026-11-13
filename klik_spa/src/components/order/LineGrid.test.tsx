@@ -73,6 +73,16 @@ describe("LineGrid", () => {
     expect(render([los], { custom_enable_loss_of_sale: 1 })).toContain(">Disc %</th>");
   });
 
+  it("adds a Code column in plain text when the till shows item codes, and widens the entry row to match", () => {
+    const off = render([line("SKU-1", "Apple")]);
+    expect(off).not.toContain(">Code</th>");
+    expect(off).toContain('colSpan="7"');
+    const on = render([line("SKU-1", "Apple")], { custom_show_item_code_in_product_list: 1 });
+    expect(on).toContain(">Code</th>");
+    expect(on).toMatch(/<td[^>]*text-gray-900[^>]*>SKU-1<\/td>/);
+    expect(on).toContain('colSpan="8"');
+  });
+
   it("shows a description as an italic second line, and nothing when there is none", () => {
     expect(render([line("A", "Apple", "Green ones")])).toMatch(/<[^>]*class="[^"]*italic[^"]*"[^>]*>Green ones</);
     expect(render([line("A", "Apple")])).not.toContain("italic");
@@ -120,7 +130,8 @@ describe("ItemResults (the entry row's search dropdown)", () => {
   });
 
   it("shows the item code only when the profile shows codes in the product list", () => {
-    expect(html(false, [pen], true)).toContain(">PEN</span>");
+    expect(html(false, [pen], true)).toContain(">Code</span>");
+    expect(html(false, [pen], true)).toMatch(/text-gray-900[^>]*>PEN<\/span>/);
     expect(html(false, [pen], false)).not.toContain(">PEN</span>");
   });
 

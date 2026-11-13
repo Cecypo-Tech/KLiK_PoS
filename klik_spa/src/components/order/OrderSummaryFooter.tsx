@@ -15,9 +15,8 @@ interface OrderSummaryFooterProps {
   taxExclusive?: boolean;
   /** Formatted total net weight, e.g. "12.5 Kg"; empty hides the row. */
   netWeightLabel?: string;
-  /** Quoting: the main button saves a quote instead of checking out, and Quote hides. */
+  /** Quoting: the main button saves a quote instead of checking out. */
   quoteMode?: boolean;
-  onQuote?: () => void;
 }
 
 export const OrderSummaryFooter = ({
@@ -33,7 +32,6 @@ export const OrderSummaryFooter = ({
   taxExclusive = false,
   netWeightLabel = "",
   quoteMode = false,
-  onQuote,
 }: OrderSummaryFooterProps) => {
   const discount = totalItemDiscount + couponDiscount;
 
@@ -78,17 +76,6 @@ export const OrderSummaryFooter = ({
         >
           Clear Cart
         </button>
-        {!quoteMode && onQuote && (
-          <button
-            id="pos-quote-btn"
-            onClick={onQuote}
-            className={`shrink-0 px-3 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm ${
-              isMobile ? "py-3" : "py-2"
-            }`}
-          >
-            Quote
-          </button>
-        )}
         <button
           id="pos-checkout-btn"
           onClick={onCheckout}

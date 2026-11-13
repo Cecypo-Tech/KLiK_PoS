@@ -34,6 +34,9 @@ import { OrderSummaryFooter } from "./OrderSummaryFooter";
 import { usePosShortcutLayer } from "../../hooks/usePosShortcutLayer";
 import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { quotesAllowed } from "../../utils/quotesAllowed";
+import { creditSalesAllowed } from "../../utils/creditSales";
+import type { SaleType } from "../../utils/saleType";
+import SaleTypeControl from "./SaleTypeControl";
 import { useSalespersonStore } from "../../stores/salespersonStore";
 import { getEffectiveDisplayRate, getEffectiveItemRate } from "../../utils/cartPricing";
 import { shouldRestorePersistedDiscount } from "../../utils/persistedDiscounts";
@@ -76,8 +79,9 @@ export default function OrderSummary({
     pendingRateOverrides,
     consumeRateOverrides,
     quoteMode,
-    enterQuoteMode,
     exitQuoteMode,
+    creditSale,
+    setSaleType,
     walkinDetails,
     extraFields,
     shippingRule,
@@ -148,6 +152,11 @@ export default function OrderSummary({
   const currency_symbol = posDetails?.currency_symbol;
   const autoFetchBatch = posDetails?.custom_autofetch_batchserial_ === 1;
   const canQuote = quotesAllowed(posDetails);
+  const saleTypeOptions: SaleType[] = [
+    "sale",
+    ...(creditSalesAllowed(posDetails) ? (["credit"] as const) : []),
+    ...(canQuote ? (["quote"] as const) : []),
+  ];
   // A till switched off for quotes drops a quote mode left over from before (it is persisted).
   useEffect(() => {
     if (!canQuote && quoteMode) exitQuoteMode();
@@ -710,6 +719,14 @@ export default function OrderSummary({
         customer={selectedCustomer}
         currencySymbol={currency_symbol}
       />
+      <div className="mt-3">
+        <SaleTypeControl
+          value={quoteMode ? "quote" : creditSale ? "credit" : "sale"}
+          options={saleTypeOptions}
+          onChange={setSaleType}
+          disabledReasons={selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : undefined}
+        />
+      </div>
     </div>
   );
 
@@ -727,16 +744,6 @@ export default function OrderSummary({
         Cancel quote
       </button>
     </div>
-  );
-
-  const quoteButton = !quoteMode && canQuote && (
-    <button
-      id="pos-quote-btn"
-      onClick={enterQuoteMode}
-      className="mt-4 px-3 py-2 border border-amber-500 text-amber-700 dark:text-amber-400 rounded-xl font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm"
-    >
-      Quote
-    </button>
   );
 
   const cartRow = (item: CartItem, isExpanded: boolean, onToggleExpand: () => void) => (
@@ -785,7 +792,6 @@ export default function OrderSummary({
       taxExclusive={!isTaxIncludedInBasicRate}
       netWeightLabel={cartWeight.total > 0 ? formatCartWeight(cartWeight) : ""}
       quoteMode={quoteMode}
-      onQuote={canQuote ? enterQuoteMode : undefined}
     />
   );
 
@@ -882,7 +888,6 @@ export default function OrderSummary({
             ) : (
               <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                 {cartItems.length ? "Select a line" : "Scan or type an item to start"}
-                {cartItems.length === 0 && <div>{quoteButton}</div>}
               </div>
             )}
           </div>
@@ -955,7 +960,6 @@ export default function OrderSummary({
               <p className="text-gray-500 dark:text-gray-400">
                 Add some items to get started!
               </p>
-              {quoteButton}
             </div>
           ) : (
             cartItems.map((item) =>
