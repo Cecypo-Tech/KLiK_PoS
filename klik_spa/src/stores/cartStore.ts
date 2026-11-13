@@ -15,6 +15,7 @@ import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '..
 import { EMPTY_CHECKOUT_EXTRAS, type CheckoutExtras } from '../utils/heldOrderPayload'
 import { addEntries, moveLine, type BulkEntry } from '../utils/bulkAdd'
 import { persistedCartState } from '../utils/cartPersist'
+import { defaultCreditSale, type SaleType } from '../utils/saleType'
 
 interface SerialBatchEntry {
   serial_no?: string;
@@ -140,6 +141,10 @@ interface CartState {
   quoteMode: boolean
   enterQuoteMode: () => void
   exitQuoteMode: () => void
+  /** Credit sale, picked in the cart beside the customer. Resets with the customer. */
+  creditSale: boolean
+  /** Sale, Credit or Quote: one of them, never two. */
+  setSaleType: (type: SaleType) => void
   isPricingLoading: boolean
   pricingError: string | null
 
@@ -252,8 +257,10 @@ export const useCartStore = create<CartState>()(
       highlightNonce: 0,
       selectedPriceList: null,
       quoteMode: false,
-      enterQuoteMode: () => set({ quoteMode: true }),
+      enterQuoteMode: () => set({ quoteMode: true, creditSale: false }),
       exitQuoteMode: () => set({ quoteMode: false }),
+      creditSale: false,
+      setSaleType: (type) => set({ quoteMode: type === "quote", creditSale: type === "credit" }),
       isPricingLoading: false,
       pricingError: null,
       shippingRule: null,
@@ -706,6 +713,7 @@ export const useCartStore = create<CartState>()(
           checkoutExtras: { ...EMPTY_CHECKOUT_EXTRAS },
           expandedCartItemId: null,
           saleCompleted: false,
+          creditSale: defaultCreditSale(usePOSProfileStore.getState().posDetails, null),
         }));
       },
 
@@ -725,7 +733,12 @@ export const useCartStore = create<CartState>()(
       })),
 
       setSelectedCustomer: async (customer) => {
-        set({ selectedCustomer: customer });
+        // Credit is a choice about this customer: another customer starts from the till's default.
+        const changed = (get().selectedCustomer?.id ?? null) !== (customer?.id ?? null);
+        set({
+          selectedCustomer: customer,
+          ...(changed ? { creditSale: defaultCreditSale(usePOSProfileStore.getState().posDetails, customer) } : {}),
+        });
         if (!customer || customer.isWalkin !== 1) {
           set({ walkinDetails: { ...EMPTY_WALKIN } });
         }
@@ -775,3 +788,7 @@ export const useCartStore = create<CartState>()(
     }
   )
 )
+
+/** The cart's sale type, from its two flags. */
+export const saleTypeOf = (s: { quoteMode: boolean; creditSale: boolean }): SaleType =>
+  s.quoteMode ? "quote" : s.creditSale ? "credit" : "sale"

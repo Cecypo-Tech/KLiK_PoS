@@ -14,6 +14,7 @@ const ORDER = [
   "shippingRule",
   "checkoutExtras",
   "saleCompleted",
+  "creditSale",
 ] as const;
 
 export function persistedCartState<T extends object>(state: T): Omit<T, (typeof TRANSIENT)[number]> {
