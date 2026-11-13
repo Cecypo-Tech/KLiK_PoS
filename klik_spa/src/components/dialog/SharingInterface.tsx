@@ -158,6 +158,7 @@ export default function SharingInterface({
         customer_name: sharingData.name,
         invoice_data: invoiceData?.name || "",
         message: getProcessedEmailMessage(),
+        template: selectedEmailTemplate?.name || undefined,
         sender: selectedSender || undefined,
       });
       toast.success("Email sent successfully!");
