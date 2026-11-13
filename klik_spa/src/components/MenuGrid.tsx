@@ -191,13 +191,16 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
       }`}>
         <div className="flex items-center justify-between gap-3 px-6 py-2">
           {headerOnly ? (
-            // The sale's context, in the order it is set: customer, warehouse, price list.
+            // The sale's context, in the order it is set: sale type, customer, warehouse, price list.
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+            <CartSaleType />
             <CustomerSearchSection
               variant="bar"
               selectedCustomer={selectedCustomer}
               onCustomerSelect={(c) => { void setSelectedCustomer(c); }}
               onCustomerClear={() => { void setSelectedCustomer(null); }}
             />
+            </div>
           ) : (
           <div className="flex items-center space-x-3 flex-1 max-w-md">
             <SearchBar
@@ -239,9 +242,9 @@ export default function MenuGrid({ onRefreshStock, onScanBarcode, headerOnly = f
           </div>
           )}
 
-          <div className="ml-auto shrink-0"><CartSaleType /></div>
+          {!headerOnly && <div className="ml-auto shrink-0"><CartSaleType /></div>}
 
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {headerOnly && (
               onScanBarcode && (
                 <button
