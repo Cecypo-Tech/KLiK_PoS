@@ -88,7 +88,7 @@ import { exclusiveSubtotal } from "../../utils/taxLabel";
 import { summaryFigures } from "../../utils/summaryFigures";
 import { extractErrorFromException } from "../../utils/errorExtraction";
 import { fetchWhatsAppTemplates, getDefaultWhatsAppTemplate, processTemplate, getDefaultMessageTemplate } from "../../services/whatsappTemplateService";
-import { fetchEmailTemplates, getDefaultEmailTemplate, processEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
+import { fetchEmailTemplates, getDefaultEmailTemplate, getDefaultEmailMessageTemplate } from "../../services/emailTemplateService";
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader, { AdditionalInfoButton } from "./PaymentHeader";
 import CreditSaleCard from "./CreditSaleCard";
@@ -2374,28 +2374,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
     return processTemplate(customMessage, parameters);
   };
 
-  const getProcessedEmailMessage = () => {
-    const parameters: Record<string, string | null> = {
-      customer_name: sharingData.name || "Customer",
-      customer: sharingData.name || "Customer",
-      first_name: sharingData.name?.split(" ")[0] || "",
-      last_name: sharingData.name?.split(" ").slice(1).join(" ") || "",
-      address: typeof selectedCustomer?.address === "string" ? selectedCustomer.address : JSON.stringify(selectedCustomer?.address || {}),
-      customer_address: typeof selectedCustomer?.address === "string" ? selectedCustomer.address : JSON.stringify(selectedCustomer?.address || {}),
-      delivery_note: invoiceData?.name || "",
-      grand_total: formatCurrencyWithSymbol(checkoutGrandTotal, displayCurrencySymbol),
-      departure_time: new Date().toLocaleTimeString(),
-      estimated_arrival: new Date(Date.now() + 30 * 60000).toLocaleTimeString(),
-      driver_name: "Delivery Driver",
-      cell_number: "+1234567890",
-      vehicle: "Delivery Vehicle",
-      invoice_total: formatCurrencyWithSymbol(checkoutGrandTotal, displayCurrencySymbol),
-      invoice_number: invoiceData?.name || "",
-      company_name: "KLiK PoS",
-      date: new Date().toLocaleDateString(),
-    };
-    return processEmailTemplate(emailMessage, parameters);
-  };
 
   const fetchCustomerDetails = async (customerId: string, existingEmail: string, existingPhone: string, existingName: string) => {
     try {
@@ -3351,7 +3329,6 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                 setSharingMode={setSharingMode}
                 posDetails={posDetails}
                 getProcessedMessage={getProcessedMessage}
-                getProcessedEmailMessage={getProcessedEmailMessage}
                 handleTemplateChange={handleTemplateChange}
                 handleEmailTemplateChange={handleEmailTemplateChange}
               />

@@ -33,7 +33,6 @@ interface SharingInterfaceProps {
   setSharingMode: (mode: string | null) => void;
   posDetails: any;
   getProcessedMessage: () => string;
-  getProcessedEmailMessage: () => string;
   handleTemplateChange: (templateName: string) => void;
   handleEmailTemplateChange: (templateName: string) => void;
 }
@@ -68,13 +67,27 @@ export default function SharingInterface({
   setSharingMode,
   posDetails,
   getProcessedMessage,
-  getProcessedEmailMessage,
   handleTemplateChange,
   handleEmailTemplateChange,
 }: SharingInterfaceProps) {
   const [modeEnabled, setModeEnabled] = useState(false);
   const [outgoingAccounts, setOutgoingAccounts] = useState<any[]>([]);
   const [selectedSender, setSelectedSender] = useState<string>("");
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; message: string } | null>(null);
+
+  // The server renders the preview, so it shows exactly what Send Email sends.
+  const invoiceName = invoiceData?.name || "";
+  const templateName = selectedEmailTemplate?.name || "";
+  useEffect(() => {
+    if (sharingMode !== "email" || !invoiceName) return;
+    let live = true;
+    const t = setTimeout(() => {
+      void import("../../services/useSharing").then(({ previewInvoiceEmail }) =>
+        previewInvoiceEmail({ invoice_data: invoiceName, message: emailMessage, template: templateName || undefined, customer_name: sharingData.name })
+      ).then((p) => { if (live) setEmailPreview(p); });
+    }, 400);
+    return () => { live = false; clearTimeout(t); };
+  }, [sharingMode, invoiceName, emailMessage, templateName, sharingData.name]);
 
   useEffect(() => {
     if (sharingMode === "email") {
@@ -157,7 +170,7 @@ export default function SharingInterface({
         email: sharingData.email,
         customer_name: sharingData.name,
         invoice_data: invoiceData?.name || "",
-        // Raw text: the server fills the placeholders from the invoice (the preview below is approximate).
+        // Raw text: the server fills the placeholders from the invoice, as the preview shows.
         message: emailMessage,
         template: selectedEmailTemplate?.name || undefined,
         sender: selectedSender || undefined,
@@ -274,8 +287,14 @@ export default function SharingInterface({
               </div>
             )}
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-2">Subject: Your Invoice from KLiK PoS</p>
-              <div className="text-sm text-gray-900 whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: getProcessedEmailMessage() }} />
+              {emailPreview ? (
+                <>
+                  <p className="text-sm text-gray-600 mb-2">Subject: {emailPreview.subject}</p>
+                  <div className="text-sm text-gray-900" dangerouslySetInnerHTML={{ __html: emailPreview.message }} />
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">Loading preview…</p>
+              )}
             </div>
           </div>
           <button onClick={sendEmail} disabled={!sharingData.email || isSendingEmail || !modeEnabled} className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-300">
