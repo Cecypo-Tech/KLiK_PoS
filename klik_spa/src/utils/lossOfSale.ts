@@ -43,6 +43,15 @@ export function planLineQty({ limited, available, requested, otherLinesQty, losE
   return losEnabled ? splitForLoS(requested, left) : null;
 }
 
+/** What one click adds: one unit, or the part-unit left when less than one remains (the last
+ * 0.5 kg), so the last of a stock is sellable and LoS is not charged for the gap. `onLine` is what
+ * the clicked line already holds, in its unit. */
+export function clickStep({ limited, available, otherLinesQty, factor }: Omit<PlanInput, "requested" | "losEnabled">, onLine = 0): number {
+  if (!limited) return 1;
+  const left = roundQty(Math.max(0, available - otherLinesQty) / stockFactor({ conversion_factor: factor }) - onLine);
+  return left > 0 && left < 1 ? left : 1;
+}
+
 /** Stock units in one of the line's unit; 1 when the line has no factor. */
 export const stockFactor = (line: { conversion_factor?: number }) =>
   Number(line.conversion_factor) > 0 ? Number(line.conversion_factor) : 1;

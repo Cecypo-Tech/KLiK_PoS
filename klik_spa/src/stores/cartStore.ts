@@ -8,7 +8,7 @@ import { clearDraftInvoiceCache } from '../utils/draftInvoiceCache'
 import { clearCheckoutAttempt } from '../utils/checkoutAttempt'
 import { usePOSProfileStore } from './posProfileStore'
 import { roundCurrency } from '../utils/currencyMath'
-import { applyLosAdjustments, linesStockQty, losToast, noStockMessage, planLineQty, stockFactor, type LosAdjustment } from '../utils/lossOfSale'
+import { applyLosAdjustments, clickStep, linesStockQty, losToast, noStockMessage, planLineQty, stockFactor, type LosAdjustment } from '../utils/lossOfSale'
 import { lineInUom } from '../utils/uomSwitch'
 import { nextExpandedCartItemId } from '../utils/toggleItemExpansion'
 import { consumeRateOverrides, enqueueRateOverride, type RateOverride } from '../utils/rateOverrides'
@@ -388,14 +388,14 @@ export const useCartStore = create<CartState>()(
         }
 
         if (existingItem) {
-          const plan = planLineQty({
+          const onLine = existingItem.quantity + (existingItem.los_qty ?? 0);
+          const stock = {
             limited,
             available: stockAvailable,
-            requested: existingItem.quantity + (existingItem.los_qty ?? 0) + 1,
             otherLinesQty: linesStockQty(state.cartItems, incomingCode, existingItem.id),
-            losEnabled,
             factor: existingItem.conversion_factor,
-          });
+          };
+          const plan = planLineQty({ ...stock, requested: onLine + clickStep(stock, onLine), losEnabled });
           if (!plan) {
             toast.error(noStockMessage(item.name, existingItem.uom, stockAvailable, existingItem.conversion_factor));
             return null;
@@ -432,15 +432,17 @@ export const useCartStore = create<CartState>()(
             };
           });
         } else {
-          const plan = planLineQty({
+          const stock = {
             limited,
             available: stockAvailable,
-            requested: 1,
             otherLinesQty: linesStockQty(state.cartItems, incomingCode),
-            losEnabled,
             factor: item.conversion_factor,
-          });
-          if (!plan) return null;
+          };
+          const plan = planLineQty({ ...stock, requested: clickStep(stock), losEnabled });
+          if (!plan) {
+            toast.error(noStockMessage(item.name, item.uom, stockAvailable, item.conversion_factor));
+            return null;
+          }
           if (plan.los_qty > 0) toast.warning(losToast(item.name, item.uom, plan));
 
           const taxDetails = await fetchItemTaxDetails(
