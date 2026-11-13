@@ -3,6 +3,7 @@ import { usePOSProfileStore } from "../../stores/posProfileStore";
 import { quotesAllowed } from "../../utils/quotesAllowed";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import type { SaleType } from "../../utils/saleType";
+import { toast } from "react-toastify";
 import SaleTypeControl from "./SaleTypeControl";
 
 /** The cart's Quote / Cash Sale | Credit Sale control, wired to the till and the cart. */
@@ -20,8 +21,15 @@ export default function CartSaleType() {
     <SaleTypeControl
       value={value}
       options={options}
-      onChange={setSaleType}
-      disabledReasons={walkin ? { credit: "Credit sales need a named customer" } : undefined}
+      onChange={(type) => {
+        // Credit needs a named customer: go and pick one rather than refusing the click.
+        if (type === "credit" && walkin) {
+          toast.info("Credit sale needs a named customer");
+          document.getElementById("pos-customer-btn")?.click();
+          return;
+        }
+        setSaleType(type);
+      }}
     />
   );
 }

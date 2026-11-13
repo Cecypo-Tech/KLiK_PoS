@@ -17,6 +17,7 @@ vi.mock("./SearchBar", () => ({ default: () => <input id="pos-search-input" /> }
 vi.mock("./SwitchProfileItem", () => ({ default: () => null }));
 vi.mock("./dialog/SalespersonAuthModal", () => ({ default: () => null }));
 vi.mock("./QuickEntryDialog", () => ({ default: () => null }));
+vi.mock("./order/CustomerSearchSection", () => ({ CustomerSearchSection: ({ variant }: { variant?: string }) => <div data-stub="customer" data-variant={variant} /> }));
 vi.mock("./KeyboardShortcutsPanel", () => ({ default: ({ mode }: { mode?: string }) => <div data-stub="shortcuts" data-mode={mode ?? "cart"} /> }));
 
 const render = (headerOnly?: boolean) =>
@@ -28,14 +29,17 @@ describe("MenuGrid", () => {
     for (const s of ['id="pos-search-input"', 'data-stub="category-tabs"', 'data-stub="product-grid"', 'data-mode="cart"', 'title="Grid View"']) {
       expect(html).toContain(s);
     }
+    expect(html).not.toContain('data-stub="customer"'); // the cart panel carries it on this layout
   });
 
-  it("headerOnly: the top bar without search, tabs, product list or view toggle; grid help; a scan button", () => {
+  it("headerOnly: the customer strip leads the bar; no search, tabs, product list or view toggle; grid help; a scan button", () => {
     const html = render(true);
+    expect(html.indexOf('data-variant="bar"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-variant="bar"')).toBeLessThan(html.indexOf('title="Scan Barcode"'));
     for (const s of ['id="pos-search-input"', 'data-stub="category-tabs"', 'data-stub="product-grid"', 'title="Grid View"']) {
       expect(html).not.toContain(s);
     }
-    for (const s of ['id="pos-shortcuts-btn"', 'data-mode="grid"', 'title="Scan Barcode"', 'title="Keyboard shortcuts (?)"', 'aria-label="Quick entry"', "Stores", "Till 1", 'aria-label="User menu"']) {
+    for (const s of ['id="pos-shortcuts-btn"', 'data-mode="grid"', 'title="Scan Barcode"', 'title="Keyboard shortcuts (?)"', 'aria-label="Quick entry"', "Till 1", 'aria-label="User menu"']) {
       expect(html).toContain(s);
     }
   });
