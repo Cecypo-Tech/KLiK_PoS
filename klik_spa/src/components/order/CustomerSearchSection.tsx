@@ -54,6 +54,8 @@ interface CustomerSearchSectionProps {
   isMobile?: boolean;
   /** "bar": one line in the grid till's top bar, pickers beside it. Default: the cart panel's card. */
   variant?: "panel" | "bar";
+  /** Checkout: the cart has lines, so the warehouse shows as fixed rather than as a picker that refuses. */
+  lockWarehouse?: boolean;
 }
 
 /** After a customer pick the cashier scans next: the grid's entry row, or the cart's search box. */
@@ -71,6 +73,7 @@ export const CustomerSearchSection = ({
   onCustomerClear,
   isMobile = false,
   variant = "panel",
+  lockWarehouse = false,
 }: CustomerSearchSectionProps) => {
   const bar = variant === "bar";
   const [isOpen, setIsOpen] = useState(false);
@@ -120,7 +123,7 @@ export const CustomerSearchSection = ({
 
   const canCreateCustomer = posDetails?.custom_allow_to_create_and_edit_customers === 1;
   const allowPriceListSwitching = !!posDetails?.allow_price_list_switching;
-  const allowWarehouseChange = !!posDetails?.allow_warehouse_change;
+  const allowWarehouseChange = !!posDetails?.allow_warehouse_change && !lockWarehouse;
   const defaultPriceList = selectedCustomer?.sellingPriceList || posDetails?.selling_price_list || "";
   const activePriceList = selectedPriceList || defaultPriceList;
   const activeWarehouse = selectedWarehouse || posDetails?.warehouse || "";
@@ -408,6 +411,8 @@ export const CustomerSearchSection = ({
         }
         break;
       case "Escape":
+        // Closes this list only: in checkout, Escape reaching the page would leave checkout.
+        e.stopPropagation();
         setIsOpen(false);
         setSearch("");
         setHighlightedIndex(-1);

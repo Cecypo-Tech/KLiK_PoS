@@ -8,8 +8,8 @@ import { SALE_TYPE_COLOUR, SALE_TYPE_LABEL } from "../../utils/saleType";
 
 const BOX = "h-9 flex items-center gap-2 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm min-w-0";
 
-/** The main top bar's sale type, customer, warehouse and price list, read-only: checkout shows
- * what was picked in the same place; changing any of it is done back in the cart. */
+/** The main top bar's sale type, customer, warehouse and price list, read-only: what checkout
+ * shows in place of the editable controls while an M-Pesa payment, a submit or a hold locks the sale. */
 export default function SaleContextStrip() {
   const saleType = useCartStore(saleTypeOf);
   const customer = useCartStore((s) => s.selectedCustomer) as Customer | null;

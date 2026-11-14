@@ -51,4 +51,11 @@ describe("PaymentHeader before payment", () => {
     expect(html).not.toMatch(/<h2/);
     expect(html).not.toMatch(/<select/);
   });
+
+  it("shows the editable controls when checkout hands them over, with their own Additional Info", () => {
+    const html = checkout({ contextSlot: <div data-stub="editable" />, onAdditionalInfo: () => {} });
+    expect(html).toContain('data-stub="editable"');
+    expect(html).not.toContain('data-stub="sale-context"');
+    expect(html).not.toContain("Additional Info");
+  });
 });

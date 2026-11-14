@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronLeft, Contact, Printer, MailPlus, MessageCirclePlus, MessageSquarePlus, Eye, Loader2, ClipboardCopy } from "lucide-react";
 import { handlePrintInvoice } from "../../utils/printHandler";
 import QzPrintIcon from "../QzPrintIcon";
@@ -23,6 +24,8 @@ interface PaymentHeaderProps {
   onQzReprint?: () => void;
   /** Times QZ has printed this invoice, shown as QZ-n. */
   qzCount?: number;
+  /** The cart's sale type, customer and price list controls, editable; absent, the row is read-only. */
+  contextSlot?: ReactNode;
 }
 
 export default function PaymentHeader({
@@ -42,6 +45,7 @@ export default function PaymentHeader({
   onAdditionalInfo,
   onQzReprint,
   qzCount = 0,
+  contextSlot,
 }: PaymentHeaderProps) {
   if (invoiceSubmitted) {
     return (
@@ -117,10 +121,11 @@ export default function PaymentHeader({
   }
 
   return (
-    // The cart's top bar, where it was and read-only: what this sale is, for whom, from where.
+    // The cart's top bar, where it was: what this sale is, for whom, from where. Editable
+    // unless checkout has locked it (it then hands over no controls).
     <div className="flex items-center justify-between gap-3 px-6 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
       <div className="flex flex-1 items-center gap-2 min-w-0">
-        <SaleContextStrip />
+        {contextSlot ?? <SaleContextStrip />}
         <button
           onClick={onCopyOrder}
           className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
@@ -139,7 +144,8 @@ export default function PaymentHeader({
           <ChevronLeft size={18} />
           {backLabel}
         </button>
-        {onAdditionalInfo && (
+        {/* The editable customer box carries its own Additional Info button. */}
+        {onAdditionalInfo && !contextSlot && (
           <AdditionalInfoButton onClick={onAdditionalInfo} disabled={isProcessingPayment || isHoldingOrder} />
         )}
       </div>
