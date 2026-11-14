@@ -3696,6 +3696,9 @@ def _update_existing_draft_invoice(
 		_create_batch_and_serial_bundle(items, invoice_doc)
 
 	invoice_doc.set_taxes()
+	# Emptied first: ERPNext refilling the till's modes over rows already here tells the
+	# cashier "Payment methods refreshed" - about rows replaced just below anyway.
+	invoice_doc.set("payments", [])
 	_set_missing_values_keeping_warehouse(invoice_doc)
 	invoice_doc.calculate_taxes_and_totals()
 
@@ -6346,6 +6349,9 @@ def _submit_draft_invoice(invoice_id, data=None, held_order_id=None, remarks=Non
 				_create_batch_and_serial_bundle(items, invoice_doc)
 
 			invoice_doc.set_taxes()
+			# Emptied first: ERPNext refilling the till's modes over rows already here tells the
+			# cashier "Payment methods refreshed" - about rows replaced just below anyway.
+			invoice_doc.set("payments", [])
 			_set_missing_values_keeping_warehouse(invoice_doc)
 			invoice_doc.calculate_taxes_and_totals()
 
