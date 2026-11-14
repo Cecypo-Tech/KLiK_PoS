@@ -133,7 +133,7 @@ def get_dashboard_summary(
 		"credited": flt(billed["credited"], 2),
 		"credited_notes": int(billed["returns"]),
 		"credited_outside": flt(billed["credited_outside"], 2),
-		"returned_earlier": _returned_earlier(condition, params, in_scope),
+		"returned_earlier": _returned_earlier(params, in_scope),
 		"credit": flt(billed["credit"], 2),
 		"credit_invoices": int(billed["credit_invoices"]),
 		"credit_customers": int(billed["credit_customers"]),
@@ -331,31 +331,43 @@ def _scope_sql(scope) -> tuple[str, dict, str]:
 		params["date_to"] = scope["date_to"]
 		in_scope += " AND si.posting_date BETWEEN %(date_from)s AND %(date_to)s"
 
-	condition = f"""si.company = %(company)s AND si.docstatus = 1 AND (
-		({in_scope} AND NOT {LINKED_RETURN})
-		OR ({LINKED_RETURN} AND si.return_against IN ({_sales_in_scope(in_scope)}))
-	)"""
+	# The returns that follow a sale into scope are named once, here, and matched by primary
+	# key. Asking for them inline (`return_against IN (subquery)` beside an OR) made MariaDB
+	# drop the posting_date range and scan every invoice: 0.14s against 0.01s on 400,000
+	# rows, in each of the eight queries that share this fragment.
+	followers = frappe.db.sql_list(
+		f"""
+		SELECT ret.name
+		FROM `tabSales Invoice` si
+		INNER JOIN `tabSales Invoice` ret ON ret.return_against = si.name
+		WHERE {in_scope} AND si.is_return = 0
+			AND ret.is_return = 1 AND ret.docstatus = 1 AND ret.company = %(company)s
+		""",
+		params,
+	)
+	params["followers"] = tuple(followers) or ("",)
+	condition = f"(({in_scope} AND NOT {LINKED_RETURN}) OR si.name IN %(followers)s)"
 	return condition, params, in_scope
 
 
 LINKED_RETURN = "(si.is_return = 1 AND COALESCE(si.return_against, '') != '')"
 
 
-def _sales_in_scope(in_scope: str) -> str:
-	"""The names of the sales in scope, as a subquery. `in_scope` only ever names columns
-	through the `si.` alias, so re-aliasing it is a plain substitution."""
-	return f"SELECT sale.name FROM `tabSales Invoice` sale WHERE {in_scope.replace('si.', 'sale.')} AND sale.is_return = 0"
-
-
-def _returned_earlier(condition: str, params: dict, in_scope: str) -> dict:
+def _returned_earlier(params: dict, in_scope: str) -> dict:
 	"""Returns dated in scope against sales outside it: they belong to the earlier sale's
-	figures, but the cashier still handled them today, so the page says so."""
+	figures, but the cashier still handled them today, so the page says so.
+
+	`in_scope` only ever names columns through the `si.` alias, so re-aliasing it for the
+	subquery is a plain substitution."""
 	row = frappe.db.sql(
 		f"""
 		SELECT COUNT(*), COALESCE(SUM({PAYABLE_TOTAL}), 0)
 		FROM `tabSales Invoice` si
 		WHERE {in_scope} AND {LINKED_RETURN}
-			AND si.return_against NOT IN ({_sales_in_scope(in_scope)})
+			AND si.return_against NOT IN (
+				SELECT sale.name FROM `tabSales Invoice` sale
+				WHERE {in_scope.replace("si.", "sale.")} AND sale.is_return = 0
+			)
 		""",
 		params,
 	)[0]
