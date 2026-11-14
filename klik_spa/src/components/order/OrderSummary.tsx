@@ -28,6 +28,7 @@ import {
 } from "../../utils/checkoutAttempt";
 import { getOriginalDraftInvoiceId, getOriginalHeldOrderId } from "../../utils/draftInvoiceCache";
 import { discardHeldOrder } from "../../utils/discardHeldOrder";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { deleteHeldOrder } from "../../services/salesOrder";
 import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
@@ -91,6 +92,7 @@ export default function OrderSummary({
 
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showSalespersonAuthModal, setShowSalespersonAuthModal] = useState(false);
+  const [heldOrderToDiscard, setHeldOrderToDiscard] = useState<string | null>(null);
   const [isValidatingCheckout, setIsValidatingCheckout] = useState(false);
   const [isRecoveringCheckout, setIsRecoveringCheckout] = useState(false);
   const [pendingSalespersonAction, setPendingSalespersonAction] = useState<"checkout" | "quote" | null>(null);
@@ -620,9 +622,18 @@ export default function OrderSummary({
   };
 
   /** The Clear Cart button: a held order resumed into this cart is discarded with it. */
-  const handleDiscardCart = async () => {
+  const handleDiscardCart = () => {
     if (cartItems.length === 0) return;
-    const blocked = await discardHeldOrder(getOriginalHeldOrderId(), deleteHeldOrder);
+    const heldOrderId = getOriginalHeldOrderId();
+    // Deleting a held order cannot be undone, so the cashier is asked first.
+    if (heldOrderId) setHeldOrderToDiscard(heldOrderId);
+    else handleClearCart();
+  };
+
+  const confirmDiscardHeldOrder = async () => {
+    const orderId = heldOrderToDiscard;
+    setHeldOrderToDiscard(null);
+    const blocked = await discardHeldOrder(orderId, deleteHeldOrder);
     if (blocked) {
       toast.error(blocked);
       return;
@@ -768,7 +779,7 @@ export default function OrderSummary({
       totalItemDiscount={totalItemDiscount}
       couponDiscount={couponDiscount}
       onCheckout={handleCheckoutClick}
-      onClearCart={() => void handleDiscardCart()}
+      onClearCart={handleDiscardCart}
       isValidating={isValidatingCheckout || isRecoveringCheckout || isSavingQuote}
       isMobile={isMobile}
       currency_symbol={currency_symbol}
@@ -806,6 +817,16 @@ export default function OrderSummary({
           onDone={() => setSavedQuote(null)}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={!!heldOrderToDiscard}
+        onClose={() => setHeldOrderToDiscard(null)}
+        onConfirm={() => void confirmDiscardHeldOrder()}
+        title="Delete Held Order"
+        message={`This cart is held order ${heldOrderToDiscard}. Clearing it deletes the held order. This action cannot be undone.`}
+        confirmText="Clear and delete"
+        cancelText="Keep"
+      />
 
       <SalespersonAuthModal
         isOpen={showSalespersonAuthModal}
