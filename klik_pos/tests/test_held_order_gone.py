@@ -83,3 +83,20 @@ class TestReHoldingAGoneOrder(FrappeTestCase):
 			result = create_held_order(_payload(so.name))
 
 		self.assertEqual(result["code"], "held_order_gone")
+
+
+class TestDeletingAGoneOrder(FrappeTestCase):
+	def test_deleting_an_order_already_gone_is_reported_gone(self):
+		"""Clear Cart discards the held order behind the cart; one already checked out or
+		cleared elsewhere must not hold the cart back."""
+		from klik_pos.api.sales_order import delete_held_order
+
+		so = _order(opening_entry="")
+		name = so.name
+		frappe.delete_doc("Sales Order", name, force=1, ignore_permissions=True)
+
+		with _as_cashier(_till(1)):
+			result = delete_held_order(name)
+
+		self.assertFalse(result["success"])
+		self.assertEqual(result["code"], "held_order_gone")

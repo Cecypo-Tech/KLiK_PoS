@@ -578,8 +578,12 @@ def attach_mpesa_receipts(invoice, receipts) -> None:
 		return
 	if not mode:
 		frappe.throw(_("The M-Pesa receipts came without a mode of payment."))
-	picked = _checked_receipts(names, invoice.customer, _receipts_on(invoice))
-	_append_receipt_rows(invoice, picked, mode)
+	# A submit that failed after the insert leaves its draft carrying the receipt. Reopened,
+	# the till picks it again: it is already recorded, so only the new picks are checked.
+	on_invoice = _receipts_on(invoice)
+	names = [n for n in names if n not in on_invoice]
+	if names:
+		_append_receipt_rows(invoice, _checked_receipts(names, invoice.customer, on_invoice), mode)
 	if mode not in {p.mode_of_payment for p in invoice.get("payments") or []}:
 		invoice.append("payments", {"mode_of_payment": mode, "amount": 0})
 

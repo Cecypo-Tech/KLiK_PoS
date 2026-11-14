@@ -27,6 +27,8 @@ import {
   getCheckoutCartFingerprint,
 } from "../../utils/checkoutAttempt";
 import { getOriginalDraftInvoiceId, getOriginalHeldOrderId } from "../../utils/draftInvoiceCache";
+import { discardHeldOrder } from "../../utils/discardHeldOrder";
+import { deleteHeldOrder } from "../../services/salesOrder";
 import { CustomerSearchSection } from "./CustomerSearchSection";
 import CustomerLoyaltySummary from "./CustomerLoyaltySummary";
 import { CartItemRow } from "./CartItemRow";
@@ -617,6 +619,17 @@ export default function OrderSummary({
     onClearCart?.();
   };
 
+  /** The Clear Cart button: a held order resumed into this cart is discarded with it. */
+  const handleDiscardCart = async () => {
+    if (cartItems.length === 0) return;
+    const blocked = await discardHeldOrder(getOriginalHeldOrderId(), deleteHeldOrder);
+    if (blocked) {
+      toast.error(blocked);
+      return;
+    }
+    handleClearCart();
+  };
+
   const handleSalespersonAuthenticated = () => {
     const nextAction = pendingSalespersonAction;
     setPendingSalespersonAction(null);
@@ -755,7 +768,7 @@ export default function OrderSummary({
       totalItemDiscount={totalItemDiscount}
       couponDiscount={couponDiscount}
       onCheckout={handleCheckoutClick}
-      onClearCart={handleClearCart}
+      onClearCart={() => void handleDiscardCart()}
       isValidating={isValidatingCheckout || isRecoveringCheckout || isSavingQuote}
       isMobile={isMobile}
       currency_symbol={currency_symbol}

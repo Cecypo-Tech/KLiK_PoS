@@ -750,7 +750,8 @@ def delete_held_order(order_id):
         delete_order(so)
         return {"success": True, "message": f"Held order {order_id} deleted."}
     except frappe.DoesNotExistError:
-        return {"success": False, "error": f"Order {order_id} not found."}
+        # Already gone is what the caller wanted; the code lets the till carry on.
+        return _gone_response(order_id, f"Order {order_id} not found.")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), f"Delete Held Order Error: {order_id}")
         return {"success": False, "error": str(e)}
