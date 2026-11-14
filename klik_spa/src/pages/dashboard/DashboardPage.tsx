@@ -120,7 +120,7 @@ export default function DashboardPage() {
               <div className="space-y-4 lg:col-span-2">
                 <HeroIdentity
                   identity={summary.identity}
-                  context={contextParts(summary, formatMoney)}
+                  context={contextParts(summary)}
                   formatMoney={formatMoney}
                 />
                 <MoneyStrip

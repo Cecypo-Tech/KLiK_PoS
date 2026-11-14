@@ -27,8 +27,6 @@ const mode = (over: Partial<ModeRow> = {}): ModeRow => ({
   ...over,
 });
 
-const money = (amount: number) => `KES ${amount.toFixed(2)}`;
-
 const summary = (over: Partial<DashboardSummary["scope"]> = {}, identity: Partial<DashboardSummary["identity"]> = {}) =>
   ({
     scope: {
@@ -45,6 +43,11 @@ const summary = (over: Partial<DashboardSummary["scope"]> = {}, identity: Partia
     identity: {
       billed: 0,
       billed_gross: 0,
+      credited: 0,
+      credited_notes: 0,
+      credited_outside: 0,
+      refunded_outside: 0,
+      returned_earlier: { amount: 0, count: 0, refunded: 0 },
       collected: 0,
       collected_at_sale: 0,
       collected_later: 0,
@@ -178,9 +181,7 @@ describe("contextParts", () => {
           { name: "OPE-2", pos_profile: "Till 2", period_start_date: "2026-09-06 09:30:00" },
           { name: "OPE-1", pos_profile: "Till 1", period_start_date: "2026-09-06 08:02:11" },
         ],
-      }),
-      money
-    );
+      }));
     expect(parts).toContain("since 08:02, Till 2, Till 1 open");
   });
 
@@ -193,26 +194,22 @@ describe("contextParts", () => {
           { name: "OPE-2", pos_profile: "Till 1", period_start_date: "2026-09-06 13:24:00" },
           { name: "OPE-3", pos_profile: "Till 1", period_start_date: "2026-09-06 22:52:00" },
         ],
-      }),
-      money
-    );
+      }));
     expect(parts).toContain("since 08:02, Till 1 open");
   });
 
   it("says plainly when it fell back to today", () => {
-    expect(contextParts(summary({ fallback: "today" }), money)).toContain("no shift open — showing today");
+    expect(contextParts(summary({ fallback: "today" }))).toContain("no shift open — showing today");
   });
 
-  it("counts credit sales and returns when there are any", () => {
+  it("counts credit sales and leaves returns to the Credited figure", () => {
     const parts = contextParts(
-      summary({ date_from: "2026-09-06", date_to: "2026-09-06" }, { credit_invoices: 2, returns: 1, returns_total: -100 }),
-      money
-    );
-    expect(parts).toEqual(["7 sales", "2 on credit", "1 return (KES -100.00)", "2026-09-06"]);
+      summary({ date_from: "2026-09-06", date_to: "2026-09-06" }, { credit_invoices: 2, returns: 1, returns_total: -100 }));
+    expect(parts).toEqual(["7 sales", "2 on credit", "2026-09-06"]);
   });
 
   it("stays quiet about credit and returns when there are none", () => {
-    expect(contextParts(summary({ date_from: "2026-09-06", date_to: "2026-09-06" }), money)).toEqual([
+    expect(contextParts(summary({ date_from: "2026-09-06", date_to: "2026-09-06" }))).toEqual([
       "7 sales",
       "2026-09-06",
     ]);

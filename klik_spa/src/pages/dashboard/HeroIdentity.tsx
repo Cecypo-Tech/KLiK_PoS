@@ -8,26 +8,42 @@ interface Props {
 }
 
 /**
- * Billed, collected, credit — the three figures that answer "where is my money", and the one
- * line that ties them together. The old page led with revenue alone, which said nothing
- * about whether the money had actually arrived.
+ * Billed, credited, collected, balance — the four figures that answer "where is my money",
+ * and billed less credited less collected is the balance (write-offs and refunds still
+ * owed get their own lines). A return follows the sale it is against, so a credit note
+ * issued days later still shows here, against the sale it reduced.
  */
 export default function HeroIdentity({ identity, context, formatMoney }: Props) {
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  const creditedNote = [
+    identity.credited_notes ? plural(identity.credited_notes, "credit note") : "",
+    identity.credited_outside ? `${formatMoney(identity.credited_outside)} issued outside this period or till` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const collectedNote = [
+    identity.collected_later ? `${formatMoney(identity.collected_later)} on account` : "",
+    identity.refunded_outside ? `${formatMoney(identity.refunded_outside)} refunded outside this period or till` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 sm:p-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Figure label="Billed" value={formatMoney(identity.billed)} emphasis />
+        <Figure label="Credited" value={formatMoney(identity.credited)} note={creditedNote || undefined} />
         <Figure
           label="Collected"
           value={formatMoney(identity.collected)}
-          note={identity.collected_later ? `${formatMoney(identity.collected_later)} on account` : undefined}
+          note={collectedNote || undefined}
         />
         <Figure
-          label="Credit"
+          label="Balance"
           value={formatMoney(identity.credit)}
           note={
             identity.credit_invoices
-              ? `${identity.credit_invoices} invoice${identity.credit_invoices === 1 ? "" : "s"}, ${identity.credit_customers} customer${identity.credit_customers === 1 ? "" : "s"}`
+              ? `${plural(identity.credit_invoices, "invoice")}, ${plural(identity.credit_customers, "customer")}`
               : undefined
           }
           tone={identity.credit ? "warn" : undefined}
@@ -35,6 +51,20 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
       </div>
 
       <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">{context.join(" · ")}</p>
+
+      {identity.returned_earlier?.count > 0 && (
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          {`${formatMoney(identity.returned_earlier.amount)} returned here against sales outside this period or till (${plural(identity.returned_earlier.count, "credit note")}), counted with those sales`}
+          {identity.returned_earlier.refunded > 0 &&
+            `; ${formatMoney(identity.returned_earlier.refunded)} of it was refunded from here and is in Collected by method`}
+        </p>
+      )}
+
+      {identity.write_off !== 0 && (
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          {formatMoney(identity.write_off)} written off
+        </p>
+      )}
 
       {identity.refunds_owed > 0 && (
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -44,7 +74,7 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
 
       {identity.outside_tills && identity.outside_tills.invoices > 0 && (
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {`${formatMoney(identity.outside_tills.amount)} more billed off these tills (${identity.outside_tills.invoices} invoice${identity.outside_tills.invoices === 1 ? "" : "s"}), not counted here`}
+          {`${formatMoney(identity.outside_tills.amount)} more billed off these tills (${plural(identity.outside_tills.invoices, "invoice")}), not counted here`}
         </p>
       )}
 
@@ -52,9 +82,9 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
         <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            {formatMoney(identity.unexplained)} is unaccounted for. Billed should equal collected
-            plus credit; a difference here is a data problem worth chasing, not a rounding
-            artefact.
+            {formatMoney(identity.unexplained)} does not add up. Billed less credited and
+            collected should equal the balance; check these invoices for a journal entry or
+            a reconciliation that settled them another way.
           </span>
         </p>
       )}

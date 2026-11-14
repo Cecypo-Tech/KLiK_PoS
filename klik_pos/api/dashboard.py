@@ -10,7 +10,7 @@ from the payment breakdown, and the two figures were sourced differently by cons
 This module answers the whole page from one call, in company currency, over any range and
 any set of the caller's tills, and holds itself to an identity the reader can check:
 
-    billed == collected_at_sale + collected_later + credit - refunds_owed + write_off
+    billed - credited == collected_at_sale + collected_later + credit - refunds_owed + write_off
 
 The residual is returned as `identity.unexplained` instead of being hidden. Every term
 comes from the same set of invoices, so a nonzero residual is a data bug worth chasing,
@@ -18,7 +18,8 @@ never a timing artefact.
 
 Scope is invoice-based, exactly like the POS Closing Entry: money is attributed to the
 range of the invoice it settles, not to the day the cash arrived. A Payment Entry received
-today against last week's credit sale belongs to last week.
+today against last week's credit sale belongs to last week, and so does a credit note:
+a return follows the sale it is against, whatever its own date.
 
 Permissions are enforced here explicitly (role, then company, then each profile) rather
 than through `apply_sql_permissions`: the match conditions that helper adds would silently
@@ -111,12 +112,18 @@ def get_dashboard_summary(
 		# empty page. Returning zeros keeps the client free of a second empty-state path.
 		return _empty_response(company, scope)
 
-	condition, params = _scope_sql(scope)
+	condition, params, in_scope = _scope_sql(scope)
 
-	billed = _billed(condition, params)
-	at_sale, change_amount = _collected_at_sale(condition, params)
-	at_sale = list(at_sale) + list(_collected_at_sale_via_payment_entries(condition, params))
+	billed = _billed(condition, params, in_scope)
+	# Money is counted where the drawer saw it: a refund paid today for last week's sale left
+	# today's till, and a mode row has to stay checkable against that till's Closing Entry.
+	# So the payment rows keep the row's own scope, and the two refund figures below carry
+	# the difference between that and the sales' own story.
+	at_sale, change_amount = _collected_at_sale(in_scope, params)
+	at_sale = list(at_sale) + list(_collected_at_sale_via_payment_entries(in_scope, params))
 	later = _collected_later(condition, params)
+	returned_earlier = _returned_earlier(params, in_scope)
+	refunded_outside = _refunded(f"si.name IN %(followers)s AND NOT COALESCE(({in_scope}), 0)", params)
 	mpesa = _unmatched_mpesa(company)
 
 	mode_rows = _build_mode_rows(at_sale, later, change_amount, mpesa["by_shortcode"])
@@ -126,9 +133,18 @@ def get_dashboard_summary(
 	identity = {
 		"billed": flt(billed["billed"], 2),
 		"billed_gross": flt(billed["billed_gross"], 2),
-		"collected": flt(collected_at_sale + collected_later, 2),
+		# What these sales brought in: the drawer's figure, without refunds it paid for sales
+		# outside the scope, and with refunds paid for these sales from outside it.
+		"collected": flt(
+			collected_at_sale + collected_later + returned_earlier["refunded"] - refunded_outside, 2
+		),
+		"refunded_outside": flt(refunded_outside, 2),
 		"collected_at_sale": flt(collected_at_sale, 2),
 		"collected_later": flt(collected_later, 2),
+		"credited": flt(billed["credited"], 2),
+		"credited_notes": int(billed["returns"]),
+		"credited_outside": flt(billed["credited_outside"], 2),
+		"returned_earlier": returned_earlier,
 		"credit": flt(billed["credit"], 2),
 		"credit_invoices": int(billed["credit_invoices"]),
 		"credit_customers": int(billed["credit_customers"]),
@@ -138,12 +154,12 @@ def get_dashboard_summary(
 		"returns": int(billed["returns"]),
 		"returns_total": flt(billed["returns_total"], 2),
 		"currency": _company_currency(company),
-		"outside_tills": _outside_tills(scope),
+		"outside_tills": _outside_tills(scope, params["followers"]),
 	}
 	identity["unexplained"] = flt(
 		identity["billed"]
-		- identity["collected_at_sale"]
-		- identity["collected_later"]
+		- identity["credited"]
+		- identity["collected"]
 		- identity["credit"]
 		+ identity["refunds_owed"]
 		- identity["write_off"],
@@ -156,7 +172,7 @@ def get_dashboard_summary(
 		"collected_by_mode": mode_rows,
 		"exceptions": _exceptions(company, scope, mpesa["unmapped"]),
 		"exceptions_cover_company": True,
-		"performance": _performance(condition, params, billed),
+		"performance": _performance(condition, params, billed, in_scope),
 	}
 
 
@@ -295,28 +311,84 @@ def _resolve_scope(company, profiles, date_range, date_from, date_to) -> dict:
 	return scope
 
 
-def _scope_sql(scope) -> tuple[str, dict]:
-	"""The WHERE fragment every aggregation shares, plus its parameters.
+LINKED_RETURN = "(si.is_return = 1 AND COALESCE(si.return_against, '') != '')"
+
+
+def _scope_sql(scope) -> tuple[str, dict, str]:
+	"""The WHERE fragment every aggregation shares, its parameters, and the bare scope test.
 
 	Every query in this module joins back to `tabSales Invoice si`, so one fragment keeps
 	them provably summing over the same rows - which is what makes the identity meaningful.
+
+	A return follows the sale it is against: it is counted when that sale is in scope and
+	not otherwise, whatever its own date or till. A credit note dated two days after the
+	sale lowers the sale's outstanding, so counting it by its own date left the range of
+	the sale short by exactly its value and the page calling correct books a data problem.
+	A return against nothing has only its own date to go by.
+
+	`in_scope` is the test on the row's own date/shift and till, for the callers that need
+	to tell a return dated inside the scope from one that merely follows a sale into it.
 	"""
 	params = {
 		"company": scope["company"],
 		"profiles": tuple(scope["pos_profiles"]) or ("",),
 		"eps": RECEIVABLE_EPSILON,
 	}
-	condition = "si.company = %(company)s AND si.docstatus = 1 AND si.pos_profile IN %(profiles)s"
+	in_scope = "si.company = %(company)s AND si.docstatus = 1 AND si.pos_profile IN %(profiles)s"
 
 	if scope["opening_entries"]:
 		params["opening_entries"] = tuple(scope["opening_entries"])
-		condition += " AND si.custom_pos_opening_entry IN %(opening_entries)s"
+		in_scope += " AND si.custom_pos_opening_entry IN %(opening_entries)s"
 	else:
 		params["date_from"] = scope["date_from"]
 		params["date_to"] = scope["date_to"]
-		condition += " AND si.posting_date BETWEEN %(date_from)s AND %(date_to)s"
+		in_scope += " AND si.posting_date BETWEEN %(date_from)s AND %(date_to)s"
 
-	return condition, params
+	# The returns that follow a sale into scope are named once, here, and matched by primary
+	# key. Asking for them inline (`return_against IN (subquery)` beside an OR) made MariaDB
+	# drop the posting_date range and scan every invoice: 0.14s against 0.01s on 400,000
+	# rows, in each of the eight queries that share this fragment.
+	# ponytail: the list is unbounded; a year of a busy till is a few thousand names. Move it
+	# to a temporary table if a site ever returns enough to make the packet matter.
+	followers = frappe.db.sql_list(
+		f"""
+		SELECT ret.name
+		FROM `tabSales Invoice` si
+		INNER JOIN `tabSales Invoice` ret ON ret.return_against = si.name
+		WHERE {in_scope} AND si.is_return = 0
+			AND ret.is_return = 1 AND ret.docstatus = 1 AND ret.company = %(company)s
+		""",
+		params,
+	)
+	params["followers"] = tuple(followers) or ("",)
+	condition = f"(({in_scope} AND NOT {LINKED_RETURN}) OR si.name IN %(followers)s)"
+	return condition, params, in_scope
+
+
+def _returned_earlier(params: dict, in_scope: str) -> dict:
+	"""Returns rung in scope against sales outside it - an earlier day, another shift, a till
+	that was not picked. They belong to that sale's figures, but this drawer handled them,
+	so the page says so, and says how much of it was paid out here."""
+	strays = f"{in_scope} AND {LINKED_RETURN} AND si.name NOT IN %(followers)s"
+	row = frappe.db.sql(
+		f"SELECT COUNT(*), COALESCE(SUM({PAYABLE_TOTAL}), 0) FROM `tabSales Invoice` si WHERE {strays}",
+		params,
+	)[0]
+	return {"amount": flt(-row[1], 2), "count": int(row[0]), "refunded": _refunded(strays, params)}
+
+
+def _refunded(where: str, params: dict) -> float:
+	"""Money paid back on the returns `where` picks, as a positive figure."""
+	row = frappe.db.sql(
+		f"""
+		SELECT COALESCE(SUM(sip.base_amount), 0)
+		FROM `tabSales Invoice Payment` sip
+		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		WHERE {where}
+		""",
+		params,
+	)
+	return flt(-row[0][0], 2)
 
 
 def _company_currency(company: str) -> str:
@@ -332,6 +404,11 @@ def _empty_response(company, scope) -> dict:
 			"collected": 0.0,
 			"collected_at_sale": 0.0,
 			"collected_later": 0.0,
+			"refunded_outside": 0.0,
+			"credited": 0.0,
+			"credited_notes": 0,
+			"credited_outside": 0.0,
+			"returned_earlier": {"amount": 0.0, "count": 0, "refunded": 0.0},
 			"credit": 0.0,
 			"credit_invoices": 0,
 			"credit_customers": 0,
@@ -362,7 +439,7 @@ def _empty_response(company, scope) -> dict:
 # --------------------------------------------------------------------------------------
 
 
-def _billed(condition: str, params: dict) -> dict:
+def _billed(condition: str, params: dict, in_scope: str) -> dict:
 	"""Billed, and everything else the invoice header alone can answer.
 
 	`outstanding_amount` is the only money field here that is not stored in company
@@ -373,8 +450,13 @@ def _billed(condition: str, params: dict) -> dict:
 	row = frappe.db.sql(
 		f"""
 		SELECT
-			COALESCE(SUM({payable}), 0) AS billed,
-			COALESCE(SUM(si.base_grand_total), 0) AS billed_gross,
+			COALESCE(SUM(CASE WHEN si.is_return = 1 THEN 0 ELSE {payable} END), 0) AS billed,
+			COALESCE(SUM(CASE WHEN si.is_return = 1 THEN 0 ELSE si.base_grand_total END), 0)
+				AS billed_gross,
+			COALESCE(SUM(CASE WHEN si.is_return = 1 THEN -({payable}) ELSE 0 END), 0) AS credited,
+			COALESCE(SUM(CASE WHEN si.is_return = 1 AND NOT COALESCE(({in_scope}), 0)
+				THEN -({payable}) ELSE 0 END), 0)
+				AS credited_outside,
 			COALESCE(SUM(si.base_net_total), 0) AS net,
 			COALESCE(SUM(si.total_qty), 0) AS qty,
 			COALESCE(SUM(CASE WHEN si.is_return = 1 THEN 0 ELSE 1 END), 0) AS invoices,
@@ -402,7 +484,7 @@ def _billed(condition: str, params: dict) -> dict:
 	return row[0] if row else frappe._dict()
 
 
-def _outside_tills(scope: dict) -> dict:
+def _outside_tills(scope: dict, followers: tuple = ("",)) -> dict:
 	"""Invoices of the same company and dates that no chosen till rang: desk invoices, and
 	other tills when the reader narrowed the picker.
 
@@ -420,12 +502,15 @@ def _outside_tills(scope: dict) -> dict:
 		WHERE si.company = %(company)s AND si.docstatus = 1
 			AND si.posting_date BETWEEN %(date_from)s AND %(date_to)s
 			AND (si.pos_profile IS NULL OR si.pos_profile NOT IN %(profiles)s)
+			AND si.name NOT IN %(followers)s
 		""",
 		{
 			"company": scope["company"],
 			"date_from": scope["date_from"],
 			"date_to": scope["date_to"],
 			"profiles": tuple(scope["pos_profiles"]) or ("",),
+			# A return off these tills that followed its sale into the figures was counted.
+			"followers": followers,
 		},
 	)[0]
 	return {"invoices": int(row[0]), "amount": flt(row[1], 2)}
@@ -751,10 +836,11 @@ def _exceptions(company: str, scope: dict, unmapped_mpesa: list) -> list:
 	return rows
 
 
-def _performance(condition: str, params: dict, billed: dict) -> dict:
+def _performance(condition: str, params: dict, billed: dict, in_scope: str) -> dict:
 	"""The second tier: what sold, when, and who rang it."""
 	invoices = int(billed.get("invoices") or 0)
-	revenue = flt(billed.get("billed") or 0, 2)
+	# Net sales: the charts below sum sales and their returns alike, and must add up to this.
+	revenue = flt(flt(billed.get("billed")) - flt(billed.get("credited")), 2)
 
 	hourly = frappe.db.sql(
 		f"""
@@ -806,7 +892,7 @@ def _performance(condition: str, params: dict, billed: dict) -> dict:
 		SELECT si.name, si.customer_name, {PAYABLE_TOTAL} AS amount, si.is_return,
 			si.posting_date, si.posting_time, si.status
 		FROM `tabSales Invoice` si
-		WHERE {condition}
+		WHERE {in_scope}
 		ORDER BY si.posting_date DESC, si.posting_time DESC
 		LIMIT 5
 		""",

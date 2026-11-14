@@ -49,7 +49,9 @@ def _payable(doc) -> float:
 	return flt(doc.base_grand_total)
 
 
-def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_against=None, till=PROFILE):
+def _invoice(
+	posting_date, lines, shares=None, is_pos=True, is_return=0, return_against=None, till=PROFILE, for_self=None
+):
 	"""A submitted invoice for the till.
 
 	`shares` splits the payable total across the POS Profile's own payment rows, in order.
@@ -69,6 +71,9 @@ def _invoice(posting_date, lines, shares=None, is_pos=True, is_return=0, return_
 	si.posting_time = "10:15:00"
 	si.is_return = is_return
 	si.return_against = return_against
+	if for_self is not None:
+		# 0 is what the till's return flow sends: the credit note lowers the sale's own balance.
+		si.update_outstanding_for_self = for_self
 	si.is_pos = 1 if is_pos else 0
 	if is_pos:
 		si.pos_profile = PROFILE
@@ -208,13 +213,20 @@ class TestDashboardSummary(FrappeTestCase):
 		"""The one line on the page that must always be true."""
 		self.assertEqual(self.summary["identity"]["unexplained"], 0.0)
 
-	def test_billed_counts_every_submitted_invoice_in_the_window(self):
+	def test_billed_counts_every_submitted_sale_in_the_window(self):
 		expected = sum(
 			_payable(doc)
-			for doc in (self.cash, self.split, self.day_two, self.credit_sale, self.settled_later, self.refund_owed)
+			for doc in (self.cash, self.split, self.day_two, self.credit_sale, self.settled_later)
 		)
 
 		self.assertAlmostEqual(self.summary["identity"]["billed"], flt(expected, 2), places=2)
+
+	def test_a_return_is_credited_not_taken_off_billed(self):
+		identity = self.summary["identity"]
+
+		self.assertAlmostEqual(identity["credited"], abs(_payable(self.refund_owed)), places=2)
+		self.assertEqual(identity["credited_notes"], 1)
+		self.assertEqual(identity["credited_outside"], 0.0)
 
 	def test_a_credit_sale_is_reported_as_credit(self):
 		identity = self.summary["identity"]
@@ -346,7 +358,7 @@ class TestDashboardSummary(FrappeTestCase):
 		kpis = self.summary["performance"]["kpis"]
 		identity = self.summary["identity"]
 
-		self.assertAlmostEqual(kpis["revenue"], identity["billed"], places=2)
+		self.assertAlmostEqual(kpis["revenue"], identity["billed"] - identity["credited"], places=2)
 		self.assertEqual(kpis["invoices"], identity["invoices"])
 		self.assertAlmostEqual(kpis["average"], flt(kpis["revenue"] / kpis["invoices"], 2), places=2)
 
@@ -354,7 +366,7 @@ class TestDashboardSummary(FrappeTestCase):
 		hourly = self.summary["performance"]["hourly"]
 
 		self.assertAlmostEqual(
-			sum(bucket["amount"] for bucket in hourly), self.summary["identity"]["billed"], places=2
+			sum(bucket["amount"] for bucket in hourly), self.summary["performance"]["kpis"]["revenue"], places=2
 		)
 
 	def test_top_items_are_ranked_and_capped(self):
@@ -659,3 +671,140 @@ class TestDashboardScopeReporting(FrappeTestCase):
 
 		self.assertIn(PROFILE, scope["available_profiles"])
 		self.assertTrue(set(scope["pos_profiles"]).issubset(set(scope["available_profiles"])))
+
+
+RET_BEFORE = "2019-05-20"
+RET_DAY_ONE = "2019-06-03"
+RET_DAY_TWO = "2019-06-04"
+RET_AFTER = "2019-06-20"
+REFUND_SALE_DAY = "2019-07-08"
+REFUND_DAY = "2019-07-09"
+DESK_NOTE_DAY = "2019-07-15"
+
+
+class TestReturnsFollowTheSale(FrappeTestCase):
+	"""A return belongs to the range of the sale it is against, whatever its own date.
+
+	Found on a customer site: two credit notes dated two days after the sales lowered the
+	sales' outstanding, appeared nowhere in the range, and the page called the difference
+	a data problem.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		window = {"date_from": RET_DAY_ONE, "date_to": RET_DAY_TWO}
+		seeded = _summary(date_from=RET_BEFORE, date_to=DESK_NOTE_DAY)["identity"]
+		if seeded["billed"] or seeded["credited"] or seeded["returned_earlier"]["count"]:
+			raise AssertionError(f"the seed window {RET_BEFORE}..{DESK_NOTE_DAY} already holds invoices")
+
+		cls.sale = _invoice(RET_DAY_ONE, [(1, 300), (1, 100)], is_pos=False)
+		cls.credited_later = _invoice(
+			RET_AFTER, [(-1, 100)], is_pos=False, is_return=1, return_against=cls.sale.name, for_self=0
+		)
+		cls.earlier_sale = _invoice(RET_BEFORE, [(1, 50), (1, 70)], is_pos=False)
+		cls.return_of_earlier = _invoice(
+			RET_DAY_TWO, [(-1, 50)], is_pos=False, is_return=1, return_against=cls.earlier_sale.name, for_self=1
+		)
+
+		# A till sale paid in cash, refunded in cash from the next day's drawer.
+		cls.paid_sale = _invoice(REFUND_SALE_DAY, [(1, 300), (1, 100)], shares=[1.0])
+		cls.cash_refund = _invoice(
+			REFUND_DAY, [(-1, 100)], shares=[1.0], is_return=1, return_against=cls.paid_sale.name, for_self=0
+		)
+
+		# A credit note raised in the Desk, on no till, against a till sale.
+		cls.desk_noted = _invoice(DESK_NOTE_DAY, [(1, 300), (1, 100)], is_pos=False)
+		cls.desk_note = _invoice(
+			DESK_NOTE_DAY,
+			[(-1, 100)],
+			is_pos=False,
+			is_return=1,
+			return_against=cls.desk_noted.name,
+			for_self=0,
+			till=None,
+		)
+		for doc in (cls.sale, cls.credited_later, cls.earlier_sale, cls.return_of_earlier, cls.cash_refund):
+			doc.reload()
+		cls.identity = _summary(**window)["identity"]
+
+	def test_a_credit_note_dated_later_is_credited_and_balances(self):
+		identity = self.identity
+		credited = abs(_payable(self.credited_later))
+
+		self.assertAlmostEqual(identity["billed"], _payable(self.sale), places=2)
+		self.assertAlmostEqual(identity["credited"], credited, places=2)
+		self.assertAlmostEqual(identity["credited_outside"], credited, places=2)
+		self.assertEqual(identity["credited_notes"], 1)
+		self.assertAlmostEqual(identity["credit"], _payable(self.sale) - credited, places=2)
+		self.assertEqual(identity["unexplained"], 0.0)
+
+	def test_a_return_against_an_earlier_sale_is_reported_not_counted(self):
+		self.assertEqual(
+			self.identity["returned_earlier"],
+			{"amount": abs(_payable(self.return_of_earlier)), "count": 1, "refunded": 0.0},
+		)
+
+	def test_the_later_range_does_not_count_the_credit_note_again(self):
+		identity = _summary(date_from=RET_AFTER, date_to=RET_AFTER)["identity"]
+
+		self.assertEqual(identity["billed"], 0.0)
+		self.assertEqual(identity["credited"], 0.0)
+		self.assertEqual(identity["unexplained"], 0.0)
+		self.assertEqual(identity["returned_earlier"]["count"], 1)
+
+	def test_the_charts_add_up_to_revenue_net_of_what_was_credited(self):
+		summary = _summary(date_from=RET_DAY_ONE, date_to=RET_DAY_TWO)
+
+		self.assertAlmostEqual(
+			sum(bucket["amount"] for bucket in summary["performance"]["hourly"]),
+			_payable(self.sale) - abs(_payable(self.credited_later)),
+			places=2,
+		)
+		self.assertAlmostEqual(
+			summary["performance"]["kpis"]["revenue"],
+			_payable(self.sale) - abs(_payable(self.credited_later)),
+			places=2,
+		)
+
+	def test_recent_sales_lists_only_what_was_rung_in_the_range(self):
+		recent = _summary(date_from=RET_DAY_ONE, date_to=RET_DAY_TWO)["performance"]["recent"]
+
+		self.assertNotIn(self.credited_later.name, [row["name"] for row in recent])
+
+	def test_a_refund_paid_later_stays_out_of_the_sale_day_s_drawer(self):
+		"""The sale day's Cash row must still match the Closing Entry it was closed with."""
+		summary = _summary(date_from=REFUND_SALE_DAY, date_to=REFUND_SALE_DAY)
+		identity = summary["identity"]
+		refund = abs(_payable(self.cash_refund))
+
+		self.assertAlmostEqual(identity["collected_at_sale"], _payable(self.paid_sale), places=2)
+		self.assertAlmostEqual(
+			sum(row["amount"] for row in summary["collected_by_mode"]), _payable(self.paid_sale), places=2
+		)
+		self.assertAlmostEqual(identity["refunded_outside"], refund, places=2)
+		self.assertAlmostEqual(identity["collected"], _payable(self.paid_sale) - refund, places=2)
+		self.assertAlmostEqual(identity["credited"], refund, places=2)
+		self.assertEqual(identity["credit"], 0.0)
+		self.assertEqual(identity["unexplained"], 0.0)
+
+	def test_a_refund_for_an_earlier_sale_leaves_the_drawer_it_was_paid_from(self):
+		summary = _summary(date_from=REFUND_DAY, date_to=REFUND_DAY)
+		identity = summary["identity"]
+		refund = abs(_payable(self.cash_refund))
+
+		self.assertAlmostEqual(identity["collected_at_sale"], -refund, places=2)
+		self.assertAlmostEqual(sum(row["amount"] for row in summary["collected_by_mode"]), -refund, places=2)
+		self.assertEqual(identity["returned_earlier"], {"amount": refund, "count": 1, "refunded": refund})
+		self.assertEqual(identity["billed"], 0.0)
+		self.assertEqual(identity["collected"], 0.0)
+		self.assertEqual(identity["unexplained"], 0.0)
+
+	def test_a_desk_credit_note_that_followed_its_sale_is_not_also_off_the_tills(self):
+		identity = _summary(date_from=DESK_NOTE_DAY, date_to=DESK_NOTE_DAY)["identity"]
+		note = abs(_payable(self.desk_note))
+
+		self.assertAlmostEqual(identity["credited"], note, places=2)
+		self.assertAlmostEqual(identity["credited_outside"], note, places=2)
+		self.assertEqual(identity["outside_tills"], {"invoices": 0, "amount": 0.0})
+		self.assertEqual(identity["unexplained"], 0.0)
