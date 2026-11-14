@@ -171,7 +171,8 @@ export default function AddCustomerModal({
   };
 
   return (
-    <div className={isFullPage ? "h-full" : "fixed inset-0 bg-black/70 bg-opacity-50 flex items-center justify-center p-4 z-50"}>
+    // Escape stays in the form: opened from checkout, it would otherwise leave checkout and drop what was typed.
+    <div onKeyDown={(e) => { if (e.key === "Escape") e.stopPropagation(); }} className={isFullPage ? "h-full" : "fixed inset-0 bg-black/70 bg-opacity-50 flex items-center justify-center p-4 z-50"}>
       <div className={isFullPage ? "h-full bg-white dark:bg-gray-800 flex flex-col" : "bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto"}>
         {!isFullPage && (
           <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700">

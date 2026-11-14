@@ -45,6 +45,7 @@ import {
 } from "../../utils/mpesaReceipts";
 import { followTotal, toggleOn, trimToPayable, withPaidMpesa } from "../../utils/paymentToggle";
 import { taxPreviewStep } from "../../utils/taxPreviewStep";
+import { quotesAllowed } from "../../utils/quotesAllowed";
 import { creditSalesAllowed } from "../../utils/creditSales";
 import { fetchCustomerCredit, type CustomerCredit } from "../../utils/customerCredit";
 import {
@@ -92,6 +93,8 @@ import { fetchEmailTemplates, getDefaultEmailTemplate, getDefaultEmailMessageTem
 import { getIconAndColor } from "./paymentIcons";
 import PaymentHeader, { AdditionalInfoButton } from "./PaymentHeader";
 import CreditSaleCard from "./CreditSaleCard";
+import SaleTypeControl from "../order/SaleTypeControl";
+import { CustomerSearchSection } from "../order/CustomerSearchSection";
 import { blockKey } from "../../utils/blockKey";
 import PaymentMethods from "./PaymentMethods";
 import SalesPersonSection from "./SalesPersonSection";
@@ -252,6 +255,13 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const creditProfile = usePOSProfileStore((s) => s.posDetails);
   const isCreditSale = creditPicked && creditSalesAllowed(creditProfile) && selectedCustomer?.isWalkin !== 1;
   const setSaleType = useCartStore((s) => s.setSaleType);
+  const setCartCustomer = useCartStore((s) => s.setSelectedCustomer);
+  // A sale that becomes a credit sale in checkout (picked, or the new customer's default) starts unpaid.
+  const wasCreditSale = useRef(isCreditSale);
+  useEffect(() => {
+    if (isCreditSale && !wasCreditSale.current) setPaymentAmounts({});
+    wasCreditSale.current = isCreditSale;
+  }, [isCreditSale]);
   const storedBalance = useCartStore((s) => s.customerBalance);
   const [dueDate, setDueDate] = useState("");
   // Payment terms in place of a typed due date, where the site has any (utils/creditTerms).
@@ -2997,6 +3007,36 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   if (isLoading || posLoading) return <div className="p-6">Loading...</div>;
   if (error) return <div className="p-6 text-red-500">Error: {error}</div>;
 
+  // Sale type, customer and price list stay editable in checkout, as in the cart. An M-Pesa
+  // push or matched receipt was asked of this customer for this total, so it locks the row
+  // (read-only strip); so does a submit or hold in flight.
+  const contextLocked = isProcessingPayment || isHoldingOrder
+    || Boolean(mpesaFlow && (mpesaFlow.source === "c2b" || mpesaFlow.status === "in_progress" || mpesaFlow.status === "completed"));
+  // A quote takes no payment, so picking it returns to the cart in quote mode.
+  const saleTypeSwitch = (
+    <SaleTypeControl
+      value={isCreditSale ? "credit" : "sale"}
+      options={[...(quotesAllowed(posDetails) ? (["quote"] as const) : []), "sale", ...(creditSalesAllowed(posDetails) ? (["credit"] as const) : [])]}
+      onChange={(type) => {
+        if (type === "quote") { setSaleType("quote"); closeDialog(false); return; }
+        setSaleType(type);
+      }}
+      disabledReasons={selectedCustomer?.isWalkin === 1 ? { credit: "Credit sales need a named customer" } : {}}
+    />
+  );
+  const contextSlot = contextLocked ? undefined : (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      {saleTypeSwitch}
+      <CustomerSearchSection
+        variant="bar"
+        lockWarehouse
+        selectedCustomer={selectedCustomer}
+        onCustomerSelect={(c) => { void setCartCustomer(c); }}
+        onCustomerClear={() => { void setCartCustomer(null); }}
+      />
+    </div>
+  );
+
   if (isMobile) {
     return (
       <div className={isFullPage ? "h-full bg-white dark:bg-gray-900 flex flex-col overflow-hidden" : "fixed inset-0 bg-white dark:bg-gray-900 z-50 flex flex-col overflow-hidden"}>
@@ -3294,6 +3334,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
           onAdditionalInfo={canOpenAdditionalInfo ? () => setAdditionalInfoOpen(true) : undefined}
           onQzReprint={qzEnabled ? qz.start : undefined}
           qzCount={qz.count}
+          contextSlot={contextSlot}
         />
 
         <div className="flex flex-1 min-h-0">
