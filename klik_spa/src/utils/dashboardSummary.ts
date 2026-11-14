@@ -34,6 +34,14 @@ export interface DashboardIdentity {
   collected: number;
   collected_at_sale: number;
   collected_later: number;
+  /** Returns against the sales in scope, whatever their own date. Positive. */
+  credited: number;
+  credited_notes: number;
+  /** The part of `credited` dated outside the scope. */
+  credited_outside: number;
+  /** Returns dated in scope against sales outside it; not part of the figures above. */
+  returned_earlier: { amount: number; count: number };
+  /** What the sales in scope still owe: the Balance. */
   credit: number;
   credit_invoices: number;
   credit_customers: number;
@@ -207,24 +215,13 @@ export function isExternalHref(href: string): boolean {
   return href.startsWith("/app") || /^https?:\/\//.test(href);
 }
 
-/**
- * The line under the hero figures: what those numbers are made of, and what they cover.
- * Money is formatted by the caller so this stays free of currency knowledge.
- */
-export function contextParts(
-  summary: DashboardSummary,
-  formatMoney: (amount: number) => string
-): string[] {
+/** The line under the hero figures: what those numbers are made of, and what they cover. */
+export function contextParts(summary: DashboardSummary): string[] {
   const { identity, scope } = summary;
   const parts: string[] = [`${identity.invoices} sale${identity.invoices === 1 ? "" : "s"}`];
 
   if (identity.credit_invoices > 0) {
     parts.push(`${identity.credit_invoices} on credit`);
-  }
-  if (identity.returns > 0) {
-    parts.push(
-      `${identity.returns} return${identity.returns === 1 ? "" : "s"} (${formatMoney(identity.returns_total)})`
-    );
   }
 
   if (scope.open_shifts.length > 0) {
