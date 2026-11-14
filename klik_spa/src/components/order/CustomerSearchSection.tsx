@@ -740,13 +740,15 @@ export const CustomerSearchSection = ({
     </div>
   );
 
+  const sideBtn = `flex-shrink-0 ${bar ? "w-9 rounded-lg" : "w-10 rounded-xl"} border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-beveren-600 dark:text-beveren-400 hover:border-beveren-400 hover:bg-beveren-50 dark:hover:bg-beveren-900/30 transition-colors flex items-center justify-center`;
   const containerClass = bar
     ? "flex min-w-0 flex-1 items-center gap-2"
     : !isMobile ? "relative" : "flex-shrink-0 p-4 border-b border-gray-100 dark:border-gray-700";
 
   return (
     <div className={containerClass}>
-      <div ref={containerRef} className={bar ? "relative min-w-[10rem] flex-[3] max-w-md" : "relative"}>
+      <div className={`flex items-stretch gap-2 ${bar ? "min-w-[10rem] flex-[3] max-w-md" : ""}`}>
+      <div ref={containerRef} className="relative flex-1 min-w-0">
         <div
           id="pos-customer-btn"
           ref={buttonRef}
@@ -779,6 +781,18 @@ export const CustomerSearchSection = ({
         </div>
 
         {typeof window !== "undefined" && createPortal(dropdown, document.body)}
+      </div>
+        {/* Beside the customer in every view: one click, no dropdown to open first. */}
+        {canCreateCustomer && (
+          <button type="button" onClick={handleAddCustomerClick} className={sideBtn} title="Add New Customer" aria-label="Add New Customer">
+            <UserPlus size={18} />
+          </button>
+        )}
+        {selectedCustomer && (
+          <button type="button" onClick={() => setAdditionalInfoOpen(true)} className={sideBtn} title="Additional Info (F4)" aria-label="Additional Info">
+            <Contact size={18} />
+          </button>
+        )}
       </div>
 
       {pickers}
