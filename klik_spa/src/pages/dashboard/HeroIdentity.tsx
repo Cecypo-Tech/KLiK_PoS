@@ -9,14 +9,21 @@ interface Props {
 
 /**
  * Billed, credited, collected, balance — the four figures that answer "where is my money",
- * and they subtract left to right. A return follows the sale it is against, so a credit
- * note issued days later still shows here, against the sale it reduced.
+ * and billed less credited less collected is the balance (write-offs and refunds still
+ * owed get their own lines). A return follows the sale it is against, so a credit note
+ * issued days later still shows here, against the sale it reduced.
  */
 export default function HeroIdentity({ identity, context, formatMoney }: Props) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
   const creditedNote = [
     identity.credited_notes ? plural(identity.credited_notes, "credit note") : "",
-    identity.credited_outside ? `${formatMoney(identity.credited_outside)} issued outside this period` : "",
+    identity.credited_outside ? `${formatMoney(identity.credited_outside)} issued outside this period or till` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const collectedNote = [
+    identity.collected_later ? `${formatMoney(identity.collected_later)} on account` : "",
+    identity.refunded_outside ? `${formatMoney(identity.refunded_outside)} refunded outside this period or till` : "",
   ]
     .filter(Boolean)
     .join(", ");
@@ -29,7 +36,7 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
         <Figure
           label="Collected"
           value={formatMoney(identity.collected)}
-          note={identity.collected_later ? `${formatMoney(identity.collected_later)} on account` : undefined}
+          note={collectedNote || undefined}
         />
         <Figure
           label="Balance"
@@ -47,7 +54,9 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
 
       {identity.returned_earlier?.count > 0 && (
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {`${formatMoney(identity.returned_earlier.amount)} returned in this period against earlier sales (${plural(identity.returned_earlier.count, "credit note")}), counted with those sales`}
+          {`${formatMoney(identity.returned_earlier.amount)} returned here against sales outside this period or till (${plural(identity.returned_earlier.count, "credit note")}), counted with those sales`}
+          {identity.returned_earlier.refunded > 0 &&
+            `; ${formatMoney(identity.returned_earlier.refunded)} of it was refunded from here and is in Collected by method`}
         </p>
       )}
 
@@ -74,8 +83,8 @@ export default function HeroIdentity({ identity, context, formatMoney }: Props) 
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {formatMoney(identity.unexplained)} does not add up. Billed less credited and
-            collected should equal the balance; the difference was settled another way, such
-            as a journal entry or a reconciliation, and is worth checking.
+            collected should equal the balance; check these invoices for a journal entry or
+            a reconciliation that settled them another way.
           </span>
         </p>
       )}

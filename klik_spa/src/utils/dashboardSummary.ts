@@ -31,16 +31,22 @@ export interface DashboardScope {
 export interface DashboardIdentity {
   billed: number;
   billed_gross: number;
+  /** What the sales in scope brought in; the mode rows are what the drawer took. */
   collected: number;
   collected_at_sale: number;
   collected_later: number;
   /** Returns against the sales in scope, whatever their own date. Positive. */
   credited: number;
   credited_notes: number;
-  /** The part of `credited` dated outside the scope. */
+  /** The part of `credited` rung outside the scope: another date, shift or till. */
   credited_outside: number;
-  /** Returns dated in scope against sales outside it; not part of the figures above. */
-  returned_earlier: { amount: number; count: number };
+  /** Refunds paid for these sales from outside the scope; already taken off `collected`. */
+  refunded_outside: number;
+  /**
+   * Returns rung in scope against sales outside it; not part of the figures above.
+   * `refunded` is what this drawer paid out for them, and is in the mode rows.
+   */
+  returned_earlier: { amount: number; count: number; refunded: number };
   /** What the sales in scope still owe: the Balance. */
   credit: number;
   credit_invoices: number;
