@@ -610,3 +610,29 @@ class TestOnlyConfiguredMpesaIsHeld(ReceiptCase):
 		invoice = self._draft(rate=100)
 		invoice.set("payments", [{"mode_of_payment": mode, "amount": 100}])
 		assert_mpesa_rows_backed(invoice)
+
+
+def submitted_twin(receipt):
+	"""A submitted copy of `receipt` under its own name, as the callback/pull race left
+	them - written below the register's insert guard, which would refuse it."""
+	twin = frappe.copy_doc(receipt)
+	twin.name = f"{receipt.name}-TWIN"
+	twin.docstatus = 1
+	twin.db_insert()
+	return twin
+
+
+class TestDraftTwin(ReceiptCase):
+	"""One receipt recorded twice: the draft copy is money its twin already holds."""
+
+	def test_draft_twin_unusable(self):
+		receipt = self._receipt(500)
+		submitted_twin(receipt)
+		self.assertEqual(_receipt_balance(receipt.name).state, "unusable")
+
+	def test_search_and_count_drop_a_draft_twin(self):
+		receipt = self._receipt(500)
+		before = get_mpesa_payments(company=COMPANY)["count"]
+		submitted_twin(receipt)
+		self.assertNotIn(receipt.name, self._search(receipt))
+		self.assertEqual(get_mpesa_payments(company=COMPANY)["count"], before - 1)

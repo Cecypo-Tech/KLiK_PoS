@@ -25,6 +25,8 @@ def refuse_cancel_while_invoice_live(doc, method=None):
 	whole doctype only exists where frappe_mpsa_payments is installed, so the absence of
 	either is normal and means there is nothing to protect.
 	"""
+	if _spare_copy(doc):
+		return
 	live = []
 	invoice = doc.get("sales_invoice")
 	if invoice and frappe.db.get_value("Sales Invoice", invoice, "docstatus") == 1:
@@ -45,4 +47,23 @@ def refuse_cancel_while_invoice_live(doc, method=None):
 	frappe.throw(
 		_("Cancel Sales Invoice {0} first; this receipt is allocated to it").format(", ".join(live)),
 		frappe.ValidationError,
+	)
+
+
+def _spare_copy(doc) -> bool:
+	"""A receipt recorded twice (the callback and a pull raced): this copy has no Payment
+	Entry and another submitted copy names the same sale, so the sale keeps its record of
+	the receipt and cancelling this one takes nothing from it."""
+	if doc.get("payment_entry") or not doc.get("transid") or not doc.get("sales_invoice"):
+		return False
+	return bool(
+		frappe.db.exists(
+			doc.doctype,
+			{
+				"transid": doc.transid,
+				"docstatus": 1,
+				"sales_invoice": doc.sales_invoice,
+				"name": ["!=", doc.name],
+			},
+		)
 	)
