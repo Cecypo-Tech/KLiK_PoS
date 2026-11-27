@@ -239,6 +239,9 @@ export default function PaymentDialog(props: PaymentDialogProps) {
   const [paymentReferences, setPaymentReferences] = useState<Record<string, string>>({});
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isHoldingOrder, setIsHoldingOrder] = useState(false);
+  // Set when the server refuses the sale as below the minimum price: Hold is then the way to request approval.
+  const [needsPriceApproval, setNeedsPriceApproval] = useState(false);
+  useEffect(() => { if (!isOpen) setNeedsPriceApproval(false); }, [isOpen]);
   // The POS's F4 (Additional Info) listens under this window. While the sale is being
   // submitted or held its payload is already built, so details saved then would be lost.
   useEffect(() => {
@@ -2001,6 +2004,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
       const defaultMessage = isB2B ? "Failed to submit invoice" : "Failed to process payment";
       const errorMessage = extractErrorFromException(err, defaultMessage);
       toast.error(errorMessage);
+      if (/below the minimum selling price/i.test(errorMessage)) setNeedsPriceApproval(true);
     } finally {
       mpesaWorkInFlightRef.current -= 1;
       setIsProcessingPayment(false);
@@ -3281,7 +3285,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                             <span>Holding...</span>
                           </>
                         ) : (
-                          <span>Hold</span>
+                          <span>{needsPriceApproval ? "Hold for approval" : "Hold"}</span>
                         )}
                       </button>
                     )}
@@ -3589,6 +3593,7 @@ export default function PaymentDialog(props: PaymentDialogProps) {
                   onNewOrder={() => { void finalizeCompletedOrderState(() => onClose(true)); }}
                   isB2B={isB2B}
                   allow_holding_invoices={allow_holding_invoices}
+                  holdLabel={needsPriceApproval ? "Hold for approval" : "Hold"}
                 />
               </div>
             </div>
