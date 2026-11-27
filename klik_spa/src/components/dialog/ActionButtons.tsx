@@ -12,6 +12,7 @@ interface ActionButtonsProps {
   onNewOrder?: () => void;
   isB2B: boolean;
   allow_holding_invoices: boolean;
+  holdLabel?: string;
 }
 
 export default function ActionButtons({
@@ -26,6 +27,7 @@ export default function ActionButtons({
   onNewOrder,
   isB2B,
   allow_holding_invoices,
+  holdLabel = "Hold",
 }: ActionButtonsProps) {
   if (invoiceSubmitted) {
     return (
@@ -65,7 +67,7 @@ export default function ActionButtons({
             ) : (
               <>
                 <ShoppingBag size={16} />
-                <span>Hold</span>
+                <span>{holdLabel}</span>
               </>
             )}
           </button>
