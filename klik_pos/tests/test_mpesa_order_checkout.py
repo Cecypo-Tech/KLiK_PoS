@@ -190,6 +190,56 @@ class TestSubmittingTheMpesaOrder(FrappeTestCase):
 				frappe.db.get_value("Sales Invoice", invoice, "powerpack_source_order"), self.order
 			)
 
+	def _paid_push_with_receipt(self):
+		"""A paid push whose C2B confirmation frappe_mpsa_payments already consumed: a
+		submitted register row with no Payment Entry, naming no sale yet (the push named
+		the order when it arrived)."""
+		push = _push(self.order, "Completed")
+		transid = f"HO{frappe.generate_hash(length=8).upper()}"
+		frappe.db.set_value(EXPRESS, push, "transaction_id", transid, update_modified=False)
+		row = frappe.get_doc(
+			{
+				"doctype": "Mpesa C2B Payment Register",
+				"name": f"_Test C2B {transid}",
+				"transid": transid,
+				"transamount": 10,
+				"businessshortcode": "HOTEST",
+				"customer": CUSTOMER,
+				"docstatus": 1,
+			}
+		)
+		row.db_insert()
+		return push, row.name
+
+	def test_handover_links_register_row(self):
+		push, row = self._paid_push_with_receipt()
+
+		result = self._submit(paid=[push])
+
+		self.assertTrue(result["success"], result)
+		self.assertEqual(
+			frappe.db.get_value("Mpesa C2B Payment Register", row, "sales_invoice"),
+			result["invoice_name"],
+		)
+
+	def test_backfill_patch(self):
+		from klik_pos.patches.v16_0 import link_stk_register_rows_to_invoice as backfill
+
+		push, row = self._paid_push_with_receipt()
+		result = self._submit(paid=[push])
+		self.assertTrue(result["success"], result)
+		# As it was before the handover set it.
+		frappe.db.set_value("Mpesa C2B Payment Register", row, "sales_invoice", None)
+
+		backfill.execute()
+		self.assertEqual(
+			frappe.db.get_value("Mpesa C2B Payment Register", row, "sales_invoice"),
+			result["invoice_name"],
+		)
+		modified = frappe.db.get_value("Mpesa C2B Payment Register", row, "modified")
+		backfill.execute()
+		self.assertEqual(frappe.db.get_value("Mpesa C2B Payment Register", row, "modified"), modified)
+
 	def test_failed_pushes_follow_the_order_to_the_invoice(self):
 		failed = _push(self.order, "Failed")
 		paid = _push(self.order, "Completed")

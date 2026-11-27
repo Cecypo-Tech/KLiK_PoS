@@ -366,6 +366,16 @@ def _hand_over_to_invoice(order_id, invoice):
 			{"reference_doctype": "Sales Invoice", "reference_name": invoice},
 			update_modified=False,
 		)
+		# The push's C2B confirmation was consumed while the push still named the order,
+		# so its register row names no sale. Point it at this one.
+		transid = frappe.db.get_value(EXPRESS, name, "transaction_id")
+		if transid:
+			for row in frappe.get_all(
+				REGISTER,
+				filters={"transid": transid, "docstatus": 1, "payment_entry": ["is", "not set"]},
+				pluck="name",
+			):
+				frappe.db.set_value(REGISTER, row, "sales_invoice", invoice, update_modified=False)
 	if frappe.get_meta("Sales Invoice").has_field("powerpack_source_order") and not frappe.db.get_value(
 		"Sales Invoice", invoice, "powerpack_source_order"
 	):
