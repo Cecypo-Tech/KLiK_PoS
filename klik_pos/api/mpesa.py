@@ -89,6 +89,12 @@ def _receipt_balance(register: str) -> frappe._dict:
 	out.transid = row.transid
 	if row.docstatus == 2:
 		return out
+	# A draft copy of a receipt that also has a submitted row: the callback and a pull once
+	# both recorded it. The money is its twin's; the copy pays nothing.
+	if row.docstatus == 0 and row.transid and frappe.db.exists(
+		"Mpesa C2B Payment Register", {"transid": row.transid, "docstatus": 1, "name": ["!=", register]}
+	):
+		return out
 
 	pe_name = row.payment_entry or _klik_entry_for_transid(row.transid)
 	if pe_name:
@@ -314,6 +320,9 @@ def get_mpesa_payments(
 			AND pe.party_type = 'Customer' AND (IFNULL(reg.company, '') = '' OR pe.company = reg.company)))
 		AND NOT (IFNULL(reg.payment_entry, '') = '' AND IFNULL(reg.transid, '') != ''
 			AND ({" OR ".join(booked_by_number)}))
+		AND NOT (reg.docstatus = 0 AND IFNULL(reg.transid, '') != '' AND EXISTS (
+			SELECT 1 FROM `tabMpesa C2B Payment Register` twin
+			WHERE twin.transid = reg.transid AND twin.docstatus = 1))
 		AND NOT EXISTS (
 			SELECT 1 FROM `tabMpesa Express Request` req
 			WHERE req.status = 'Completed' AND req.transaction_id = reg.transid AND (
