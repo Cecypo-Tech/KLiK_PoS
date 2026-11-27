@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { extractErrorMessage } from "./errorExtraction";
 
 describe("extractErrorMessage", () => {
+  it("tells the till to hold the order when powerpack asks for a price approval", () => {
+    const message = "Row(s) 1 are below the minimum selling price. Use <b>Request Price Approval</b> before submitting.";
+    expect(extractErrorMessage({ message })).toBe(
+      "Row(s) 1 are below the minimum selling price. Hold the order, then use Request Price Approval in History > Held."
+    );
+  });
+
   it("keeps line breaks and list items apart when it strips the server's HTML", () => {
     const message =
       "Credit limit has been crossed (3200.0/1000.0)<br><br>Please contact:<br><br><ul><li>kushal (k@x.com)<li>mathias (m@x.com)</li></ul><br>Hold the order instead.";

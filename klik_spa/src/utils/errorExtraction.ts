@@ -44,6 +44,12 @@ function cleanHtmlFromErrorMessage(message: string): string {
     }
   }
 
+  // powerpack's desk wording points at a button the till's payment screen does not have.
+  const rows = cleanedMessage.match(/^Row\(s\) (.+?) are below the minimum selling price\. Use Request Price Approval before submitting\.?$/i);
+  if (rows) {
+    cleanedMessage = `Row(s) ${rows[1]} are below the minimum selling price. Hold the order, then use Request Price Approval in History > Held.`;
+  }
+
   return cleanedMessage;
 }
 
